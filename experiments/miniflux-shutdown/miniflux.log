@@ -5,3 +5,4 @@ level=INFO msg="[API] User authenticated successfully with the Basic HTTP Authen
 level=INFO msg="[API] User authenticated successfully with the Basic HTTP Authentication" authentication_successful=true client_ip=127.0.0.1 user_agent=curl/8.7.1 username=admin request_uri=/v1/feeds/refresh
 level=INFO msg="Created a batch of feeds" batch_size=0 rows_count=1 skipped_feeds_count=0 jobs_count=1
 level=INFO msg="Triggered a manual refresh of all feeds from the API" user_id=1 nb_jobs=1
+level=WARN msg="Unable to fetch feed" user_id=1 feed_id=1 feed_url=http://127.0.0.1:18090/feed.xml error="fetcher: Get \"http://127.0.0.1:18090/feed.xml\": context canceled"

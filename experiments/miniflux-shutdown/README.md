@@ -10,6 +10,8 @@ miniflux binary:
 ./run.sh /path/to/miniflux
 ```
 
-`feedserver` answers the first request for its feed at once and later ones
+`feedserver` answers the first request for `/feed.xml` at once and later ones
 after 60 seconds, so the refresh that run.sh triggers hangs until miniflux
-gives up on it.
+gives up on it. `/500.xml` and `/garbage.xml` fail after their first request;
+`./errors.sh /path/to/miniflux` refreshes them and prints what miniflux
+records, to compare two builds.

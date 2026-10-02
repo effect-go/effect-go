@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -25,6 +26,33 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/rss+xml")
 		fmt.Fprint(w, feed)
+	})
+	// For the error paths: a feed that always works, a server error, and a
+	// page that isn't a feed. Each answers its first request with a feed, so
+	// it can be subscribed to.
+	seen := map[string]bool{}
+	var mu sync.Mutex
+	first := func(r *http.Request) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		f := !seen[r.URL.Path]
+		seen[r.URL.Path] = true
+		return f
+	}
+	http.HandleFunc("/ok.xml", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, feed) })
+	http.HandleFunc("/500.xml", func(w http.ResponseWriter, r *http.Request) {
+		if first(r) {
+			fmt.Fprint(w, feed)
+			return
+		}
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	http.HandleFunc("/garbage.xml", func(w http.ResponseWriter, r *http.Request) {
+		if first(r) {
+			fmt.Fprint(w, feed)
+			return
+		}
+		fmt.Fprint(w, "this is not a feed")
 	})
 	http.ListenAndServe("127.0.0.1:18090", nil)
 }

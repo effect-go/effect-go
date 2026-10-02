@@ -5,13 +5,13 @@ self-hosted RSS reader (Apache-2.0, 9.7k stars, 81k lines of Go).*
 
 We ported the part of miniflux that refreshes feeds in the background to
 effect-go:
-- **the refresh itself:** `RefreshFeed`;
+- **the refresh itself:** `RefreshFeed`, its errors, and the database queries only it uses;
 - **the worker pool;**
 - **the batch refresh** behind `miniflux -refresh-feeds`;
 - **the schedulers;**
 - **the daemon** that starts and stops all of it.
 
-That is five files and about 360 lines. The other 80,000 lines stay plain Go and call the ported code as before. That's how a team would adopt effect-go: one subsystem at a time, where it hurts.
+That is seven files and about 650 lines of the original. The other 80,000 lines stay plain Go and call the ported code as before. That's how a team would adopt effect-go: one subsystem at a time, where it hurts.
 
 ## Results
 
@@ -22,8 +22,11 @@ That is five files and about 360 lines. The other 80,000 lines stay plain Go and
 | The slow feed after that stop | marked as failing | untouched; refreshed next time |
 | Background loops left running until the process exits | 3 (feed scheduler, cleanup scheduler, systemd watchdog) | 0: they stop first |
 | A span per feed refresh | no | yes |
+| What a failed refresh records (server error, a page that isn't a feed, an unknown feed) | | identical, message for message |
+| Where a refresh failure becomes a UI message, and whether it counts against the feed | 8 places in `RefreshFeed` | one exhaustive `match` each |
 | miniflux's tests | 1,925 pass | 1,925 pass (`-race` on the ported packages) |
-| Lines of code in the ported files | 282 | 277 in `.ego` (the same behaviour in plain Go, as generated: 340) |
+| Lines of code: concurrency (pool, batch refresh, schedulers, daemon) | 282 | 277 in `.ego` (the same behaviour in plain Go, as generated: 340) |
+| Lines of code: the refresh and its errors | 154 | 163 in `.ego`, with the error set's 9 lines (plain Go, as generated: 239) |
 
 **How we measured.** We ran miniflux on a throwaway PostgreSQL with one feed, served by a local server that answers the first request and then hangs. We started a refresh of all feeds through the API, sent SIGTERM two seconds later, and timed the exit. Miniflux's HTTP client timeout was 20 s, its default. Before the port, nothing could interrupt the refresh, so shutdown waited until the client timeout fired and then recorded the timeout as the feed's error.
 
@@ -43,7 +46,7 @@ Before:
 After:
 
 ```go
-effect daemon(s *scope.Scope, store *storage.Storage) (struct{}, error) {
+effect daemon(s *scope.Scope, store *storage.Storage) error {
 	pool := worker.NewPool(store, config.Opts.WorkerPoolSize())
 	s.Defer(_ => { pool.Shutdown(); return nil })
 
@@ -55,7 +58,7 @@ effect daemon(s *scope.Scope, store *storage.Storage) (struct{}, error) {
 	}
 	…
 	check all(runScheduler(store, pool), gatherMetrics(store), watchdog(store), reloadCertificates(certReloadFn))
-	return struct{}{}, nil
+	return nil
 }
 ```
 
@@ -112,11 +115,64 @@ After, it is an `effect` function: it takes a `ctx`, which the fetch uses, and r
 
 The pool's workers became `effect` functions run with `each`. `Shutdown` cancels them, which cancels their refreshes. `PushContext` lets the scheduler stop even while it waits for a free worker. `Push` keeps its behaviour for the HTTP handlers, which call it in a goroutine after responding.
 
+### Errors: a set, and two decisions in one place each
+
+`RefreshFeed` returns a `*locale.LocalizedErrorWrapper`, which pairs an error with a translation key for the UI. In the original, each failure built one where it happened (8 times), and each one either recorded the error on the feed or didn't. Whether a given failure counted against the feed was spread over the function:
+
+```go
+originalFeed, storeErr := store.FeedByID(userID, feedID)
+if storeErr != nil {
+	return locale.NewLocalizedErrorWrapper(storeErr, "error.database_error", storeErr)
+}
+…
+updatedFeed, parseErr := parser.ParseFeed(responseHandler.EffectiveURL(), bytes.NewReader(responseBody))
+if parseErr != nil {
+	localizedError := locale.NewLocalizedErrorWrapper(parseErr, "error.unable_to_parse_feed", parseErr)
+	if errors.Is(parseErr, parser.ErrFeedFormatNotDetected) {
+		localizedError = locale.NewLocalizedErrorWrapper(parseErr, "error.feed_format_not_detected", parseErr)
+	}
+	return getTranslatedLocalizedError(store, userID, originalFeed, localizedError)
+}
+```
+
+After, the work is in `refresh`, which returns an error set, so a failure is one line:
+
+```go
+error RefreshError {
+	NotFound{} "fetcher: feed not found"
+	Storage{ Cause error } "{Cause}" // before the fetch
+	Fetch{ Err *locale.LocalizedErrorWrapper } "{Err.Error()}"
+	Body{ Err *locale.LocalizedErrorWrapper } "{Err.Error()}" // reading the response
+	Duplicated{} "fetcher: duplicated feed"
+	Parse{ Cause error } "{Cause}"
+	Save{ Cause error } "{Cause}" // storing the result
+}
+
+updatedFeed := check parser.ParseFeed(responseHandler.EffectiveURL(), bytes.NewReader(responseBody)) as Parse
+```
+
+`RefreshFeed` keeps its signature, so the UI and the API don't change, and makes the two decisions with exhaustive matches:
+
+```go
+recorded := match err {
+	nil                                        => false
+	Fetch(_), Duplicated(_), Parse(_), Save(_) => ctx.Err() == nil // a stopped refresh isn't the feed's fault
+	NotFound(_), Storage(_), Body(_)           => false
+}
+```
+
+A new case won't compile until both matches handle it. Writing the first one also brought out an inconsistency nobody had to face before: an error while *reading* the response (`Body`) isn't recorded on the feed, while an error *getting* it (`Fetch`) is. We kept that behaviour; the arm now says so, where a maintainer can see it and decide.
+
+The queries only the refresh uses became `effect` methods: `WeeklyFeedEntryCount`, `UpdateFeedError` and `RefreshFeedEntries`, whose per-entry transactions now start with `BeginTx(ctx, nil)`. A stopped refresh rolls back the entry in progress and stops.
+
+We checked the error paths against the original on a real database: a feed whose server answers 500, a page that isn't a feed, and an unknown feed record the same message and count, and return the same HTTP status ([errors.sh](../experiments/miniflux-shutdown/errors.sh)).
+
 ## What effect-go didn't do for us
 
 - **Cancellation still takes judgement.** With the refresh cancellable, a shutdown would have been recorded as the feed's fetch error. The compiler gives you the context; deciding what a cancelled operation means is still yours. We added one check: a refresh stopped by its context isn't recorded against the feed.
-- **Error handling stayed as it was.** miniflux's `LocalizedErrorWrapper` carries a translation key for the UI, and its `Error()` returns an `error`, not a string. So it isn't an `error`, and `check`, `else` and error sets don't apply to it without redesigning the error type across the UI and API. A port that went further would start there.
-- **The database isn't cancellable yet.** The storage layer doesn't take a context, so its queries still run to the end. That would be the next step: storage methods as `effect` methods, with their callers unchanged.
+- **The UI's error type stays at the boundary.** miniflux's `LocalizedErrorWrapper` isn't an `error` (its `Error()` returns an `error`, not a string), and the UI and API depend on it. The port converts to it in one function, `localize`, instead of redesigning it across the codebase.
+- **Most queries still run to the end.** Only the three queries the refresh alone uses take a context. `FeedByID`, `UpdateFeed` and `UserByID` (80 callers) don't. Giving them one changes their signature for every caller: that's a refactoring effect-go makes cheaper inside effect functions (the `ctx` is passed for you) but not free.
+- **The line count isn't the point of the error half.** The refresh is 9 lines longer, the size of the error set. What it buys is the decisions in one place, checked for completeness by the compiler.
 - **One fire-and-forget goroutine remains.** `go integration.PushEntries(…)` sends new entries to third-party services. Bringing it into the scope would mean deciding whether shutdown should wait for those pushes, which is a product decision, not a mechanical change.
 
 ## Reproducing it
@@ -124,4 +180,4 @@ The pool's workers became `effect` functions run with `each`. `Shutdown` cancels
 The port is the `effect-go` branch of a local clone of miniflux at 703fe82. Its `go.mod` points at a local effect-go with a `replace` directive until effect-go is published. Steps:
 1. `ego generate ./internal/...` regenerates the Go.
 2. `go test ./internal/...` runs miniflux's tests.
-3. [experiments/miniflux-shutdown](../experiments/miniflux-shutdown) has the slow feed server and the script that times SIGTERM.
+3. [experiments/miniflux-shutdown](../experiments/miniflux-shutdown) has the test feed server, the script that times SIGTERM (`run.sh`) and the one that compares recorded errors (`errors.sh`).

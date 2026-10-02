@@ -6,7 +6,9 @@ BIN=$1
 S=$(cd "$(dirname "$0")" && pwd)
 U="postgres://postgres@127.0.0.1:54329/miniflux?sslmode=disable"
 dropdb -h 127.0.0.1 -p 54329 -U postgres --if-exists miniflux && createdb -h 127.0.0.1 -p 54329 -U postgres miniflux
-go run "$S/feedserver" > "$S/feedserver.log" 2>&1 & FS=$!
+FSBIN=$(mktemp -d)/feedserver
+(cd "$S/feedserver" && go build -o "$FSBIN" .) || exit 1
+"$FSBIN" > "$S/feedserver.log" 2>&1 & FS=$!
 DATABASE_URL=$U RUN_MIGRATIONS=1 CREATE_ADMIN=1 ADMIN_USERNAME=admin ADMIN_PASSWORD=test-password-123 \
   LISTEN_ADDR=127.0.0.1:18081 FETCHER_ALLOW_PRIVATE_NETWORKS=1 HTTP_CLIENT_TIMEOUT=20 POLLING_FREQUENCY=60 \
   "$BIN" > "$S/miniflux.log" 2>&1 & MF=$!
