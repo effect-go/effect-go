@@ -1,0 +1,48 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "effect-go",
+  "scopeName": "source.ego",
+  "patterns": [
+    { "include": "#fstring" },
+    {
+      "comment": "effect declarations: effect Name( and effect (recv) Name(",
+      "match": "^\\s*(effect)\\b(?=\\s*[\\w(])",
+      "captures": { "1": { "name": "keyword.function.ego" } }
+    },
+    {
+      "comment": "error sets and enums: error Name { and enum Name {",
+      "match": "^\\s*(error|enum)\\s+([A-Za-z_]\\w*)\\s*(?=\\{)",
+      "captures": { "1": { "name": "keyword.type.ego" }, "2": { "name": "entity.name.type.ego" } }
+    },
+    {
+      "match": "\\b(check|must)\\b(?=\\s+[A-Za-z_])",
+      "name": "keyword.control.ego"
+    },
+    { "match": "\\b(fail)\\b(?=\\s+[\\w\"&])", "name": "keyword.control.ego" },
+    { "match": "\\b(match)\\b(?=\\s+[A-Za-z_])", "name": "keyword.control.ego" },
+    { "match": "\\b(as)\\b(?=\\s+[A-Z])", "name": "keyword.control.ego" },
+    { "match": "\\b(all|race|retry|timeout)\\b(?=\\()", "name": "support.function.builtin.ego" },
+    { "match": "=>|\\?\\.|\\?\\?", "name": "keyword.operator.ego" },
+    { "include": "source.go" }
+  ],
+  "repository": {
+    "fstring": {
+      "begin": "\\bf\"",
+      "end": "\"",
+      "name": "string.quoted.double.ego",
+      "patterns": [
+        { "match": "\\{\\{|\\}\\}", "name": "constant.character.escape.ego" },
+        { "match": "\\\\.", "name": "constant.character.escape.ego" },
+        {
+          "begin": "\\{",
+          "end": "\\}",
+          "name": "meta.interpolation.ego",
+          "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.ego" } },
+          "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.ego" } },
+          "contentName": "source.go",
+          "patterns": [{ "include": "source.go" }]
+        }
+      ]
+    }
+  }
+}
