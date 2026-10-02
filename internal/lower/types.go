@@ -1,0 +1,352 @@
+package lower
+
+import (
+	"fmt"
+	goast "go/ast"
+	"go/token"
+	"go/types"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+
+	"golang.org/x/tools/go/packages"
+
+	"github.com/effect-go/effect-go/internal/syntax/ast"
+)
+
+// An Importer loads the packages a package imports, from export data, and
+// caches them. It's safe for concurrent use.
+type Importer struct {
+	mu    sync.Mutex
+	paths []string // everything loaded, sorted
+	pkgs  map[string]*types.Package
+	errs  map[string]string
+}
+
+func NewImporter() *Importer { return &Importer{pkgs: map[string]*types.Package{}} }
+
+// load makes sure paths are loaded. Packages are loaded together so that
+// they share their dependencies: one types.Package per import path.
+func (im *Importer) load(dir string, paths []string) error {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+	missing := false
+	for _, p := range paths {
+		if _, ok := im.pkgs[p]; !ok {
+			if _, failed := im.errs[p]; !failed {
+				missing = true
+			}
+		}
+	}
+	if !missing {
+		return nil
+	}
+	all := slices.Clone(im.paths)
+	for _, p := range paths {
+		if !slices.Contains(all, p) {
+			all = append(all, p)
+		}
+	}
+	sort.Strings(all)
+	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps, Dir: dir}
+	loaded, err := packages.Load(cfg, all...)
+	if err != nil {
+		return fmt.Errorf("loading imports: %v", err)
+	}
+	im.paths = all
+	im.pkgs = map[string]*types.Package{}
+	im.errs = map[string]string{}
+	packages.Visit(loaded, nil, func(p *packages.Package) {
+		if p.Types != nil && !p.IllTyped {
+			im.pkgs[p.PkgPath] = p.Types
+		}
+		if len(p.Errors) > 0 && slices.Contains(all, p.PkgPath) {
+			im.errs[p.PkgPath] = p.Errors[0].Msg
+		}
+	})
+	return nil
+}
+
+func (im *Importer) Import(path string) (*types.Package, error) {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+	if p, ok := im.pkgs[path]; ok {
+		return p, nil
+	}
+	if msg, ok := im.errs[path]; ok {
+		return nil, fmt.Errorf("%s", msg)
+	}
+	return nil, fmt.Errorf("package %s not loaded", path)
+}
+
+// typeInfo is the result of type-checking one draft of the package.
+type typeInfo struct {
+	fset  *token.FileSet
+	pkg   *types.Package
+	info  *types.Info
+	errs  []error
+	files map[*fileGen]*fileTypes
+}
+
+// fileTypes finds the go/ast node a .ego node was rendered as.
+type fileTypes struct {
+	f     *goast.File
+	tf    *token.File
+	index map[[2]int]goast.Expr
+	m     *SourceMap
+	recs  map[ast.Node][2]int
+}
+
+func newFileTypes(fset *token.FileSet, f *goast.File, w *writer) *fileTypes {
+	ft := &fileTypes{f: f, tf: fset.File(f.Pos()), index: map[[2]int]goast.Expr{}, m: newSourceMap(w), recs: map[ast.Node][2]int{}}
+	for _, r := range w.recs {
+		if _, ok := ft.recs[r.node]; !ok {
+			ft.recs[r.node] = [2]int{r.start, r.end}
+		}
+	}
+	goast.Inspect(f, func(n goast.Node) bool {
+		if x, ok := n.(goast.Expr); ok && n.Pos().IsValid() && n.End().IsValid() {
+			key := [2]int{ft.tf.Offset(n.Pos()), ft.tf.Offset(n.End())}
+			if _, ok := ft.index[key]; !ok {
+				ft.index[key] = x
+			}
+		}
+		return true
+	})
+	return ft
+}
+
+// expr returns the go/ast expression n was rendered as in the draft.
+func (g *fileGen) goExpr(n ast.Node) goast.Expr {
+	ti := g.r.ti
+	if ti == nil || n == nil {
+		return nil
+	}
+	ft := ti.files[g]
+	if ft == nil {
+		return nil
+	}
+	span, ok := ft.recs[n]
+	if !ok {
+		a, b, ok2 := ft.m.span(g.off(n.Pos()), g.off(n.End()))
+		if !ok2 {
+			return nil
+		}
+		span = [2]int{a, b}
+	}
+	return ft.index[span]
+}
+
+// tv returns the type and value of a .ego expression, from the last draft.
+func (g *fileGen) tv(n ast.Node) (types.TypeAndValue, bool) {
+	x := g.goExpr(n)
+	if x == nil {
+		return types.TypeAndValue{}, false
+	}
+	if tv, ok := g.r.ti.info.Types[x]; ok && tv.Type != nil {
+		return tv, true
+	}
+	if id, ok := x.(*goast.Ident); ok {
+		if obj := g.r.ti.info.ObjectOf(id); obj != nil {
+			return types.TypeAndValue{Type: obj.Type()}, true
+		}
+	}
+	return types.TypeAndValue{}, false
+}
+
+// typeOf returns the type of a .ego expression, or nil.
+func (g *fileGen) typeOf(n ast.Node) types.Type {
+	tv, ok := g.tv(n)
+	if !ok {
+		return nil
+	}
+	if b, ok := tv.Type.(*types.Basic); ok && b.Kind() == types.Invalid {
+		return nil
+	}
+	return tv.Type
+}
+
+// objectOf returns the object an identifier or selector refers to.
+func (g *fileGen) objectOf(n ast.Expr) types.Object {
+	x := g.goExpr(n)
+	switch x := x.(type) {
+	case *goast.Ident:
+		return g.r.ti.info.ObjectOf(x)
+	case *goast.SelectorExpr:
+		return g.r.ti.info.ObjectOf(x.Sel)
+	}
+	return nil
+}
+
+// typeString renders t as Go source in this file, adding imports as needed.
+func (g *fileGen) typeString(t types.Type) string {
+	return types.TypeString(t, func(p *types.Package) string {
+		if g.r.ti != nil && p == g.r.ti.pkg {
+			return ""
+		}
+		return g.use(p.Path(), p.Name())
+	})
+}
+
+// zero returns the zero value of t as Go source.
+func (g *fileGen) zero(t types.Type) string {
+	if t == nil {
+		return "nil"
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Basic:
+		switch {
+		case u.Info()&types.IsBoolean != 0:
+			return "false"
+		case u.Info()&types.IsString != 0:
+			return `""`
+		case u.Info()&types.IsNumeric != 0:
+			return "0"
+		case u.Kind() == types.UnsafePointer, u.Kind() == types.UntypedNil:
+			return "nil"
+		}
+	case *types.Struct, *types.Array:
+		return g.typeString(t) + "{}"
+	case *types.Interface:
+		if _, ok := t.(*types.TypeParam); ok {
+			return "*new(" + g.typeString(t) + ")"
+		}
+	}
+	return "nil"
+}
+
+func isError(t types.Type) bool {
+	return t != nil && types.Identical(t, types.Universe.Lookup("error").Type())
+}
+
+func implementsError(t types.Type) bool {
+	return t != nil && types.Implements(t, types.Universe.Lookup("error").Type().Underlying().(*types.Interface))
+}
+
+func isContext(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	n, ok := types.Unalias(t).(*types.Named)
+	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "context" && n.Obj().Name() == "Context"
+}
+
+// results returns the result types of a call, or nil if unknown.
+func results(t types.Type) []types.Type {
+	switch t := t.(type) {
+	case nil:
+		return nil
+	case *types.Tuple:
+		var out []types.Type
+		for v := range t.Variables() {
+			out = append(out, v.Type())
+		}
+		return out
+	}
+	return []types.Type{t}
+}
+
+// verb returns the fmt verb that prints a value of type t naturally.
+func verb(t types.Type) string {
+	if t == nil {
+		return "%v"
+	}
+	if types.Implements(t, stringer) || implementsError(t) {
+		return "%v"
+	}
+	if b, ok := t.Underlying().(*types.Basic); ok {
+		switch {
+		case b.Info()&types.IsString != 0:
+			return "%s"
+		case b.Info()&types.IsInteger != 0:
+			return "%d"
+		}
+	}
+	return "%v"
+}
+
+var stringer = func() *types.Interface {
+	sig := types.NewSignatureType(nil, nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "", types.Typ[types.String])), false)
+	return types.NewInterfaceType([]*types.Func{types.NewFunc(token.NoPos, nil, "String", sig)}, nil).Complete()
+}()
+
+// sumCases returns the cases of a sum type (an error set or an enum with
+// data): the named types in its package with the marker method is<Name>.
+// It returns nil if t isn't one.
+func sumCases(t types.Type) (set *types.Named, cases []*types.TypeName) {
+	n, ok := types.Unalias(t).(*types.Named)
+	if !ok {
+		return nil, nil
+	}
+	iface, ok := n.Underlying().(*types.Interface)
+	if !ok || n.Obj().Pkg() == nil {
+		return nil, nil
+	}
+	marker := "is" + n.Obj().Name()
+	found := false
+	for m := range iface.Methods() {
+		if m.Name() == marker {
+			found = true
+		}
+	}
+	if !found {
+		return nil, nil
+	}
+	scope := n.Obj().Pkg().Scope()
+	for _, name := range scope.Names() {
+		tn, ok := scope.Lookup(name).(*types.TypeName)
+		if !ok || tn.IsAlias() || tn == n.Obj() {
+			continue
+		}
+		if _, isIface := tn.Type().Underlying().(*types.Interface); isIface {
+			continue
+		}
+		if types.Implements(tn.Type(), iface) {
+			cases = append(cases, tn)
+		}
+	}
+	sort.Slice(cases, func(i, j int) bool { return cases[i].Pos() < cases[j].Pos() })
+	return n, cases
+}
+
+// setOf returns the sum type a case type belongs to, from its marker method.
+func setOf(t types.Type) *types.Named {
+	n, ok := types.Unalias(t).(*types.Named)
+	if !ok || n.Obj().Pkg() == nil {
+		return nil
+	}
+	ms := types.NewMethodSet(n)
+	for sel := range ms.Methods() {
+		name := sel.Obj().Name()
+		if rest, ok := strings.CutPrefix(name, "is"); ok && rest != "" {
+			if tn, ok := n.Obj().Pkg().Scope().Lookup(rest).(*types.TypeName); ok {
+				if s, _ := sumCases(tn.Type()); s != nil {
+					return s
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// enumConsts returns the constants of a named non-interface type declared in
+// its package: Go's usual enum pattern.
+func enumConsts(t types.Type) []*types.Const {
+	n, ok := types.Unalias(t).(*types.Named)
+	if !ok || n.Obj().Pkg() == nil {
+		return nil
+	}
+	if _, ok := n.Underlying().(*types.Basic); !ok {
+		return nil
+	}
+	var out []*types.Const
+	scope := n.Obj().Pkg().Scope()
+	for _, name := range scope.Names() {
+		if c, ok := scope.Lookup(name).(*types.Const); ok && types.Identical(c.Type(), n) {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Pos() < out[j].Pos() })
+	return out
+}

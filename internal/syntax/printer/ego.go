@@ -208,6 +208,10 @@ func (p *printer) sumDecl(d *ast.SumDecl) {
 		if c.Fields != nil {
 			p.fieldList(c.Fields, true, false)
 		}
+		if c.Message != nil {
+			p.print(blank)
+			p.expr(c.Message)
+		}
 		if c.Comment != nil {
 			p.print(vtab)
 			p.setComment(c.Comment)

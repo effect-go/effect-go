@@ -117,11 +117,15 @@ type SumCase struct {
 	Doc     *CommentGroup
 	Name    *Ident
 	Fields  *FieldList // nil without braces
+	Message *FString   // "message {Field}" after the fields; or nil
 	Comment *CommentGroup
 }
 
 func (c *SumCase) Pos() token.Pos { return c.Name.Pos() }
 func (c *SumCase) End() token.Pos {
+	if c.Message != nil {
+		return c.Message.End()
+	}
 	if c.Fields != nil {
 		return c.Fields.End()
 	}
@@ -240,6 +244,9 @@ func walkEgo(v Visitor, n Node) bool {
 		Walk(v, n.Name)
 		if n.Fields != nil {
 			Walk(v, n.Fields)
+		}
+		if n.Message != nil {
+			Walk(v, n.Message)
 		}
 	default:
 		return false

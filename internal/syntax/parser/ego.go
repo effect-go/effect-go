@@ -256,6 +256,10 @@ func (p *parser) parseSumDecl() *ast.SumDecl {
 			}
 			c.Fields.Closing = p.expect(token.RBRACE)
 		}
+		if p.tok == token.STRING {
+			c.Message = p.interpolate(&ast.BasicLit{ValuePos: p.pos, ValueEnd: p.end(), Kind: token.STRING, Value: p.lit})
+			p.next()
+		}
 		if p.tok == token.RBRACE {
 			c.Comment = p.lineComment
 		} else {
