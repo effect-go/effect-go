@@ -1493,6 +1493,9 @@ func (p *parser) parseOperand() ast.Expr {
 	case token.INT, token.FLOAT, token.IMAG, token.CHAR, token.STRING:
 		x := &ast.BasicLit{ValuePos: p.pos, ValueEnd: p.end(), Kind: p.tok, Value: p.lit}
 		p.next()
+		if x.Kind == token.STRING && x.Value[0] == 'f' {
+			return p.interpolate(x) // effect-go: f"…"
+		}
 		return x
 
 	case token.LPAREN:

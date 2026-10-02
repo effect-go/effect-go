@@ -258,6 +258,53 @@ func (r *resolver) Visit(node ast.Node) ast.Visitor {
 	case *ast.Ident:
 		r.resolve(n, true)
 
+	case *ast.LambdaExpr:
+		r.openScope(n.Pos())
+		defer r.closeScope()
+		for _, f := range n.Params.List {
+			if f.Type != nil {
+				ast.Walk(r, f.Type)
+			}
+			r.declare(f, nil, r.topScope, ast.Var, f.Names...)
+		}
+		if b, ok := n.Body.(*ast.BlockStmt); ok {
+			r.walkBody(b)
+		} else {
+			ast.Walk(r, n.Body)
+		}
+		return nil
+
+	case *ast.MatchArm:
+		// Case(x) binds x in the arm.
+		r.openScope(n.Pos())
+		defer r.closeScope()
+		for _, pat := range n.Patterns {
+			if c, ok := pat.(*ast.CallExpr); ok {
+				ast.Walk(r, c.Fun)
+				for _, a := range c.Args {
+					if id, ok := a.(*ast.Ident); ok && id.Obj == nil {
+						r.declare(c, nil, r.topScope, ast.Var, id)
+					}
+				}
+			} else {
+				ast.Walk(r, pat)
+			}
+		}
+		ast.Walk(r, n.Body)
+		return nil
+
+	case *ast.SumDecl:
+		r.declare(n, nil, r.pkgScope, ast.Typ, n.Name)
+		for _, c := range n.Cases {
+			r.declare(c, nil, r.pkgScope, ast.Typ, c.Name)
+			if c.Fields != nil {
+				for _, f := range c.Fields.List {
+					ast.Walk(r, f.Type)
+				}
+			}
+		}
+		return nil
+
 	case *ast.FuncLit:
 		r.openScope(n.Pos())
 		defer r.closeScope()

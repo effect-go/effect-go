@@ -103,6 +103,9 @@ func (p *printer) egoExpr(expr ast.Expr, prec1, depth int) bool {
 	case *ast.MatchExpr:
 		p.match(x.Match, x.Tag, x.Lbrace, x.Arms, x.Rbrace)
 
+	case *ast.FString:
+		p.print(x.Lit)
+
 	default:
 		return false
 	}

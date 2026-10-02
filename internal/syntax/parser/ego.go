@@ -57,7 +57,7 @@ func (p *parser) parseCheck() ast.Expr {
 		return x
 	}
 	if p.tok == token.STRING {
-		x.Label = &ast.BasicLit{ValuePos: p.pos, ValueEnd: p.end(), Kind: token.STRING, Value: p.lit}
+		x.Label = p.interpolate(&ast.BasicLit{ValuePos: p.pos, ValueEnd: p.end(), Kind: token.STRING, Value: p.lit})
 		p.next()
 	}
 	if p.tok == token.IDENT && p.lit == "as" {
@@ -204,6 +204,9 @@ func (p *parser) parseEgoStmt() ast.Stmt {
 			s := &ast.FailStmt{Fail: p.pos}
 			p.next()
 			s.X = p.parseRhs()
+			if lit, ok := s.X.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				s.X = p.interpolate(lit) // fail messages interpolate without f
+			}
 			p.expectSemi()
 			return s
 		}
@@ -263,4 +266,106 @@ func (p *parser) parseSumDecl() *ast.SumDecl {
 	d.Rbrace = p.expect(token.RBRACE)
 	p.expectSemi()
 	return d
+}
+
+// interpolate splits a string literal into text and {expr} parts. The
+// expressions are parsed in place, so their positions are real.
+func (p *parser) interpolate(lit *ast.BasicLit) *ast.FString {
+	fs := &ast.FString{Lit: lit}
+	v := lit.Value
+	base := p.file.Offset(lit.ValuePos)
+	start := 1
+	if v[0] == 'f' {
+		start = 2
+	}
+	end := len(v) - 1
+	if end < start {
+		return fs
+	}
+	raw := v[end] == '`'
+	var text []byte
+	flush := func() {
+		if len(text) > 0 {
+			fs.Parts = append(fs.Parts, &ast.FStringPart{Text: string(text)})
+			text = nil
+		}
+	}
+	for j := start; j < end; j++ {
+		c := v[j]
+		switch {
+		case c == '{' && j+1 < end && v[j+1] == '{':
+			text = append(text, '{')
+			j++
+		case c == '}' && j+1 < end && v[j+1] == '}':
+			text = append(text, '}')
+			j++
+		case c == '{':
+			k, colon := matchBrace(v, j+1, end)
+			if k < 0 {
+				p.error(token.Pos(int(lit.ValuePos)+j), "unterminated { in string: write {{ for a literal brace")
+				return fs
+			}
+			flush()
+			xend, spec := k, ""
+			if colon >= 0 {
+				xend, spec = colon, v[colon+1:k]
+			}
+			fs.Parts = append(fs.Parts, &ast.FStringPart{X: p.subExpr(base+j+1, base+xend), Spec: spec})
+			j = k
+		case c == '}':
+			p.error(token.Pos(int(lit.ValuePos)+j), "unmatched } in string: write }} for a literal brace")
+		case c == '\\' && !raw && j+1 < end:
+			text = append(text, v[j], v[j+1])
+			j++
+		default:
+			text = append(text, c)
+		}
+	}
+	flush()
+	return fs
+}
+
+// matchBrace returns the index of the "}" closing an interpolation that
+// starts at i, and of the first ':' at its top level (or -1).
+func matchBrace(v string, i, end int) (int, int) {
+	depth, colon := 0, -1
+	for ; i < end; i++ {
+		switch v[i] {
+		case '(', '[', '{':
+			depth++
+		case ')', ']':
+			depth--
+		case '}':
+			if depth == 0 {
+				return i, colon
+			}
+			depth--
+		case ':':
+			if depth == 0 && colon < 0 {
+				colon = i
+			}
+		}
+	}
+	return -1, -1
+}
+
+// subExpr parses the expression at file offsets [start, end).
+func (p *parser) subExpr(start, end int) ast.Expr {
+	q := &parser{file: p.file, mode: p.mode &^ ParseComments}
+	eh := func(pos token.Position, msg string) { p.errors.Add(pos, msg) }
+	q.scanner.InitRange(p.file, p.scanner.Source(), start, end, eh, 0)
+	q.next()
+	if q.tok == token.EOF {
+		p.error(p.file.Pos(start), "empty {} in string")
+		return &ast.BadExpr{From: p.file.Pos(start), To: p.file.Pos(end)}
+	}
+	x := q.parseRhs()
+	if q.tok == token.SEMICOLON && q.lit == "\n" {
+		q.next()
+	}
+	if q.tok != token.EOF {
+		p.error(q.pos, "unexpected "+scanner.TokenString(q.tok)+" in {…}")
+	}
+	p.errors = append(p.errors, q.errors...)
+	return x
 }

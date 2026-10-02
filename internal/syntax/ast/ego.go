@@ -13,7 +13,7 @@ type (
 		Check token.Pos // position of "check" or "must"
 		Must  bool      // "must" instead of "check"
 		X     Expr      // the call
-		Label *BasicLit // custom label (a STRING); or nil
+		Label *FString  // custom label; or nil
 		As    token.Pos // position of "as"; or token.NoPos
 		Case  Expr      // error set case after "as"; or nil
 	}
@@ -219,6 +219,12 @@ func walkEgo(v Visitor, n Node) bool {
 		Walk(v, n.Body)
 	case *FailStmt:
 		Walk(v, n.X)
+	case *FString:
+		for _, p := range n.Parts {
+			if p.X != nil {
+				Walk(v, p.X)
+			}
+		}
 	case *SumDecl:
 		if n.Doc != nil {
 			Walk(v, n.Doc)
@@ -245,4 +251,28 @@ func walkArms(v Visitor, arms []*MatchArm) {
 	for _, a := range arms {
 		Walk(v, a)
 	}
+}
+
+// An FString is an interpolated string: an f"…" literal, a check label or a
+// fail message.
+type FString struct {
+	Lit   *BasicLit
+	Parts []*FStringPart
+}
+
+// An FStringPart is either text or an interpolated expression.
+type FStringPart struct {
+	Text string // source text, escapes kept; "{{" and "}}" already folded
+	X    Expr   // interpolated expression; nil for text
+	Spec string // format spec after ':' in {x:spec}; or ""
+}
+
+func (x *FString) Pos() token.Pos { return x.Lit.Pos() }
+func (x *FString) End() token.Pos { return x.Lit.End() }
+func (*FString) exprNode()        {}
+
+// Raw reports whether the literal is backquoted.
+func (x *FString) Raw() bool {
+	v := x.Lit.Value
+	return len(v) > 0 && v[len(v)-1] == '`'
 }

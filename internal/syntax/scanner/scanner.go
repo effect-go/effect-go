@@ -1069,3 +1069,22 @@ func (s *Scanner) ScanToken() (token.Pos, token.Token, string) {
 		}
 	}
 }
+
+// InitRange prepares s to scan src[start:end] of file, with positions in
+// file. effect-go uses it to parse the expressions inside f-strings.
+func (s *Scanner) InitRange(file *token.File, src []byte, start, end int, err ErrorHandler, mode Mode) {
+	*s = Scanner{
+		file:        file,
+		src:         src[:end],
+		err:         err,
+		mode:        mode,
+		ch:          ' ',
+		endPosValid: true,
+		offset:      start,
+		rdOffset:    start,
+	}
+	s.next()
+}
+
+// Source returns the source being scanned.
+func (s *Scanner) Source() []byte { return s.src }
