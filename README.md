@@ -50,6 +50,8 @@ The generated code is plain, gofmt'd Go with `//line` directives, so compiler er
 
 Editors: `ego lsp` is a language server that runs gopls on the generated Go and maps positions back, for hover, go to definition, diagnostics, rename and format-on-save. [editors/vscode](editors/vscode) is a VS Code extension for it; [docs/editors.md](docs/editors.md) sets up GoLand, Neovim and Helix.
 
+In a real codebase: [miniflux's feed refreshing, ported](docs/case-study-miniflux.md). Its shutdown went from 18 s to 0 s with one slow feed, and its background loops now stop.
+
 To start: [docs/adopting.md](docs/adopting.md) goes from the library alone to the dialect one file at a time, and back out with `ego eject`.
 
 Analyzers, for plain Go too: `ego vet ./...` runs `go vet`, then checks exhaustive switches over sum types and enums, child tasks that use their parent's context (the errgroup `ctx`/`gctx` bug), and fibers that are never joined.
