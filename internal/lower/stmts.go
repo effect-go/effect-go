@@ -416,12 +416,14 @@ func (g *fileGen) fail(s *ast.FailStmt) {
 			g.errorf(s.X.Pos(), "this function returns %s: fail with one of its cases", g.fn.set.Name.Name)
 		}
 	default:
-		errText = g.renderStr(x)
 		if g.r.final && g.fn != nil && g.fn.set != nil {
 			if t := g.typeOf(x); t != nil && !g.inSet(t, g.fn.set) && !isErrorSet(t, g.fn.set) {
 				g.errorf(x.Pos(), "%s is not a case of %s", types.TypeString(t, func(*types.Package) string { return "" }), g.fn.set.Name.Name)
 			}
 		}
+		g.w.str(strings.TrimSuffix(g.ret("X"), "X"))
+		g.node(x)
+		return
 	}
 	g.w.str(g.ret(errText))
 }

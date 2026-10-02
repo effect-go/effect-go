@@ -164,7 +164,6 @@ type fileGen struct {
 	r       *round
 	w, pre  *writer // current output, and where hoisted statements go
 	edits   []edit
-	applied []bool
 	needs   map[ast.Node]bool
 	lowered map[ast.Stmt]bool // statements rendered by lowerStmt
 	names   map[string]string // import path -> name, from the file's imports
@@ -174,6 +173,7 @@ type fileGen struct {
 	fn      *funcState
 
 	exprPats map[*ast.CallExpr]bool
+	parents  map[ast.Node]ast.Node
 }
 
 // funcState describes the function being rendered.
@@ -239,8 +239,13 @@ func (g *fileGen) render(r *round) *writer {
 	}
 	cur := importsEnd
 	for _, d := range g.file.Decls[first:] {
-		g.copy(cur, g.off(d.Pos()))
-		g.mark(d.Pos())
+		start := d.Pos()
+		if doc := declDoc(d); doc != nil {
+			start = doc.Pos()
+		}
+		g.copy(cur, g.off(start))
+		g.mark(start)
+		g.copy(g.off(start), g.off(d.Pos()))
 		g.node(d)
 		cur = g.off(d.End())
 	}
@@ -328,16 +333,21 @@ func (g *fileGen) use(p, name string) string {
 
 func (g *fileGen) pkgRef(p string) string { return g.use(p, path.Base(p)) }
 
-// copy copies src[a:b], applying edits.
+// copy copies src[a:b], applying edits. A replacement applies when it
+// starts in [a, b); an insertion belongs to the gap before its offset, so
+// it applies when its offset is in (a, b].
 func (g *fileGen) copy(a, b int) {
-	for i, e := range g.edits {
-		if g.applied[i] || e.off < a || e.off > b || (e.off == b && e.end > b) {
+	for _, e := range g.edits {
+		if e.end > e.off {
+			if e.off < a || e.off >= b {
+				continue
+			}
+		} else if e.off <= a || e.off > b {
 			continue
 		}
 		g.w.copySrc(g.src, a, e.off)
 		g.w.anchor(e.off)
 		g.w.str(e.text)
-		g.applied[i] = true
 		a = max(a, e.end)
 	}
 	g.w.copySrc(g.src, a, b)
@@ -594,7 +604,6 @@ func (g *fileGen) computeEdits() {
 	})
 	sort.SliceStable(g.edits, func(i, j int) bool { return g.edits[i].off < g.edits[j].off })
 	g.edits = slices.CompactFunc(g.edits, func(a, b edit) bool { return a == b })
-	g.applied = make([]bool, len(g.edits))
 }
 
 func (g *fileGen) ctxParamEdit(ft *ast.FuncType) {
@@ -894,4 +903,16 @@ func (g *fileGen) exprPatterns() map[*ast.CallExpr]bool {
 		})
 	}
 	return g.exprPats
+}
+
+func declDoc(d ast.Decl) *ast.CommentGroup {
+	switch d := d.(type) {
+	case *ast.FuncDecl:
+		return d.Doc
+	case *ast.GenDecl:
+		return d.Doc
+	case *ast.SumDecl:
+		return d.Doc
+	}
+	return nil
 }

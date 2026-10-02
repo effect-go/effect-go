@@ -564,9 +564,7 @@ func (g *fileGen) fstring(x *ast.FString, wrap string, extra []string) {
 func (g *fileGen) lambda(x *ast.LambdaExpr) {
 	f := g.pkg.fact(x)
 	if g.r.ti != nil && f.sig == nil {
-		// Drafts render untyped lambdas as nil, which go/types converts to
-		// the expected function type.
-		if t := g.typeOf(x); t != nil {
+		if t := g.expected(x); t != nil {
 			if sig, ok := t.Underlying().(*types.Signature); ok && sig.Params().Len() == countParams(x) {
 				f.sig = sig
 			}
@@ -659,10 +657,11 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 				g.lowerInto(name, true, res[0], b)
 				g.w.str("return " + name + "\n")
 			} else {
-				g.genStmt(func() {
-					g.w.str(ret)
-					g.node(b)
-				})
+				// One line, as a hand-written function literal would be.
+				g.w.buf = g.w.buf[:len(g.w.buf)-1]
+				g.w.str(" " + ret)
+				g.node(b)
+				g.w.str(" ")
 			}
 		}
 		g.fn = g.fn.outer
@@ -893,4 +892,90 @@ func (g *fileGen) autoLabel(x ast.Expr) string {
 		parts = parts[len(parts)-2:]
 	}
 	return strings.Join(parts, ".")
+}
+
+// expected returns the type the context of x expects: the parameter it's
+// passed to, the variable it's assigned to, or the result it's returned as.
+func (g *fileGen) expected(x ast.Expr) types.Type {
+	parent := g.parent(x)
+	switch p := parent.(type) {
+	case *ast.CallExpr:
+		tv, ok := g.tv(p.Fun)
+		if !ok {
+			return nil
+		}
+		sig, ok := tv.Type.Underlying().(*types.Signature)
+		if !ok {
+			return nil
+		}
+		for i, a := range p.Args {
+			if a != x {
+				continue
+			}
+			// An implicit ctx shifts the parameters by one.
+			if sig.Params().Len() > 0 && isContext(sig.Params().At(0).Type()) && len(p.Args) < sig.Params().Len() {
+				i++
+			}
+			n := sig.Params().Len()
+			switch {
+			case sig.Variadic() && i >= n-1:
+				return sig.Params().At(n - 1).Type().(*types.Slice).Elem()
+			case i < n:
+				return sig.Params().At(i).Type()
+			}
+		}
+	case *ast.AssignStmt:
+		for i, r := range p.Rhs {
+			if r == x && i < len(p.Lhs) && p.Tok == token.ASSIGN {
+				return g.typeOf(p.Lhs[i])
+			}
+		}
+	case *ast.ValueSpec:
+		if p.Type != nil {
+			return g.typeOf(p.Type)
+		}
+	case *ast.ReturnStmt:
+		if g.fn != nil {
+			for i, r := range p.Results {
+				if r == x && i < len(g.fn.types) {
+					return g.fn.types[i]
+				}
+			}
+		}
+	case *ast.KeyValueExpr:
+		if p.Value == x {
+			if lit, ok := g.parent(p).(*ast.CompositeLit); ok {
+				if st, ok := g.typeOf(lit).Underlying().(*types.Struct); ok {
+					if k, ok := p.Key.(*ast.Ident); ok {
+						for f := range st.Fields() {
+							if f.Name() == k.Name {
+								return f.Type()
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// parent returns the node that contains n.
+func (g *fileGen) parent(n ast.Node) ast.Node {
+	if g.parents == nil {
+		g.parents = map[ast.Node]ast.Node{}
+		var stack []ast.Node
+		ast.Inspect(g.file, func(n ast.Node) bool {
+			if n == nil {
+				stack = stack[:len(stack)-1]
+				return true
+			}
+			if len(stack) > 0 {
+				g.parents[n] = stack[len(stack)-1]
+			}
+			stack = append(stack, n)
+			return true
+		})
+	}
+	return g.parents[n]
 }

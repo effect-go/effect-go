@@ -1,0 +1,49 @@
+package basics
+
+import "errors"
+
+error E {
+	A{ Cause error }
+	B{}
+}
+
+type Other struct{}
+
+func (Other) Error() string { return "other" }
+
+func load() (int, error) { return 0, errors.New("x") }
+
+func noErr() int {
+	x := check load() // ERROR "check needs a function that returns an error"
+	return x
+}
+
+func set() (int, E) {
+	x := check load() // ERROR "returns E: write check … as <case>"
+	fail Other{} // ERROR "Other is not a case of E"
+}
+
+func noCause() (int, E) {
+	x := check load() as B // ERROR "B has no error field"
+	return x, nil
+}
+
+func inner() (int, error) {
+	return check load() + 1, nil // ERROR "check must start a statement"
+}
+
+func handle(err error) {
+	match err { // ERROR "doesn't handle B"
+		nil  => println("ok")
+		A(_) => println("a")
+	}
+}
+
+func lam() {
+	f := x => x // ERROR "can't tell the parameter types"
+	_ = f
+}
+
+effect withCtx(ctx int) error { // ERROR "effect functions declare ctx themselves"
+	return nil
+}

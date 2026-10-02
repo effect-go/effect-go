@@ -151,19 +151,15 @@ func (m *SourceMap) ToOutput(src int) (out int, exact bool) {
 // span returns the output span of the source span [a, b), if both ends were
 // copied verbatim.
 func (m *SourceMap) span(a, b int) (int, int, bool) {
-	start, ok1 := -1, false
-	for _, s := range m.segs {
+	for i, s := range m.segs {
 		if s.src <= a && a < s.src+s.n {
-			start, ok1 = s.out+a-s.src, true
-			break
-		}
-	}
-	if !ok1 {
-		return 0, 0, false
-	}
-	for _, s := range m.segs {
-		if s.out >= start && s.src < b && b <= s.src+s.n {
-			return start, s.out + b - s.src, true
+			start := s.out + a - s.src
+			for _, e := range m.segs[i:] {
+				if e.src < b && b <= e.src+e.n {
+					return start, e.out + b - e.src, true
+				}
+			}
+			return 0, 0, false
 		}
 	}
 	return 0, 0, false

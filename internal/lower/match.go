@@ -383,10 +383,16 @@ func (g *fileGen) draftMatch(tag ast.Expr, arms []*ast.MatchArm, body func(*ast.
 			switch pt.kind {
 			case patCase:
 				if pt.bind == "_" {
-					g.w.str("if _egoUse(_egoAs[" + g.renderStr(pt.typ) + "](" + t + ")); true {\n")
+					g.w.str("if _egoUse(_egoAs[")
 				} else {
-					g.w.str("if " + pt.bind + " := _egoAs[" + g.renderStr(pt.typ) + "](" + t + "); true {\n")
-					g.w.str("_egoUse(" + pt.bind + ")\n")
+					g.w.str("if " + pt.bind + " := _egoAs[")
+				}
+				g.node(pt.typ)
+				g.w.str("](" + t + ")")
+				if pt.bind == "_" {
+					g.w.str("); true {\n")
+				} else {
+					g.w.str("; true {\n_egoUse(" + pt.bind + ")\n")
 				}
 			case patValue:
 				g.w.str("if " + t + " == " + g.renderStr(pt.expr) + " {\n")
