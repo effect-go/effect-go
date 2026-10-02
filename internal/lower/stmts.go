@@ -191,18 +191,25 @@ func (g *fileGen) check(lhs []ast.Expr, tok token.Token, c *ast.CheckExpr) {
 		n = len(lhs)
 	}
 
+	// The variable for the error: an if scopes it; otherwise it stays in
+	// the block, where a later err := of the user's would clash with it.
+	ev := "err"
+	if lhs != nil && g.declaresErrLater(c) {
+		ev = g.temp("err")
+	}
+
 	// What to do with the error.
 	var handle string
 	switch {
 	case c.Must:
-		handle = "panic(err)"
+		handle = "panic(" + ev + ")"
 	default:
-		handle = g.ret(g.wrap(c, "err"))
+		handle = g.ret(g.wrap(c, ev))
 		if call, ok := ast.Unparen(c.X).(*ast.CallExpr); ok && c.Case != nil && g.fn != nil && g.fn.set != nil {
 			if set := g.fn.set; g.isErrorSet(g.innerSet(call), set) {
 				// timeout or each of calls returning this set: their errors
 				// pass through, and the case holds the cancellation.
-				handle = "if _, ok := " + g.pkgRef("errors") + ".AsType[" + set.Name.Name + "](err); ok {\n" + g.ret("err") + "\n}\n" + handle
+				handle = "if _, ok := " + g.pkgRef("errors") + ".AsType[" + set.Name.Name + "](" + ev + "); ok {\n" + g.ret(ev) + "\n}\n" + handle
 			}
 		}
 	}
@@ -210,25 +217,69 @@ func (g *fileGen) check(lhs []ast.Expr, tok token.Token, c *ast.CheckExpr) {
 	switch {
 	case lhs == nil:
 		blanks := strings.Repeat("_, ", n)
-		g.w.str("if " + blanks + "err := ")
+		g.w.str("if " + blanks + ev + " := ")
 		g.w.add(call)
-		g.w.str("; err != nil {\n" + handle + "\n}")
+		g.w.str("; " + ev + " != nil {\n" + handle + "\n}")
 	case tok == token.DEFINE:
 		g.lhs(lhs)
-		g.w.str(", err := ")
+		g.w.str(", " + ev + " := ")
 		g.w.add(call)
-		g.w.str("\nif err != nil {\n" + handle + "\n}")
+		g.w.str("\nif " + ev + " != nil {\n" + handle + "\n}")
 	default:
 		var tmps []string
 		for range lhs {
 			tmps = append(tmps, g.temp("v"))
 		}
-		g.w.str(strings.Join(tmps, ", ") + ", err := ")
+		g.w.str(strings.Join(tmps, ", ") + ", " + ev + " := ")
 		g.w.add(call)
-		g.w.str("\nif err != nil {\n" + handle + "\n}\n")
+		g.w.str("\nif " + ev + " != nil {\n" + handle + "\n}\n")
 		g.lhs(lhs)
 		g.w.str(" " + tok.String() + " " + strings.Join(tmps, ", "))
 	}
+}
+
+// declaresErrLater reports whether a statement after check c's, in the
+// same block, declares a variable named err.
+func (g *fileGen) declaresErrLater(c *ast.CheckExpr) bool {
+	stmt := g.parent(c)
+	var list []ast.Stmt
+	switch b := g.parent(stmt).(type) {
+	case *ast.BlockStmt:
+		list = b.List
+	case *ast.CaseClause:
+		list = b.Body
+	case *ast.CommClause:
+		list = b.Body
+	}
+	after := false
+	for _, s := range list {
+		if s == stmt {
+			after = true
+			continue
+		}
+		if !after {
+			continue
+		}
+		switch s := s.(type) {
+		case *ast.AssignStmt:
+			for _, l := range s.Lhs {
+				if id, ok := l.(*ast.Ident); ok && id.Name == "err" && s.Tok == token.DEFINE {
+					return true
+				}
+			}
+		case *ast.DeclStmt:
+			if gd, ok := s.Decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+				for _, spec := range gd.Specs {
+					for _, n := range spec.(*ast.ValueSpec).Names {
+						if n.Name == "err" {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (g *fileGen) lhs(lhs []ast.Expr) {
@@ -335,6 +386,9 @@ func (g *fileGen) wrap(c *ast.CheckExpr, err string) string {
 			}
 		}
 		return err
+	}
+	if c.Label != nil && len(c.Label.Parts) == 0 {
+		return err // check f() "": the error as it is
 	}
 	if c.Label != nil {
 		saved := g.w

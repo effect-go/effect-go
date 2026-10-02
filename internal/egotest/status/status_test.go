@@ -54,6 +54,15 @@ func TestStatus(t *testing.T) {
 	if _, err := Clamp("x"); !errors.Is(err, strconv.ErrSyntax) {
 		t.Fatalf("Clamp: %v", err)
 	}
+	if n, err := Both("1", "2"); n != 3 || err != nil {
+		t.Fatal(n, err)
+	}
+	if _, err := Both("-5", "1"); err == nil || err.Error() != "negative" {
+		t.Fatalf("Both: %v", err)
+	}
+	if _, err := Parse("x"); err == nil || err.Error() != `strconv.Atoi: parsing "x": invalid syntax` {
+		t.Fatalf("Parse: %v", err)
+	}
 	defer func() {
 		if recover() == nil {
 			t.Fatal("an error outside the set should panic")

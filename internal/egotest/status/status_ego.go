@@ -160,3 +160,33 @@ func Clamp(s string) (int, error) {
 //line status.ego:81
 	return n, nil
 }
+
+// Parse passes strconv's error on as it is: an empty label adds nothing.
+func Parse(s string) (int, error) {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, err
+	}
+//line status.ego:87
+	return n, nil
+}
+
+// Both reads two numbers. A later err := of its own doesn't clash with the
+// error variable of check.
+func Both(a, b string) (int, error) {
+	x, err2 := strconv.Atoi(a)
+	if err2 != nil {
+		return 0, err2
+	}
+//line status.ego:94
+	y, err3 := strconv.Atoi(b)
+	if err3 != nil {
+		return 0, err3
+	}
+//line status.ego:95
+	err := error(nil)
+	if x+y < 0 {
+		err = errors.New("negative")
+	}
+	return x + y, err
+}

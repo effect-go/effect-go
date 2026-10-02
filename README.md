@@ -95,6 +95,8 @@ is the whole language on one page, for you and for coding agents.
   [VS Code extension](editors/vscode), and [setup for other editors](docs/editors.md).
 - **Errors point at your code.** Compiler errors, panics and the debugger
   show `.ego` lines.
+- **We use it ourselves.** The `ego` command and its language server are
+  written in `.ego`.
 
 In a real codebase: we ported [miniflux's feed refreshing](docs/case-study-miniflux.md).
 With one slow feed, its shutdown went from 18 seconds to instant.

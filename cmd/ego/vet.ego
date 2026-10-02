@@ -1,0 +1,38 @@
+package main
+
+import (
+	"os"
+	"os/exec"
+	"strings"
+
+	"golang.org/x/tools/go/analysis/unitchecker"
+
+	"github.com/effect-go/effect-go/analysis/ctxcheck"
+	"github.com/effect-go/effect-go/analysis/exhaustive"
+	"github.com/effect-go/effect-go/analysis/fiberjoin"
+)
+
+// vetCmd runs go vet's own checks, then the effect-go analyzers, with ego
+// as go vet's tool.
+func vetCmd(args []string) error {
+	exe := check os.Executable() ""
+	for _, vet := range [][]string{{"vet"}, {"vet", "-vettool=" + exe}} {
+		cmd := exec.Command("go", append(vet, args...)...)
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		if err := cmd.Run(); err != nil {
+			return errSilent
+		}
+	}
+	return nil
+}
+
+// isVetTool reports whether go vet is running ego as its analysis tool:
+// ego -V=full, ego -flags, or ego [flags] vet.cfg.
+func isVetTool(args []string) bool {
+	if len(args) < 2 {
+		return false
+	}
+	return args[1] == "-V=full" || args[1] == "-flags" || strings.HasSuffix(args[len(args)-1], ".cfg")
+}
+
+func vetTool() { unitchecker.Main(exhaustive.Analyzer, ctxcheck.Analyzer, fiberjoin.Analyzer) }

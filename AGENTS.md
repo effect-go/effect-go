@@ -8,6 +8,7 @@
 |---|---|
 | `x := check f(a)` | if `f` fails, return its error wrapped as `"f: <err>"` (the label is the last two parts of the callee: `repo.Find`) |
 | `x := check f(a) "load {a}"` | same, as `"load <a>: <err>"`; `{expr}` interpolates |
+| `x := check f(a) ""` | return the error as it is, without a label (when it already says enough, or callers compare it to `io.EOF`) |
 | `x := check f(a) as Storage` | return the error as the case `Storage{Cause: err}` of this function's error set |
 | `x := check f(a) as Invalid{Reason: "bad {a}"}` | the same, with fields of your own; the cause still goes in an error field if the case has one |
 | `x := f(a) else fallback` | on error, use `fallback` |

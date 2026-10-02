@@ -46,6 +46,10 @@ git diff -- '*_ego.go' '*_ego_test.go'
 A new compile error gets a case in `internal/lower/testdata/errors`: a line
 ending with `// ERROR "regexp"` must get that error, and no other line any.
 
+`cmd/ego` and `internal/lsp` are written in `.ego` themselves. `go build`
+uses their committed Go, so a compiler change that breaks them can still be
+built and fixed: regenerate them with a working `ego`.
+
 `internal/syntax` is a copy of Go's parser and printer, extended with the
 dialect. Its [README](internal/syntax/README.md) explains how a new Go
 release is merged in.

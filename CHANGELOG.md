@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `check f() ""` returns the error as it is, without a label.
+- `x := check f()` no longer clashes with an `err` declared later in the same block.
+- `ego fmt` names the file in its errors.
+- The `ego` command and its language server are written in `.ego`.
+
 ## v0.1.0 (2026-10-02)
 
 The first release.

@@ -37,22 +37,12 @@ func newConn(r io.Reader, w io.Writer) *conn { return &conn{r: bufio.NewReader(r
 
 func (c *conn) read() (*message, error) {
 	tp := textproto.NewReader(c.r)
-	h, err := tp.ReadMIMEHeader()
-	if err != nil {
-		return nil, err
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(h.Get("Content-Length")))
-	if err != nil {
-		return nil, fmt.Errorf("bad Content-Length: %v", err)
-	}
+	h := check tp.ReadMIMEHeader() ""
+	n := check strconv.Atoi(strings.TrimSpace(h.Get("Content-Length"))) "bad Content-Length"
 	body := make([]byte, n)
-	if _, err := io.ReadFull(c.r, body); err != nil {
-		return nil, err
-	}
+	check io.ReadFull(c.r, body) ""
 	m := &message{}
-	if err := json.Unmarshal(body, m); err != nil {
-		return nil, err
-	}
+	check json.Unmarshal(body, m) ""
 	if c.log != nil {
 		fmt.Fprintf(c.log, "<- %s %s\n", c.name, truncate(body))
 	}
@@ -61,35 +51,24 @@ func (c *conn) read() (*message, error) {
 
 func (c *conn) write(m *message) error {
 	m.JSONRPC = "2.0"
-	body, err := json.Marshal(m)
-	if err != nil {
-		return err
-	}
+	body := check json.Marshal(m) ""
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.log != nil {
 		fmt.Fprintf(c.log, "-> %s %s\n", c.name, truncate(body))
 	}
-	if _, err := fmt.Fprintf(c.w, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
-		return err
-	}
-	_, err = c.w.Write(body)
-	return err
+	check fmt.Fprintf(c.w, "Content-Length: %d\r\n\r\n", len(body)) ""
+	check c.w.Write(body) ""
+	return nil
 }
 
 func (c *conn) notify(method string, params any) error {
-	p, err := json.Marshal(params)
-	if err != nil {
-		return err
-	}
+	p := check json.Marshal(params) ""
 	return c.write(&message{Method: method, Params: p})
 }
 
 func (c *conn) reply(id json.RawMessage, result any) error {
-	r, err := json.Marshal(result)
-	if err != nil {
-		return err
-	}
+	r := check json.Marshal(result) ""
 	return c.write(&message{ID: id, Result: r})
 }
 

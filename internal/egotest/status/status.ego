@@ -80,3 +80,21 @@ func Clamp(s string) (int, error) {
 	n := check strconv.Atoi(s) else { strconv.ErrRange => math.MaxInt }
 	return n, nil
 }
+
+// Parse passes strconv's error on as it is: an empty label adds nothing.
+func Parse(s string) (int, error) {
+	n := check strconv.Atoi(s) ""
+	return n, nil
+}
+
+// Both reads two numbers. A later err := of its own doesn't clash with the
+// error variable of check.
+func Both(a, b string) (int, error) {
+	x := check strconv.Atoi(a) ""
+	y := check strconv.Atoi(b) ""
+	err := error(nil)
+	if x+y < 0 {
+		err = errors.New("negative")
+	}
+	return x + y, err
+}

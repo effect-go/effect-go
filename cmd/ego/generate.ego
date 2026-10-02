@@ -23,18 +23,12 @@ func generate(args []string) error {
 	check := fl.Bool("check", false, "write nothing; fail if a generated file is missing or stale (for CI)")
 	fl.Parse(args)
 	checkOnly = *check
-	dirs, err := egoDirs(fl.Args())
-	if err != nil {
-		return err
-	}
+	dirs := check egoDirs(fl.Args()) ""
 	dirs = dependencyOrder(dirs)
 	im := lower.NewImporter()
 	failed := false
 	for _, dir := range dirs {
-		res, err := lower.Generate(lower.Config{Dir: dir, NoLines: !*lines, Importer: im})
-		if err != nil {
-			return err
-		}
+		res := check lower.Generate(lower.Config{Dir: dir, NoLines: !*lines, Importer: im}) "{rel(dir)}"
 		for _, d := range res.Diags {
 			fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
 		}
@@ -48,16 +42,11 @@ func generate(args []string) error {
 			continue
 		}
 		for _, out := range res.Outputs {
-			if err := write(out.Go, out.Code); err != nil {
-				return err
-			}
+			check write(out.Go, out.Code) ""
 		}
 		// Layers are wired after the .ego files compile: injectors may use
 		// their declarations.
-		lr, err := layers.Generate(dir)
-		if err != nil {
-			return err
-		}
+		lr := check layers.Generate(dir) "{rel(dir)}"
 		if lr != nil {
 			for _, d := range lr.Diags {
 				fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
@@ -66,9 +55,7 @@ func generate(args []string) error {
 				failed = true
 				continue
 			}
-			if err := write(lr.Path, lr.Code); err != nil {
-				return err
-			}
+			check write(lr.Path, lr.Code) ""
 		}
 	}
 	if failed || stale {
@@ -92,9 +79,7 @@ func write(path string, code []byte) error {
 		stale = true
 		return nil
 	}
-	if err := os.WriteFile(path, code, 0o666); err != nil {
-		return err
-	}
+	check os.WriteFile(path, code, 0o666) ""
 	fmt.Println(rel(path))
 	return nil
 }
@@ -123,10 +108,8 @@ func egoDirs(args []string) ([]string, error) {
 	}
 	for _, a := range args {
 		if root, ok := strings.CutSuffix(a, "/..."); ok {
-			err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
+			check filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+				check err
 				if d.IsDir() && path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" || d.Name() == "vendor") {
 					return filepath.SkipDir
 				}
@@ -140,10 +123,7 @@ func egoDirs(args []string) ([]string, error) {
 					add(filepath.Dir(path))
 				}
 				return nil
-			})
-			if err != nil {
-				return nil, err
-			}
+			}) ""
 			continue
 		}
 		if strings.HasSuffix(a, ".ego") {

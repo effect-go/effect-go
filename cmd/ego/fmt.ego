@@ -21,25 +21,17 @@ func fmtCmd(args []string) error {
 	if len(paths) == 0 {
 		if !*list && !*write {
 			// Like gofmt: format stdin to stdout.
-			src, err := readAll(os.Stdin)
-			if err != nil {
-				return err
-			}
-			out, err := format.Source(src)
-			if err != nil {
-				return err
-			}
-			_, err = os.Stdout.Write(out)
-			return err
+			src := check readAll(os.Stdin) ""
+			out := check format.Source(src) ""
+			check os.Stdout.Write(out) ""
+			return nil
 		}
 		paths = []string{"."}
 	}
 	failed := false
 	for _, root := range paths {
-		err := filepath.WalkDir(strings.TrimSuffix(root, "/..."), func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
+		check filepath.WalkDir(strings.TrimSuffix(root, "/..."), func(path string, d fs.DirEntry, err error) error {
+			check err
 			if d.IsDir() {
 				if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "vendor" || d.Name() == "testdata") {
 					return filepath.SkipDir
@@ -49,13 +41,10 @@ func fmtCmd(args []string) error {
 			if !strings.HasSuffix(path, ".ego") {
 				return nil
 			}
-			src, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
+			src := check os.ReadFile(path) ""
 			out, err := format.Source(src)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
+				fmt.Fprintf(os.Stderr, "%s:%v\n", path, err)
 				failed = true
 				return nil
 			}
@@ -72,10 +61,7 @@ func fmtCmd(args []string) error {
 				os.Stdout.Write(out)
 			}
 			return nil
-		})
-		if err != nil {
-			return err
-		}
+		}) ""
 	}
 	if failed {
 		return errSilent

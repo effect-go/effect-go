@@ -22,9 +22,7 @@ func testCmd(args []string) error {
 	if len(pkgs) == 0 {
 		pkgs = []string{"."}
 	}
-	if err := generate(pkgs); err != nil {
-		return err
-	}
+	check generate(pkgs) ""
 	if wantsCoverage(args) {
 		restore, err := withoutLines(pkgs)
 		defer restore()

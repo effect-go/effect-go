@@ -83,17 +83,9 @@ func Run(cfg Config, in io.Reader, out io.Writer) error {
 	if cfg.Log != nil {
 		cmd.Stderr = cfg.Log
 	}
-	gin, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
-	gout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting gopls: %v", err)
-	}
+	gin := check cmd.StdinPipe() ""
+	gout := check cmd.StdoutPipe() ""
+	check cmd.Start() "starting gopls"
 	p := &Proxy{
 		cfg: cfg, editor: newConn(in, out), gopls: newConn(gout, gin), cmd: cmd,
 		egos: map[string]*egoDoc{}, gens: map[string]*genDoc{}, byEgo: map[string]*genDoc{},
@@ -107,7 +99,7 @@ func Run(cfg Config, in io.Reader, out io.Writer) error {
 	done := make(chan error, 2)
 	go func() { done <- p.fromGopls() }()
 	go func() { done <- p.fromEditor() }()
-	err = <-done
+	err := <-done
 	gin.Close()
 	cmd.Wait()
 	if err == io.EOF {
@@ -139,10 +131,7 @@ func pathToURI(path string) string {
 // fromEditor handles messages from the editor.
 func (p *Proxy) fromEditor() error {
 	for {
-		m, err := p.editor.read()
-		if err != nil {
-			return err
-		}
+		m := check p.editor.read() ""
 		if err := p.handleEditor(m); err != nil {
 			p.logf("%s: %v", m.Method, err)
 		}
@@ -205,9 +194,7 @@ func (p *Proxy) handleEditor(m *message) error {
 		return nil
 	case "textDocument/didSave":
 		dir := filepath.Dir(uriToPath(uri))
-		if err := p.flush(dir); err != nil {
-			return err
-		}
+		check p.flush(dir) ""
 		return p.save(dir)
 	case "textDocument/didClose":
 		return p.close(uri)
@@ -288,9 +275,7 @@ func (p *Proxy) close(uri string) error {
 	delete(p.goDiags, uri)
 	p.mu.Unlock()
 	if gen != nil {
-		if err := p.gopls.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": gen.uri}}); err != nil {
-			return err
-		}
+		check p.gopls.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": gen.uri}}) ""
 	}
 	return p.editor.notify("textDocument/publishDiagnostics", map[string]any{"uri": uri, "diagnostics": []any{}})
 }
@@ -308,10 +293,7 @@ func (p *Proxy) regen(dir string) error {
 		}
 	}
 	p.mu.Unlock()
-	res, err := lower.Generate(lower.Config{Dir: dir, Overlay: overlay, Importer: p.im, NoLines: true, NoTypeCheck: true})
-	if err != nil {
-		return err
-	}
+	res := check lower.Generate(lower.Config{Dir: dir, Overlay: overlay, Importer: p.im, NoLines: true, NoTypeCheck: true}) ""
 	byFile := map[string][]any{}
 	for path := range overlay {
 		byFile[pathToURI(path)] = []any{}
@@ -363,9 +345,7 @@ func (p *Proxy) regen(dir string) error {
 	}
 	p.mu.Unlock()
 	for _, n := range notes {
-		if err := n(); err != nil {
-			return err
-		}
+		check n() ""
 	}
 	for _, uri := range uris {
 		p.publish(uri)
@@ -375,17 +355,15 @@ func (p *Proxy) regen(dir string) error {
 
 // save writes the generated files of dir, if it compiled cleanly.
 func (p *Proxy) save(dir string) error {
-	res, err := lower.Generate(lower.Config{Dir: dir, Importer: p.im})
-	if err != nil || len(res.Diags) > 0 {
-		return err
+	res := check lower.Generate(lower.Config{Dir: dir, Importer: p.im}) ""
+	if len(res.Diags) > 0 {
+		return nil
 	}
 	for _, out := range res.Outputs {
 		if old, _ := os.ReadFile(out.Go); string(old) == string(out.Code) {
 			continue
 		}
-		if err := os.WriteFile(out.Go, out.Code, 0o666); err != nil {
-			return err
-		}
+		check os.WriteFile(out.Go, out.Code, 0o666) ""
 	}
 	return nil
 }
@@ -448,10 +426,7 @@ func (p *Proxy) format(m *message, uri string) error {
 // fromGopls handles messages from gopls.
 func (p *Proxy) fromGopls() error {
 	for {
-		m, err := p.gopls.read()
-		if err != nil {
-			return err
-		}
+		m := check p.gopls.read() ""
 		if err := p.handleGopls(m); err != nil {
 			p.logf("from gopls: %v", err)
 		}
@@ -472,9 +447,7 @@ func (p *Proxy) handleGopls(m *message) error {
 			return p.editor.write(m)
 		}
 		var v any
-		if err := json.Unmarshal(m.Result, &v); err != nil {
-			return err
-		}
+		check json.Unmarshal(m.Result, &v) ""
 		v = p.fromGen(v, pd.gen, pd.method == "textDocument/rename")
 		r, _ := json.Marshal(v)
 		m.Result = r
@@ -530,9 +503,7 @@ func adjustCapabilities(raw json.RawMessage) json.RawMessage {
 // Go.
 func (p *Proxy) toGen(raw json.RawMessage, egoText []byte, genURI string, gen *lower.Output) (json.RawMessage, error) {
 	var v map[string]any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return nil, err
-	}
+	check json.Unmarshal(raw, &v) ""
 	src := newText(egoText)
 	out := newText(gen.Raw)
 	conv := func(pos any) any {

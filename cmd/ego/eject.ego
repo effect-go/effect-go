@@ -21,10 +21,7 @@ func ejectCmd(args []string) error {
 	fl := flag.NewFlagSet("eject", flag.ExitOnError)
 	write := fl.Bool("w", false, "eject: without -w, only print what would change")
 	fl.Parse(args)
-	dirs, err := egoDirs(fl.Args())
-	if err != nil {
-		return err
-	}
+	dirs := check egoDirs(fl.Args()) ""
 	type step struct {
 		path   string // file to write
 		code   []byte
@@ -33,10 +30,7 @@ func ejectCmd(args []string) error {
 	var steps []step
 	im := lower.NewImporter()
 	for _, dir := range dependencyOrder(dirs) {
-		res, err := lower.Generate(lower.Config{Dir: dir, NoLines: true, Importer: im})
-		if err != nil {
-			return err
-		}
+		res := check lower.Generate(lower.Config{Dir: dir, NoLines: true, Importer: im}) "{rel(dir)}"
 		for _, d := range res.Diags {
 			fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
 		}
@@ -51,10 +45,7 @@ func ejectCmd(args []string) error {
 			}
 			steps = append(steps, s)
 		}
-		lr, err := layers.Generate(dir)
-		if err != nil {
-			return err
-		}
+		lr := check layers.Generate(dir) "{rel(dir)}"
 		if lr != nil {
 			if len(lr.Diags) > 0 {
 				return fmt.Errorf("%s: the wiring doesn't compile: run ego generate", rel(dir))
@@ -77,9 +68,7 @@ func ejectCmd(args []string) error {
 		return nil
 	}
 	for _, s := range steps {
-		if err := os.WriteFile(s.path, s.code, 0o666); err != nil {
-			return err
-		}
+		check os.WriteFile(s.path, s.code, 0o666) ""
 		for _, r := range s.remove {
 			if err := os.Remove(r); err != nil && !os.IsNotExist(err) {
 				return err
