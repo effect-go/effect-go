@@ -293,21 +293,33 @@ func (g *fileGen) render(r *round) *writer {
 	case len(paths) == 0:
 		g.copy(0, importsEnd)
 	case lp == nil && single != nil:
-		// import "x" becomes a block with the added imports.
+		// import "x" becomes a block with the added imports, standard
+		// library first.
 		g.copy(0, g.off(single.Pos()))
-		out.str("import (\n\t")
-		g.copy(g.off(single.Specs[0].Pos()), g.off(single.Specs[0].End()))
-		out.str("\n")
+		out.str("import (\n")
+		own := single.Specs[0].(*ast.ImportSpec)
+		ownPath, _ := strconv.Unquote(own.Path.Value)
+		copyOwn := func() {
+			out.str("\t")
+			g.copy(g.off(own.Pos()), g.off(own.End()))
+			out.str("\n")
+		}
+		if isStd(ownPath) {
+			copyOwn()
+		}
 		for _, p := range paths {
 			if isStd(p) {
 				out.str("\t" + spec(p) + "\n")
 			}
 		}
-		for i, p := range nonStd(paths) {
-			if i == 0 {
-				out.str("\n")
+		if others := nonStd(paths); len(others) > 0 || !isStd(ownPath) {
+			out.str("\n")
+			if !isStd(ownPath) {
+				copyOwn()
 			}
-			out.str("\t" + spec(p) + "\n")
+			for _, p := range others {
+				out.str("\t" + spec(p) + "\n")
+			}
 		}
 		out.str(")")
 		g.copy(g.off(single.End()), importsEnd)
@@ -373,12 +385,13 @@ func (g *fileGen) pkgRef(p string) string { return g.use(p, path.Base(p)) }
 // starts in [a, b); an insertion belongs to the gap before its offset, so
 // it applies when its offset is in (a, b].
 func (g *fileGen) copy(a, b int) {
+	start := a
 	for _, e := range g.edits {
 		if e.end > e.off {
-			if e.off < a || e.off >= b {
+			if e.off < start || e.off >= b {
 				continue
 			}
-		} else if e.off <= a || e.off > b {
+		} else if e.off <= start || e.off > b {
 			continue
 		}
 		g.w.copySrc(g.src, a, e.off)

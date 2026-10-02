@@ -291,6 +291,9 @@ func (p *pkgGen) parse(res *Result) error {
 	return nil
 }
 
+// ImportPath returns the import path of the package in dir, from go.mod.
+func ImportPath(dir string) (string, error) { return importPath(dir) }
+
 // importPath returns the import path of the package in dir, from go.mod.
 func importPath(dir string) (string, error) {
 	for d := dir; ; d = filepath.Dir(d) {

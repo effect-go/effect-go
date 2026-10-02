@@ -1,0 +1,10 @@
+// Package consumer calls another .ego package's effect functions.
+package consumer
+
+import "github.com/effect-go/effect-go/internal/egotest/multi"
+
+effect Words(text string) (int, error) {
+	s := multi.NewStore[string, int]()
+	n := check multi.Count(s, text) "count words"
+	return n, nil
+}

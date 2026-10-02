@@ -1,0 +1,31 @@
+package multi
+
+import (
+	"strings"
+	"sync"
+)
+
+// Count stores the length of each word, in parallel, and returns how many
+// distinct words there were.
+effect Count(s *Store[string, int], text string) (int, error) {
+	words := strings.Fields(text)
+	errs := make(chan error, len(words))
+	var wg sync.WaitGroup
+	for _, w := range words {
+		wg.Go(func() {
+			errs <- s.Put(w, len(w)) // ctx flows into the goroutine
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		check err
+	}
+	return s.Size(), nil
+}
+
+// Lookup returns a word's length, or -1.
+effect Lookup(s *Store[string, int], w string) (int, error) {
+	n, ok := check s.Get(w)
+	return if ok { n } else { -1 }, nil
+}

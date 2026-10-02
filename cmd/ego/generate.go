@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+
+	"github.com/effect-go/effect-go/internal/syntax/parser"
 
 	"github.com/effect-go/effect-go/internal/layers"
 	"github.com/effect-go/effect-go/internal/lower"
@@ -23,6 +27,7 @@ func generate(args []string) error {
 	if err != nil {
 		return err
 	}
+	dirs = dependencyOrder(dirs)
 	im := lower.NewImporter()
 	failed := false
 	for _, dir := range dirs {
@@ -142,4 +147,52 @@ func egoDirs(args []string) ([]string, error) {
 		add(a)
 	}
 	return dirs, nil
+}
+
+// dependencyOrder sorts dirs so that a package comes after the packages it
+// imports: the compiler type-checks against their generated code.
+func dependencyOrder(dirs []string) []string {
+	paths := map[string]string{} // import path -> dir
+	for _, d := range dirs {
+		if p, err := lower.ImportPath(d); err == nil {
+			paths[p] = d
+		}
+	}
+	deps := map[string][]string{}
+	for _, d := range dirs {
+		entries, _ := os.ReadDir(d)
+		for _, e := range entries {
+			if !strings.HasSuffix(e.Name(), ".ego") && !strings.HasSuffix(e.Name(), ".go") {
+				continue
+			}
+			f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(d, e.Name()), nil, parser.ImportsOnly)
+			if err != nil {
+				continue
+			}
+			for _, imp := range f.Imports {
+				p, _ := strconv.Unquote(imp.Path.Value)
+				if dep, ok := paths[p]; ok && dep != d {
+					deps[d] = append(deps[d], dep)
+				}
+			}
+		}
+	}
+	var out []string
+	state := map[string]int{} // 1: visiting, 2: done
+	var visit func(d string)
+	visit = func(d string) {
+		if state[d] != 0 {
+			return // done, or an import cycle, which go build reports
+		}
+		state[d] = 1
+		for _, dep := range deps[d] {
+			visit(dep)
+		}
+		state[d] = 2
+		out = append(out, d)
+	}
+	for _, d := range dirs {
+		visit(d)
+	}
+	return out
 }

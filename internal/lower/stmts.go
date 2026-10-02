@@ -166,6 +166,10 @@ func (g *fileGen) check(lhs []ast.Expr, tok token.Token, c *ast.CheckExpr) {
 	if !c.Must && (g.fn == nil || !g.fn.hasErr) {
 		g.errorf(c.Pos(), "check needs a function that returns an error: use must, or else")
 	}
+	if _, isCall := ast.Unparen(c.X).(*ast.CallExpr); !isCall && lhs == nil {
+		g.checkValue(c)
+		return
+	}
 	// Render the call first, to learn its result types.
 	call := &writer{}
 	saved := g.w
@@ -431,4 +435,32 @@ func (g *fileGen) fail(s *ast.FailStmt) {
 func isErrorSet(t types.Type, set *ast.SumDecl) bool {
 	n, ok := types.Unalias(t).(*types.Named)
 	return ok && n.Obj().Name() == set.Name.Name
+}
+
+// checkValue lowers check err, for an error value: return it if it isn't
+// nil, with a custom label if there is one.
+func (g *fileGen) checkValue(c *ast.CheckExpr) {
+	if !isSimple(c.X) {
+		g.errorf(c.X.Pos(), "check needs a call or a variable")
+	}
+	if t := g.typeOf(c.X); t != nil && !implementsError(t) {
+		g.errorf(c.X.Pos(), "check needs an error")
+	}
+	v := g.renderStr(c.X)
+	g.w.str("if ")
+	g.node(c.X)
+	g.w.str(" != nil {\n")
+	var handle string
+	switch {
+	case c.Must:
+		handle = "panic(" + v + ")"
+	case c.Case != nil || c.Label != nil:
+		handle = g.ret(strings.ReplaceAll(g.wrap(c), "err}", v+"}"))
+		if c.Label != nil {
+			handle = strings.Replace(handle, ", err)", ", "+v+")", 1)
+		}
+	default:
+		handle = g.ret(v)
+	}
+	g.w.str(handle + "\n}")
 }

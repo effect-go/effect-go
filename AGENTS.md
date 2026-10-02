@@ -11,6 +11,7 @@
 | `x := check f(a) as Storage` | return the error as the case `Storage{Cause: err}` of this function's error set |
 | `x := f(a) else fallback` | on error, use `fallback` |
 | `x := must f(a)` | on error, panic |
+| `check err` | return `err` if it isn't nil (for an error value you already have) |
 | `fail NotFound{ID: id}` / `fail "bad {id}"` | return this error, with zero values for the other results |
 
 `check` and `must` only start a statement or the right side of `=`/`:=`. `check f()` alone works for functions returning only `error`. A function using `check` or `fail` must return an `error` (or an error set) last. Inside a function that returns an error set, every `check` needs `as Case`, unless the callee returns the same set.

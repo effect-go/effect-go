@@ -1,0 +1,33 @@
+// Package multi has two .ego files that use each other, generics, and an
+// effect function without an error.
+package multi
+
+import "sync"
+
+type Store[K comparable, V any] struct {
+	mu sync.Mutex
+	m  map[K]V
+}
+
+func NewStore[K comparable, V any]() *Store[K, V] { return &Store[K, V]{m: map[K]V{}} }
+
+effect (s *Store[K, V]) Get(k K) (V, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.m[k]
+	return v, ok, ctx.Err()
+}
+
+effect (s *Store[K, V]) Put(k K, v V) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[k] = v
+	return nil
+}
+
+// Size has no error result: it still gets ctx and a span.
+effect (s *Store[K, V]) Size() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.m)
+}
