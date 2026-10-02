@@ -15,14 +15,14 @@ Replace an errgroup and a retry loop where they hurt most:
 // errgroup: the first error only; a panic kills the process; a goroutine
 // can still use the parent ctx by mistake.
 user, orders, err := scope.All2(ctx,
-	func(ctx context.Context) (User, error) { return users.Get(ctx, id) },
-	func(ctx context.Context) ([]Order, error) { return orders.For(ctx, id) },
+	func(ctx context.Context) (User, error) { return d.Users.Get(ctx, id) },
+	func(ctx context.Context) ([]Order, error) { return d.Orders.ForUser(ctx, id) },
 )
 // every real failure is joined; a panic comes back with its stack; the
 // other call is cancelled and awaited
 
 recs, err := schedule.Retry(ctx, schedule.Max(schedule.Exponential(100*time.Millisecond), schedule.Recurs(3)),
-	func(ctx context.Context) ([]Rec, error) { return recs.For(ctx, id) })
+	func(ctx context.Context) ([]Rec, error) { return d.Recs.For(ctx, id) })
 ```
 
 ## 2. The analyzers, in CI
