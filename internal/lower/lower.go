@@ -45,6 +45,9 @@ type Config struct {
 	Overlay map[string][]byte
 	// NoLines turns off //line directives in the output.
 	NoLines bool
+	// NoTypeCheck skips type-checking the generated code. The editor proxy
+	// sets it: gopls reports those errors itself.
+	NoTypeCheck bool
 	// Importer, if set, is reused across calls to cache loaded packages.
 	Importer *Importer
 }
@@ -162,7 +165,7 @@ func Generate(cfg Config) (*Result, error) {
 		out := &Output{Ego: f.path, Go: filepath.Join(dir, GoName(f.name)), Src: f.src, Raw: w.buf, Map: newSourceMap(w), File: f.tf}
 		res.Outputs = append(res.Outputs, out)
 	}
-	if len(res.Diags) == 0 {
+	if len(res.Diags) == 0 && !cfg.NoTypeCheck {
 		// Type-check the result, and report its errors at .ego positions.
 		final, err := p.check(ws, false)
 		if err != nil {

@@ -13,10 +13,10 @@ import (
 
 var update = flag.Bool("update", false, "rewrite the generated files in testdata")
 
-// fixtures are the testdata packages that compile: their generated files are
+// fixtures are the packages in internal/egotest: their generated files are
 // committed, and their tests run against the generated code.
 func fixtures(t *testing.T) []string {
-	dirs, _ := filepath.Glob("testdata/*")
+	dirs, _ := filepath.Glob("../egotest/*")
 	var out []string
 	for _, d := range dirs {
 		if egos, _ := filepath.Glob(filepath.Join(d, "*.ego")); len(egos) > 0 {
@@ -68,7 +68,7 @@ func TestFixturesRun(t *testing.T) {
 	}
 	var pkgs []string
 	for _, d := range fixtures(t) {
-		pkgs = append(pkgs, "./"+d)
+		pkgs = append(pkgs, d)
 	}
 	for _, args := range [][]string{{"vet"}, {"test", "-race", "-count=1"}} {
 		cmd := exec.Command("go", append(args, pkgs...)...)

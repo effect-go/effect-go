@@ -279,29 +279,36 @@ func (g *fileGen) chain(p *matchPlan, isExpr bool, body func(*ast.MatchArm)) {
 	var blankArm *ast.MatchArm
 	for i, a := range p.arms {
 		for _, pt := range p.pats[i] {
-			var head string
 			switch pt.kind {
 			case patBlank:
 				blankArm = a
 				continue
-			case patNil:
-				head = p.tag + " == nil"
-			case patCase:
-				typ := g.renderStr(pt.typ)
-				if p.mode == modeErrors {
-					head = pt.bind + ", ok := " + errors + ".AsType[" + typ + "](" + p.tag + "); ok"
-				} else {
-					head = pt.bind + ", ok := " + p.tag + ".(" + typ + "); ok"
-				}
-			case patValue:
-				head = p.tag + " == " + g.renderStr(pt.expr)
 			}
 			if first {
-				g.w.str("if " + head + " {\n")
+				g.w.str("if ")
 				first = false
 			} else {
-				g.w.str("} else if " + head + " {\n")
+				g.w.str("} else if ")
 			}
+			// Patterns are copied, so the editor can navigate from them.
+			switch pt.kind {
+			case patNil:
+				g.w.str(p.tag + " == nil")
+			case patCase:
+				if p.mode == modeErrors {
+					g.w.str(pt.bind + ", ok := " + errors + ".AsType[")
+					g.node(pt.typ)
+					g.w.str("](" + p.tag + "); ok")
+				} else {
+					g.w.str(pt.bind + ", ok := " + p.tag + ".(")
+					g.node(pt.typ)
+					g.w.str("); ok")
+				}
+			case patValue:
+				g.w.str(p.tag + " == ")
+				g.node(pt.expr)
+			}
+			g.w.str(" {\n")
 			body(a)
 		}
 	}
@@ -327,15 +334,12 @@ func (g *fileGen) switchArms(p *matchPlan, isExpr bool, body func(*ast.MatchArm)
 	g.w.str("switch " + p.tag + " {\n")
 	var blankArm *ast.MatchArm
 	for i, a := range p.arms {
-		var cases []string
+		var cases []pattern
 		for _, pt := range p.pats[i] {
-			switch pt.kind {
-			case patBlank:
+			if pt.kind == patBlank {
 				blankArm = a
-			case patNil:
-				cases = append(cases, "nil")
-			default:
-				cases = append(cases, g.renderStr(pt.expr))
+			} else {
+				cases = append(cases, pt)
 			}
 		}
 		if len(cases) == 0 {
@@ -344,7 +348,14 @@ func (g *fileGen) switchArms(p *matchPlan, isExpr bool, body func(*ast.MatchArm)
 		if containsBreak(a.Body) {
 			g.errorf(a.Pos(), "break in a match arm would leave the match, not a loop: use a labeled break")
 		}
-		g.w.str("case " + strings.Join(cases, ", ") + ":\n")
+		g.w.str("case ")
+		for j, pt := range cases {
+			if j > 0 {
+				g.w.str(", ")
+			}
+			g.node(pt.expr)
+		}
+		g.w.str(":\n")
 		body(a)
 	}
 	switch {

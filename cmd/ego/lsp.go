@@ -1,5 +1,26 @@
 package main
 
-import "errors"
+import (
+	"flag"
+	"io"
+	"os"
 
-func lsp(args []string) error { return errors.New("lsp: not implemented yet") }
+	"github.com/effect-go/effect-go/internal/lsp"
+)
+
+func lspCmd(args []string) error {
+	fl := flag.NewFlagSet("lsp", flag.ExitOnError)
+	gopls := fl.String("gopls", "gopls", "path to gopls")
+	logFile := fl.String("log", "", "write a debug log to this file")
+	fl.Parse(args)
+	var log io.Writer
+	if *logFile != "" {
+		f, err := os.Create(*logFile)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		log = f
+	}
+	return lsp.Run(lsp.Config{Gopls: *gopls, Log: log}, os.Stdin, os.Stdout)
+}

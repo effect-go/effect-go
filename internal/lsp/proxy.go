@@ -1,0 +1,683 @@
+// Package lsp is a language server for .ego files. It sits between the
+// editor and gopls: it compiles each .ego file to Go in memory, gives gopls
+// the generated Go as unsaved buffers, and translates positions both ways
+// with the compiler's source maps. Formatting is done by ego fmt.
+//
+// The editor keeps using its own gopls for .go files; this server only
+// handles .ego documents (templ's architecture).
+package lsp
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"unicode/utf8"
+
+	"github.com/effect-go/effect-go/internal/lower"
+	"github.com/effect-go/effect-go/internal/syntax/format"
+)
+
+// Config configures the proxy.
+type Config struct {
+	Gopls string    // path to gopls; "gopls" if empty
+	Log   io.Writer // debug log; may be nil
+}
+
+type egoDoc struct {
+	uri, path string
+	text      []byte
+}
+
+// genDoc is a generated file, open in gopls as an unsaved buffer.
+type genDoc struct {
+	uri     string
+	egoURI  string
+	out     *lower.Output
+	version int
+}
+
+type pending struct {
+	method string
+	gen    *genDoc
+}
+
+// Proxy is the language server.
+type Proxy struct {
+	cfg    Config
+	editor *conn
+	gopls  *conn
+	cmd    *exec.Cmd
+
+	mu       sync.Mutex
+	egos     map[string]*egoDoc // by .ego URI
+	gens     map[string]*genDoc // by generated URI
+	byEgo    map[string]*genDoc // .ego URI -> generated
+	pending  map[string]pending // requests forwarded to gopls, by id
+	egoDiags map[string][]any   // .ego URI -> compiler diagnostics
+	goDiags  map[string][]any   // .ego URI -> gopls diagnostics, mapped
+	results  map[string]*lower.Result
+	im       *lower.Importer
+}
+
+// Run serves one editor connection until it closes or sends exit.
+func Run(cfg Config, in io.Reader, out io.Writer) error {
+	gopls := cfg.Gopls
+	if gopls == "" {
+		gopls = "gopls"
+	}
+	cmd := exec.Command(gopls)
+	cmd.Stderr = os.Stderr
+	if cfg.Log != nil {
+		cmd.Stderr = cfg.Log
+	}
+	gin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	gout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting gopls: %v", err)
+	}
+	p := &Proxy{
+		cfg: cfg, editor: newConn(in, out), gopls: newConn(gout, gin), cmd: cmd,
+		egos: map[string]*egoDoc{}, gens: map[string]*genDoc{}, byEgo: map[string]*genDoc{},
+		pending: map[string]pending{}, egoDiags: map[string][]any{}, goDiags: map[string][]any{},
+		results: map[string]*lower.Result{}, im: lower.NewImporter(),
+	}
+	if os.Getenv("EGO_LSP_TRACE") != "" && cfg.Log != nil {
+		p.editor.name, p.editor.log = "editor", cfg.Log
+		p.gopls.name, p.gopls.log = "gopls", cfg.Log
+	}
+	done := make(chan error, 2)
+	go func() { done <- p.fromGopls() }()
+	go func() { done <- p.fromEditor() }()
+	err = <-done
+	gin.Close()
+	cmd.Wait()
+	if err == io.EOF {
+		return nil
+	}
+	return err
+}
+
+func (p *Proxy) logf(format string, args ...any) {
+	if p.cfg.Log != nil {
+		fmt.Fprintf(p.cfg.Log, "ego lsp: "+format+"\n", args...)
+	}
+}
+
+func isEgo(uri string) bool { return strings.HasSuffix(uri, ".ego") }
+
+func uriToPath(uri string) string {
+	u, err := url.Parse(uri)
+	if err != nil || u.Scheme != "file" {
+		return uri
+	}
+	return filepath.FromSlash(u.Path)
+}
+
+func pathToURI(path string) string {
+	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()
+}
+
+// fromEditor handles messages from the editor.
+func (p *Proxy) fromEditor() error {
+	for {
+		m, err := p.editor.read()
+		if err != nil {
+			return err
+		}
+		if err := p.handleEditor(m); err != nil {
+			p.logf("%s: %v", m.Method, err)
+		}
+		if m.Method == "exit" {
+			return io.EOF
+		}
+	}
+}
+
+type docParams struct {
+	TextDocument struct {
+		URI     string `json:"uri"`
+		Version int    `json:"version"`
+		Text    string `json:"text"`
+	} `json:"textDocument"`
+	ContentChanges []struct {
+		Range *Range `json:"range"`
+		Text  string `json:"text"`
+	} `json:"contentChanges"`
+}
+
+func (p *Proxy) handleEditor(m *message) error {
+	if m.isResponse() {
+		return p.gopls.write(m)
+	}
+	var dp docParams
+	json.Unmarshal(m.Params, &dp)
+	uri := dp.TextDocument.URI
+	switch {
+	case m.Method == "initialize":
+		p.track(m.ID, pending{method: m.Method})
+		return p.gopls.write(m)
+	case !isEgo(uri):
+		return p.gopls.write(m)
+	}
+	switch m.Method {
+	case "textDocument/didOpen":
+		p.mu.Lock()
+		p.egos[uri] = &egoDoc{uri: uri, path: uriToPath(uri), text: []byte(dp.TextDocument.Text)}
+		p.mu.Unlock()
+		return p.regen(filepath.Dir(uriToPath(uri)))
+	case "textDocument/didChange":
+		p.mu.Lock()
+		d := p.egos[uri]
+		if d == nil {
+			p.mu.Unlock()
+			return nil
+		}
+		for _, c := range dp.ContentChanges {
+			if c.Range == nil {
+				d.text = []byte(c.Text)
+				continue
+			}
+			t := newText(d.text)
+			a, b := t.offset(c.Range.Start), t.offset(c.Range.End)
+			d.text = append(append(append([]byte(nil), d.text[:a]...), c.Text...), d.text[b:]...)
+		}
+		p.mu.Unlock()
+		return p.regen(filepath.Dir(uriToPath(uri)))
+	case "textDocument/didSave":
+		return p.save(filepath.Dir(uriToPath(uri)))
+	case "textDocument/didClose":
+		p.mu.Lock()
+		delete(p.egos, uri)
+		p.mu.Unlock()
+		return nil
+	case "textDocument/formatting":
+		return p.format(m, uri)
+	}
+	if !m.isRequest() {
+		return nil // other notifications about .ego files
+	}
+	p.mu.Lock()
+	gen := p.byEgo[uri]
+	d := p.egos[uri]
+	p.mu.Unlock()
+	if gen == nil || d == nil {
+		return p.editor.reply(m.ID, nil)
+	}
+	params, err := p.toGen(m.Params, d, gen)
+	if err != nil {
+		return p.editor.reply(m.ID, nil)
+	}
+	p.track(m.ID, pending{method: m.Method, gen: gen})
+	return p.gopls.write(&message{ID: m.ID, Method: m.Method, Params: params})
+}
+
+func (p *Proxy) track(id json.RawMessage, pd pending) {
+	p.mu.Lock()
+	p.pending[string(id)] = pd
+	p.mu.Unlock()
+}
+
+// regen compiles the package in dir with the open .ego files, and updates
+// gopls's buffers and the diagnostics.
+func (p *Proxy) regen(dir string) error {
+	p.mu.Lock()
+	overlay := map[string][]byte{}
+	for _, d := range p.egos {
+		if filepath.Dir(d.path) == dir {
+			overlay[d.path] = d.text
+		}
+	}
+	p.mu.Unlock()
+	res, err := lower.Generate(lower.Config{Dir: dir, Overlay: overlay, Importer: p.im, NoLines: true, NoTypeCheck: true})
+	if err != nil {
+		return err
+	}
+	byFile := map[string][]any{}
+	for path := range overlay {
+		byFile[pathToURI(path)] = []any{}
+	}
+	for _, d := range res.Diags {
+		uri := pathToURI(d.Pos.Filename)
+		byFile[uri] = append(byFile[uri], p.egoDiag(uri, d))
+	}
+	p.mu.Lock()
+	p.results[dir] = res
+	for uri, ds := range byFile {
+		p.egoDiags[uri] = ds
+	}
+	var notes []func() error
+	for _, out := range res.Outputs {
+		uri := pathToURI(out.Go)
+		egoURI := pathToURI(out.Ego)
+		gen := p.gens[uri]
+		first := gen == nil
+		if first {
+			gen = &genDoc{uri: uri, egoURI: egoURI}
+			p.gens[uri] = gen
+			p.byEgo[egoURI] = gen
+		}
+		if !first && string(gen.out.Raw) == string(out.Raw) {
+			gen.out = out
+			continue
+		}
+		gen.out = out
+		gen.version++
+		text, version := string(out.Raw), gen.version
+		if first {
+			notes = append(notes, func() error {
+				return p.gopls.notify("textDocument/didOpen", map[string]any{
+					"textDocument": map[string]any{"uri": uri, "languageId": "go", "version": version, "text": text},
+				})
+			})
+		} else {
+			notes = append(notes, func() error {
+				return p.gopls.notify("textDocument/didChange", map[string]any{
+					"textDocument":   map[string]any{"uri": uri, "version": version},
+					"contentChanges": []any{map[string]any{"text": text}},
+				})
+			})
+		}
+	}
+	var uris []string
+	for uri := range byFile {
+		uris = append(uris, uri)
+	}
+	p.mu.Unlock()
+	for _, n := range notes {
+		if err := n(); err != nil {
+			return err
+		}
+	}
+	for _, uri := range uris {
+		p.publish(uri)
+	}
+	return nil
+}
+
+// save writes the generated files of dir, if it compiled cleanly.
+func (p *Proxy) save(dir string) error {
+	res, err := lower.Generate(lower.Config{Dir: dir, Importer: p.im})
+	if err != nil || len(res.Diags) > 0 {
+		return err
+	}
+	for _, out := range res.Outputs {
+		if old, _ := os.ReadFile(out.Go); string(old) == string(out.Code) {
+			continue
+		}
+		if err := os.WriteFile(out.Go, out.Code, 0o666); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// publish sends the diagnostics of a .ego file: the compiler's and gopls's.
+func (p *Proxy) publish(uri string) {
+	p.mu.Lock()
+	all := append(append([]any{}, p.egoDiags[uri]...), p.goDiags[uri]...)
+	p.mu.Unlock()
+	p.editor.notify("textDocument/publishDiagnostics", map[string]any{"uri": uri, "diagnostics": all})
+}
+
+func (p *Proxy) egoDiag(uri string, d lower.Diagnostic) any {
+	text := p.textOf(uri)
+	start := Position{Line: max(d.Pos.Line-1, 0)}
+	if text != nil && d.Pos.Line > 0 {
+		start = text.position(text.lineStart(d.Pos.Line-1) + max(d.Pos.Column-1, 0))
+	}
+	end := start
+	if text != nil {
+		end = text.position(text.wordEnd(text.offset(start)))
+	}
+	return map[string]any{
+		"range":    Range{Start: start, End: end},
+		"severity": 1,
+		"source":   "ego",
+		"message":  d.Msg,
+	}
+}
+
+func (p *Proxy) textOf(uri string) *text {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if d := p.egos[uri]; d != nil {
+		return newText(d.text)
+	}
+	if b, err := os.ReadFile(uriToPath(uri)); err == nil {
+		return newText(b)
+	}
+	return nil
+}
+
+// format formats a .ego document with ego fmt.
+func (p *Proxy) format(m *message, uri string) error {
+	p.mu.Lock()
+	d := p.egos[uri]
+	p.mu.Unlock()
+	if d == nil {
+		return p.editor.reply(m.ID, nil)
+	}
+	out, err := format.Source(d.text)
+	if err != nil || string(out) == string(d.text) {
+		return p.editor.reply(m.ID, []any{})
+	}
+	t := newText(d.text)
+	edit := map[string]any{"range": Range{Start: Position{}, End: t.position(len(d.text))}, "newText": string(out)}
+	return p.editor.reply(m.ID, []any{edit})
+}
+
+// fromGopls handles messages from gopls.
+func (p *Proxy) fromGopls() error {
+	for {
+		m, err := p.gopls.read()
+		if err != nil {
+			return err
+		}
+		if err := p.handleGopls(m); err != nil {
+			p.logf("from gopls: %v", err)
+		}
+	}
+}
+
+func (p *Proxy) handleGopls(m *message) error {
+	if m.isResponse() {
+		p.mu.Lock()
+		pd, ok := p.pending[string(m.ID)]
+		delete(p.pending, string(m.ID))
+		p.mu.Unlock()
+		if !ok || len(m.Result) == 0 {
+			return p.editor.write(m)
+		}
+		if pd.method == "initialize" {
+			m.Result = adjustCapabilities(m.Result)
+			return p.editor.write(m)
+		}
+		var v any
+		if err := json.Unmarshal(m.Result, &v); err != nil {
+			return err
+		}
+		v = p.fromGen(v, pd.gen, pd.method == "textDocument/rename")
+		r, _ := json.Marshal(v)
+		m.Result = r
+		return p.editor.write(m)
+	}
+	if m.Method == "textDocument/publishDiagnostics" {
+		var params struct {
+			URI         string           `json:"uri"`
+			Diagnostics []map[string]any `json:"diagnostics"`
+		}
+		json.Unmarshal(m.Params, &params)
+		p.mu.Lock()
+		gen := p.gens[params.URI]
+		p.mu.Unlock()
+		if gen == nil {
+			return nil // a .go file: the editor's own gopls reports it
+		}
+		var ds []any
+		for _, d := range params.Diagnostics {
+			ds = append(ds, p.fromGen(d, gen, false))
+		}
+		p.mu.Lock()
+		p.goDiags[gen.egoURI] = ds
+		p.mu.Unlock()
+		p.publish(gen.egoURI)
+		return nil
+	}
+	return p.editor.write(m)
+}
+
+// adjustCapabilities advertises what this server supports for .ego files.
+func adjustCapabilities(raw json.RawMessage) json.RawMessage {
+	var r map[string]any
+	if json.Unmarshal(raw, &r) != nil {
+		return raw
+	}
+	caps, _ := r["capabilities"].(map[string]any)
+	if caps == nil {
+		caps = map[string]any{}
+		r["capabilities"] = caps
+	}
+	caps["textDocumentSync"] = map[string]any{"openClose": true, "change": 1, "save": map[string]any{"includeText": false}}
+	caps["documentFormattingProvider"] = true
+	for _, k := range []string{"semanticTokensProvider", "inlayHintProvider", "codeLensProvider", "documentLinkProvider", "codeActionProvider", "documentRangeFormattingProvider", "foldingRangeProvider", "selectionRangeProvider", "callHierarchyProvider", "typeHierarchyProvider"} {
+		delete(caps, k)
+	}
+	r["serverInfo"] = map[string]any{"name": "ego lsp"}
+	out, _ := json.Marshal(r)
+	return out
+}
+
+// toGen translates request params from a .ego document to its generated
+// Go.
+func (p *Proxy) toGen(raw json.RawMessage, d *egoDoc, gen *genDoc) (json.RawMessage, error) {
+	var v map[string]any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+	src := newText(d.text)
+	out := newText(gen.out.Raw)
+	conv := func(pos any) any {
+		var ps Position
+		b, _ := json.Marshal(pos)
+		json.Unmarshal(b, &ps)
+		off, _ := gen.out.Map.ToOutput(src.offset(ps))
+		return out.position(off)
+	}
+	if td, ok := v["textDocument"].(map[string]any); ok {
+		td["uri"] = gen.uri
+	}
+	if pos, ok := v["position"]; ok {
+		v["position"] = conv(pos)
+	}
+	if r, ok := v["range"].(map[string]any); ok {
+		r["start"], r["end"] = conv(r["start"]), conv(r["end"])
+	}
+	return json.Marshal(v)
+}
+
+// fromGen translates positions in a result from generated Go back to .ego.
+// gen is the document the request was about, for ranges without a URI.
+// For edits (strict), only text that maps exactly is kept.
+func (p *Proxy) fromGen(v any, gen *genDoc, strict bool) any {
+	switch v := v.(type) {
+	case []any:
+		out := v[:0]
+		for _, e := range v {
+			if e = p.fromGen(e, gen, strict); e != nil {
+				out = append(out, e)
+			}
+		}
+		return out
+	case map[string]any:
+		doc := gen
+		for _, k := range []string{"uri", "targetUri"} {
+			if u, ok := v[k].(string); ok {
+				p.mu.Lock()
+				g := p.gens[u]
+				p.mu.Unlock()
+				doc = g
+				if g != nil {
+					v[k] = g.egoURI
+				}
+			}
+		}
+		if changes, ok := v["changes"].(map[string]any); ok {
+			mapped := map[string]any{}
+			for u, edits := range changes {
+				p.mu.Lock()
+				g := p.gens[u]
+				p.mu.Unlock()
+				if g == nil {
+					mapped[u] = edits
+					continue
+				}
+				mapped[g.egoURI] = p.fromGen(edits, g, true)
+			}
+			v["changes"] = mapped
+		}
+		if td, ok := v["textDocument"].(map[string]any); ok {
+			if u, ok := td["uri"].(string); ok {
+				p.mu.Lock()
+				g := p.gens[u]
+				p.mu.Unlock()
+				if g != nil {
+					td["uri"] = g.egoURI
+					td["version"] = nil
+					doc = g
+					strict = true
+				}
+			}
+		}
+		for k, e := range v {
+			switch k {
+			case "range", "selectionRange", "targetRange", "targetSelectionRange", "insert", "replace":
+				if doc == nil {
+					continue
+				}
+				r, exact := p.mapRange(e, doc)
+				if r == nil || strict && !exact && k == "range" {
+					return nil
+				}
+				v[k] = r
+			case "originSelectionRange":
+				if r, _ := p.mapRange(e, gen); r != nil {
+					v[k] = r
+				}
+			case "changes", "uri", "targetUri", "textDocument":
+			default:
+				if m := p.fromGen(e, gen, strict); m != nil || e == nil {
+					v[k] = m
+				}
+			}
+		}
+		return v
+	}
+	return v
+}
+
+// mapRange maps a range in generated Go to the .ego file.
+func (p *Proxy) mapRange(v any, gen *genDoc) (any, bool) {
+	var r Range
+	b, _ := json.Marshal(v)
+	if json.Unmarshal(b, &r) != nil || gen == nil || gen.out == nil {
+		return nil, false
+	}
+	out := newText(gen.out.Raw)
+	src := newText(gen.out.Src)
+	p.mu.Lock()
+	if d := p.egos[gen.egoURI]; d != nil {
+		src = newText(d.text)
+	}
+	p.mu.Unlock()
+	a, ok1 := gen.out.Map.ToSource(out.offset(r.Start))
+	z, ok2 := gen.out.Map.ToSource(out.offset(r.End))
+	if !ok2 {
+		z = a
+	}
+	if z < a {
+		z = a
+	}
+	return Range{Start: src.position(a), End: src.position(z)}, ok1 && ok2
+}
+
+// Position and Range are LSP's, in UTF-16 code units.
+type Position struct {
+	Line      int `json:"line"`
+	Character int `json:"character"`
+}
+
+type Range struct {
+	Start Position `json:"start"`
+	End   Position `json:"end"`
+}
+
+// text converts between byte offsets and LSP positions.
+type text struct {
+	src   []byte
+	lines []int
+}
+
+func newText(src []byte) *text {
+	t := &text{src: src, lines: []int{0}}
+	for i, c := range src {
+		if c == '\n' {
+			t.lines = append(t.lines, i+1)
+		}
+	}
+	return t
+}
+
+func (t *text) lineStart(line int) int {
+	if line >= len(t.lines) {
+		return len(t.src)
+	}
+	return t.lines[line]
+}
+
+func (t *text) offset(p Position) int {
+	if p.Line >= len(t.lines) {
+		return len(t.src)
+	}
+	off := t.lines[p.Line]
+	for n := 0; n < p.Character && off < len(t.src) && t.src[off] != '\n'; {
+		r, size := utf8.DecodeRune(t.src[off:])
+		off += size
+		n++
+		if r >= 0x10000 {
+			n++
+		}
+	}
+	return off
+}
+
+func (t *text) position(off int) Position {
+	off = min(max(off, 0), len(t.src))
+	lo, hi := 0, len(t.lines)-1
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if t.lines[mid] <= off {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	n := 0
+	for i := t.lines[lo]; i < off; {
+		r, size := utf8.DecodeRune(t.src[i:])
+		i += size
+		n++
+		if r >= 0x10000 {
+			n++
+		}
+	}
+	return Position{Line: lo, Character: n}
+}
+
+// wordEnd returns the end of the identifier or token at off.
+func (t *text) wordEnd(off int) int {
+	i := off
+	for i < len(t.src) {
+		c := t.src[i]
+		if c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= 0x80 {
+			i++
+			continue
+		}
+		break
+	}
+	if i == off && i < len(t.src) && t.src[i] != '\n' {
+		i++
+	}
+	return i
+}

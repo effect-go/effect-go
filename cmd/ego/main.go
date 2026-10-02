@@ -38,7 +38,7 @@ func main() {
 	case "fmt":
 		err = fmtCmd(args)
 	case "lsp":
-		err = lsp(args)
+		err = lspCmd(args)
 	case "version":
 		fmt.Println("ego", version)
 	case "help", "-h", "--help":

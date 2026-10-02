@@ -30,7 +30,9 @@ func (g *fileGen) sumDecl(d *ast.SumDecl) {
 		}
 		g.w.str("// " + name + " is " + kind + " " + strings.Join(cases, " | ") + ".\n")
 	}
-	g.w.str("type " + name + " interface {\n")
+	g.w.str("type ")
+	g.node(d.Name)
+	g.w.str(" interface {\n")
 	if !d.Enum {
 		g.w.str("error\n")
 	}
@@ -41,7 +43,9 @@ func (g *fileGen) sumDecl(d *ast.SumDecl) {
 			g.copy(g.off(c.Doc.Pos()), g.off(c.Doc.End()))
 			g.w.str("\n")
 		}
-		g.w.str("type " + c.Name.Name + " struct")
+		g.w.str("type ")
+		g.node(c.Name)
+		g.w.str(" struct")
 		if c.Fields != nil {
 			g.copy(g.off(c.Fields.Opening), g.off(c.Fields.Closing)+1)
 		} else {
@@ -183,13 +187,15 @@ func (g *fileGen) constEnum(d *ast.SumDecl) {
 	if d.Doc == nil {
 		g.w.str("// " + name + " is the enum " + strings.Join(cases, " | ") + ".\n")
 	}
-	g.w.str("type " + name + " int\n\nconst (\n")
+	g.w.str("type ")
+	g.node(d.Name)
+	g.w.str(" int\n\nconst (\n")
 	for i, c := range d.Cases {
 		if c.Doc != nil {
 			g.copy(g.off(c.Doc.Pos()), g.off(c.Doc.End()))
 			g.w.str("\n")
 		}
-		g.w.str(c.Name.Name)
+		g.node(c.Name)
 		if i == 0 {
 			g.w.str(" " + name + " = iota")
 		}

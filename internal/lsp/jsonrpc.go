@@ -1,0 +1,106 @@
+package lsp
+
+import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/textproto"
+	"strconv"
+	"strings"
+	"sync"
+)
+
+// A message is a JSON-RPC 2.0 request, notification or response.
+type message struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	Method  string          `json:"method,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   json.RawMessage `json:"error,omitempty"`
+}
+
+func (m *message) isRequest() bool  { return m.Method != "" && len(m.ID) > 0 }
+func (m *message) isResponse() bool { return m.Method == "" && len(m.ID) > 0 }
+
+// conn reads and writes LSP messages framed by Content-Length headers.
+type conn struct {
+	r    *bufio.Reader
+	mu   sync.Mutex
+	w    io.Writer
+	name string    // for the log
+	log  io.Writer // may be nil
+}
+
+func newConn(r io.Reader, w io.Writer) *conn { return &conn{r: bufio.NewReader(r), w: w} }
+
+func (c *conn) read() (*message, error) {
+	tp := textproto.NewReader(c.r)
+	h, err := tp.ReadMIMEHeader()
+	if err != nil {
+		return nil, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(h.Get("Content-Length")))
+	if err != nil {
+		return nil, fmt.Errorf("bad Content-Length: %v", err)
+	}
+	body := make([]byte, n)
+	if _, err := io.ReadFull(c.r, body); err != nil {
+		return nil, err
+	}
+	m := &message{}
+	if err := json.Unmarshal(body, m); err != nil {
+		return nil, err
+	}
+	if c.log != nil {
+		fmt.Fprintf(c.log, "<- %s %s\n", c.name, truncate(body))
+	}
+	return m, nil
+}
+
+func (c *conn) write(m *message) error {
+	m.JSONRPC = "2.0"
+	body, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.log != nil {
+		fmt.Fprintf(c.log, "-> %s %s\n", c.name, truncate(body))
+	}
+	if _, err := fmt.Fprintf(c.w, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
+		return err
+	}
+	_, err = c.w.Write(body)
+	return err
+}
+
+func (c *conn) notify(method string, params any) error {
+	p, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	return c.write(&message{Method: method, Params: p})
+}
+
+func (c *conn) reply(id json.RawMessage, result any) error {
+	r, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	return c.write(&message{ID: id, Result: r})
+}
+
+func (c *conn) replyError(id json.RawMessage, code int, msg string) error {
+	e, _ := json.Marshal(map[string]any{"code": code, "message": msg})
+	return c.write(&message{ID: id, Error: e})
+}
+
+func truncate(b []byte) string {
+	if len(b) > 400 {
+		return string(b[:400]) + "…"
+	}
+	return string(b)
+}
