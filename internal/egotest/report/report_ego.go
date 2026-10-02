@@ -6,11 +6,15 @@ package report
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"os"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/effect-go/effect-go/scope"
+	"github.com/effect-go/effect-go/trace"
 )
 
 //line report.ego:13
@@ -138,4 +142,20 @@ func Until(t time.Time) string {
 func Typed() func(int) string {
 	f := func(n int) string { return fmt.Sprintf("#%d", n) }
 	return f
+}
+
+// Scoped passes a lambda to a generic, variadic function that takes ctx
+// first: the lambda's results come from its body.
+func Scoped(ctx context.Context, n int) (_ string, err error) {
+	ctx, span := trace.Start(ctx, "report.Scoped")
+	defer trace.End(span, &err)
+//line report.ego:100
+	return scope.Run(ctx, func(s *scope.Scope) (string, error) { return label(s.Context(), n) })
+}
+
+func label(ctx context.Context, n int) (_ string, err error) {
+	ctx, span := trace.Start(ctx, "report.label")
+	defer trace.End(span, &err)
+//line report.ego:104
+	return fmt.Sprintf("#%d", n), nil
 }

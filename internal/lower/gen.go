@@ -39,6 +39,7 @@ type pkgGen struct {
 type fact struct {
 	sig      *types.Signature // expected type of a lambda
 	bodyType types.Type       // type of a typed lambda's expression body
+	openRes  bool             // sig is a generic function's: its results wait for inference
 }
 
 func (p *pkgGen) fact(n ast.Node) *fact {
@@ -738,20 +739,7 @@ func (g *fileGen) ctxEdits(n ast.Node) {
 			return true
 		}
 		sig, ok := tv.Type.Underlying().(*types.Signature)
-		if !ok || sig.Params().Len() == 0 || !isContext(sig.Params().At(0).Type()) {
-			return true
-		}
-		if len(call.Args) > 0 {
-			t := g.typeOf(call.Args[0])
-			if t != nil && (isContext(t) || types.Implements(t, contextIface(sig))) {
-				return true // explicit
-			}
-			if t == nil && sig.Variadic() {
-				return true // can't tell whether ctx was passed
-			}
-		}
-		want := sig.Params().Len() - 1
-		if len(call.Args) != want && !(sig.Variadic() && len(call.Args) >= want-1) {
+		if !ok || !g.leavesCtx(call, sig) {
 			return true
 		}
 		text := "ctx"
@@ -761,6 +749,25 @@ func (g *fileGen) ctxEdits(n ast.Node) {
 		g.edits = append(g.edits, edit{g.off(call.Lparen) + 1, g.off(call.Lparen) + 1, text})
 		return true
 	})
+}
+
+// leavesCtx reports whether call leaves out the context.Context that sig
+// takes first, so that ctx is passed for it.
+func (g *fileGen) leavesCtx(call *ast.CallExpr, sig *types.Signature) bool {
+	if sig.Params().Len() == 0 || !isContext(sig.Params().At(0).Type()) {
+		return false
+	}
+	if len(call.Args) > 0 {
+		t := g.typeOf(call.Args[0])
+		if t != nil && (isContext(t) || types.Implements(t, contextIface(sig))) {
+			return false // explicit
+		}
+		if t == nil && sig.Variadic() {
+			return false // can't tell whether ctx was passed
+		}
+	}
+	want := sig.Params().Len() - 1
+	return len(call.Args) == want || sig.Variadic() && len(call.Args) >= want-1
 }
 
 func contextIface(sig *types.Signature) *types.Interface {

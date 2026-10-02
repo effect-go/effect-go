@@ -46,4 +46,7 @@ func TestShorthand(t *testing.T) {
 	if !slices.Equal(Double([]int{1, 2}), []int{2, 4}) || Typed()(7) != "#7" {
 		t.Fatal("lambdas")
 	}
+	if got, err := Scoped(t.Context(), 7); got != "#7" || err != nil {
+		t.Fatal(got, err)
+	}
 }

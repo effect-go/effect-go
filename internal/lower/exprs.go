@@ -556,7 +556,15 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 	if g.r.ti != nil && f.sig == nil {
 		if t := g.expected(x); t != nil {
 			if sig, ok := t.Underlying().(*types.Signature); ok && sig.Params().Len() == countParams(x) {
-				f.sig = sig
+				// Passed to a generic function whose type arguments aren't
+				// inferred yet, as in scope.Run(ctx, s => f(s)): the
+				// parameters are known, and the results come from the body.
+				switch {
+				case !g.generic(sig):
+					f.sig = sig
+				case !g.generic(sig.Params()):
+					f.sig, f.openRes = sig, true
+				}
 			}
 		}
 	}
@@ -613,7 +621,7 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 		g.w.str(")")
 		var res []types.Type
 		switch {
-		case f.sig != nil:
+		case f.sig != nil && !f.openRes:
 			for v := range f.sig.Results().Variables() {
 				res = append(res, v.Type())
 			}
@@ -630,7 +638,7 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 			g.w.str(" " + resTexts[0])
 		case len(resTexts) > 1:
 			g.w.str(" (" + strings.Join(resTexts, ", ") + ")")
-		case exprBody && f.sig == nil && !g.r.final:
+		case exprBody && (f.sig == nil || f.openRes) && !g.r.final:
 			g.w.str(" any") // draft: learn the body's type
 		}
 		g.w.str(" {\n")
@@ -656,7 +664,7 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 			g.pre = saved
 		case ast.Expr:
 			ret := "return "
-			if len(resTexts) == 0 && (f.sig != nil || g.r.final) {
+			if len(resTexts) == 0 && (f.sig != nil && !f.openRes || g.r.final) {
 				ret = ""
 			}
 			if needsHoist(b) && ret != "" && len(res) == 1 {
@@ -674,6 +682,40 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 		g.fn = g.fn.outer
 		g.w.str("}")
 	})
+}
+
+// generic reports whether t mentions a type parameter of the function the
+// lambda is passed to (the expected type is that function's declaration).
+func (g *fileGen) generic(t types.Type) bool {
+	switch t := t.(type) {
+	case *types.TypeParam:
+		return true
+	case *types.Tuple:
+		for v := range t.Variables() {
+			if g.generic(v.Type()) {
+				return true
+			}
+		}
+	case *types.Signature:
+		return g.generic(t.Params()) || g.generic(t.Results())
+	case *types.Pointer:
+		return g.generic(t.Elem())
+	case *types.Slice:
+		return g.generic(t.Elem())
+	case *types.Array:
+		return g.generic(t.Elem())
+	case *types.Chan:
+		return g.generic(t.Elem())
+	case *types.Map:
+		return g.generic(t.Key()) || g.generic(t.Elem())
+	case *types.Named:
+		for a := range t.TypeArgs().Types() {
+			if g.generic(a) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func countParams(x *ast.LambdaExpr) int {
@@ -921,7 +963,7 @@ func (g *fileGen) expected(x ast.Expr) types.Type {
 				continue
 			}
 			// An implicit ctx shifts the parameters by one.
-			if sig.Params().Len() > 0 && isContext(sig.Params().At(0).Type()) && len(p.Args) < sig.Params().Len() {
+			if g.leavesCtx(p, sig) {
 				i++
 			}
 			n := sig.Params().Len()

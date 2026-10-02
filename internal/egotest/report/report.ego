@@ -93,3 +93,13 @@ func Typed() func(int) string {
 	f := (n int) => f"#{n}"
 	return f
 }
+
+// Scoped passes a lambda to a generic, variadic function that takes ctx
+// first: the lambda's results come from its body.
+effect Scoped(n int) (string, error) {
+	return scope.Run(ctx, s => label(s.Context(), n))
+}
+
+effect label(n int) (string, error) {
+	return f"#{n}", nil
+}

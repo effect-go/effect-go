@@ -26,11 +26,7 @@ type session struct {
 func (s *session) run(args ...string) (string, int) {
 	s.out.Reset()
 	cmd, err := ParseArgs(args)
-	if err != nil {
-		code := Report(s.out, err)
-		return s.out.String(), code
-	}
-	code := s.cli.Run(s.t.Context(), cmd)
+	code := if err != nil { Report(s.out, err) } else { s.cli.Run(s.t.Context(), cmd) }
 	return s.out.String(), code
 }
 
@@ -38,10 +34,7 @@ func (s *session) run(args ...string) (string, int) {
 func withApp(t *testing.T, build func(context.Context, *scope.Scope, Config) (*CLI, error), fn func(*session)) {
 	out := &bytes.Buffer{}
 	_, err := scope.Run(t.Context(), func(s *scope.Scope) (struct{}, error) {
-		cli, err := build(s.Context(), s, Config{DatabaseURL: os.Getenv("TODO_TEST_DATABASE_URL"), Out: out, Err: out})
-		if err != nil {
-			return struct{}{}, err
-		}
+		cli := check build(s.Context(), s, Config{DatabaseURL: os.Getenv("TODO_TEST_DATABASE_URL"), Out: out, Err: out})
 		fn(&session{t, cli, out})
 		return struct{}{}, nil
 	})
@@ -51,7 +44,7 @@ func withApp(t *testing.T, build func(context.Context, *scope.Scope, Config) (*C
 }
 
 func memory(ctx context.Context, s *scope.Scope, cfg Config) (*CLI, error) {
-	return BuildTestCLI(ctx, s, cfg, func() time.Time { return today })
+	return BuildTestCLI(ctx, s, cfg, () => today)
 }
 
 // The commands, on the in-memory graph.
@@ -65,14 +58,9 @@ func TestPostgres(t *testing.T) {
 		t.Skip("set TODO_TEST_DATABASE_URL to run against PostgreSQL")
 	}
 	withApp(t, BuildCLI, func(s *session) {
-		pool, err := Connect(t.Context(), Config{DatabaseURL: url})
-		if err != nil {
-			t.Fatal(err)
-		}
+		pool := must Connect(t.Context(), Config{DatabaseURL: url})
 		defer pool.Close()
-		if _, err := pool.Exec(t.Context(), "TRUNCATE todos RESTART IDENTITY"); err != nil {
-			t.Fatal(err)
-		}
+		must pool.Exec(t.Context(), "TRUNCATE todos RESTART IDENTITY")
 		commands(s)
 	})
 }
@@ -83,11 +71,11 @@ func commands(s *session) {
 		t.Helper()
 		out, code := s.run(strings.Fields(args)...)
 		if code != wantCode {
-			t.Errorf("todo %s: exit %d, want %d\n%s", args, code, wantCode, out)
+			t.Error(f"todo {args}: exit {code}, want {wantCode}\n{out}")
 		}
 		for _, w := range want {
 			if !strings.Contains(out, w) {
-				t.Errorf("todo %s: output lacks %q:\n%s", args, w, out)
+				t.Error(f"todo {args}: output lacks {w:q}:\n{out}")
 			}
 		}
 	}
@@ -97,13 +85,13 @@ func commands(s *session) {
 	expect("add -p low water plants", 0, "added #3")
 	expect("list", 0, "#1   High   buy milk  2026-10-01 (overdue)")
 	if out, _ := s.run("list"); strings.Index(out, "#2") > strings.Index(out, "#3") {
-		t.Errorf("medium should come before low:\n%s", out)
+		t.Error(f"medium should come before low:\n{out}")
 	}
 	expect("stats", 0, "3 open, 0 done, 1 overdue")
 	expect("done 1", 0)
 	expect("done 1", 0) // done twice is fine
 	if out, _ := s.run("list"); strings.Contains(out, "buy milk") {
-		t.Errorf("list shows a done todo:\n%s", out)
+		t.Error(f"list shows a done todo:\n{out}")
 	}
 	expect("list -all", 0, "[x] #1")
 	expect("stats", 0, "2 open, 1 done, 0 overdue")
@@ -123,17 +111,14 @@ func commands(s *session) {
 
 // A database that never answers is a readable error, after the retries.
 func TestNoDatabase(t *testing.T) {
-	_, err := scope.Run(t.Context(), func(s *scope.Scope) (*CLI, error) {
-		return BuildCLI(s.Context(), s, Config{DatabaseURL: "postgres://nobody@127.0.0.1:1/todo?connect_timeout=1"})
-	})
-	if err == nil || !strings.Contains(err.Error(), "connect to the database") {
-		t.Fatalf("err %v", err)
-	}
-	_, err = scope.Run(t.Context(), func(s *scope.Scope) (*CLI, error) {
-		return BuildCLI(s.Context(), s, Config{DatabaseURL: "not a url"})
-	})
-	if err == nil || !strings.Contains(err.Error(), "bad database URL") {
-		t.Fatalf("err %v", err)
+	for url, want := range map[string]string{
+		"postgres://nobody@127.0.0.1:1/todo?connect_timeout=1": "connect to the database",
+		"not a url": "bad database URL",
+	} {
+		_, err := scope.Run(t.Context(), s => BuildCLI(s.Context(), s, Config{DatabaseURL: url}))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Error(f"{url}: err {err}, want {want:q}")
+		}
 	}
 }
 
@@ -141,7 +126,7 @@ func TestNoDatabase(t *testing.T) {
 func TestBadArgsNeedNoDatabase(t *testing.T) {
 	for _, args := range []string{"", "list -x", "frobnicate", "done", "done x", "add -p urgent milk"} {
 		if _, err := ParseArgs(strings.Fields(args)); err == nil {
-			t.Errorf("ParseArgs(%q) succeeded", args)
+			t.Error(f"ParseArgs({args:q}) succeeded")
 		}
 	}
 }

@@ -15,7 +15,7 @@
 | `check err` | return `err` if it isn't nil (for an error value you already have) |
 | `fail NotFound{ID: id}` / `fail "bad {id}"` | return this error, with zero values for the other results |
 
-`check` and `must` only start a statement or the right side of `=`/`:=`. `check f()` alone works for functions returning only `error`. A function using `check` or `fail` must return an `error` (or an error set) last. Inside a function that returns an error set, every `check` needs `as Case`, unless the callee returns the same set.
+`check` and `must` only start a statement or the right side of `=`/`:=`. `check f()` and `must f()` alone drop the other results. A function using `check` or `fail` must return an `error` (or an error set) last. Inside a function that returns an error set, every `check` needs `as Case`, unless the callee returns the same set.
 
 ## Error sets, enums, match
 

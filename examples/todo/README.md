@@ -34,14 +34,13 @@ Exit codes: 1 for a missing todo, 2 for bad input, 3 when the database fails.
 | `all`: three queries in parallel | `Service.Stats` |
 | `retry` with a schedule that skips errors that won't go away | `Connect` and `connectRetry` in [store.ego](store.ego) |
 | `timeout` around a whole command | `CLI.Run` |
-| Command-line mistakes reported before connecting | `ParseArgs` in [args.ego](args.ego), called by [main.go](main.go) |
-| Lambdas, with types inferred | `Service.List`, `MemStore`, `connectRetry` |
+| Command-line mistakes reported before connecting | `ParseArgs` in [args.ego](args.ego), called by `start` in [main.ego](main.ego) |
+| Lambdas, with types inferred, even through a generic function | `Service.List`, `MemStore`, `connectRetry`, `scope.Run(ctx, s => …)` in [main.ego](main.ego) |
 | `if` expressions, including `else if` chains | `compareDue`, `ParseArgs`, `CLI.list` |
 | `?.` and `??` | `CLI.list` (the due date), `databaseURL` |
 | f-strings with format specs | `CLI.list`, `CLI.add`, `ParsePriority` |
-| Layers: a pool closed with the scope; a test graph with an in-memory store and a fixed clock | [inject.go](inject.go), used by [main.go](main.go) and [cli_test.go](cli_test.go) |
-| Plain Go calling effect-go code | [main.go](main.go), [cli_test.go](cli_test.go) |
-| A test written in effect-go | [parse_test.ego](parse_test.ego) |
+| Layers: a pool closed with the scope; a test graph with an in-memory store and a fixed clock | [inject.go](inject.go) (plain Go, as injectors are), used by [main.ego](main.ego) and [cli_test.ego](cli_test.ego) |
+| Tests written in effect-go: `must`, `match`, f-strings, `check` in a function literal | [parse_test.ego](parse_test.ego), [cli_test.ego](cli_test.ego) |
 
 Tests: `go test ./todo` runs the commands on the in-memory graph. Set
 `TODO_TEST_DATABASE_URL` to a database the tests may empty, and the same

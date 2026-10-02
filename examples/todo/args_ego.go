@@ -193,7 +193,7 @@ func Report(w io.Writer, err error) int {
 	} else {
 
 //line args.ego:124
-		fmt.Fprintln(w, err) // a timeout, or no database
+		fmt.Fprintln(w, err) // a timeout
 		return 1
 
 	}
