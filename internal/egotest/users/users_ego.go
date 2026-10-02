@@ -13,7 +13,7 @@ import (
 	"github.com/effect-go/effect-go/trace"
 )
 
-//line users.ego:9
+//line users.ego:10
 type UserID string
 
 type User struct {
@@ -52,7 +52,7 @@ func (e Storage) Error() string { return fmt.Sprintf("storage: %v", e.Cause) }
 
 func (e Storage) Unwrap() error { return e.Cause }
 
-//line users.ego:27
+//line users.ego:28
 type Service struct {
 	Repo Repo
 	Now  func() time.Time
@@ -61,12 +61,12 @@ type Service struct {
 func (s *Service) Get(ctx context.Context, id UserID) (_ User, err error) {
 	ctx, span := trace.Start(ctx, "users.Service.Get")
 	defer trace.End(span, &err)
-//line users.ego:33
+//line users.ego:34
 	u, ok, err := s.Repo.Find(ctx, id)
 	if err != nil {
 		return User{}, Storage{Cause: err}
 	}
-//line users.ego:34
+//line users.ego:35
 	if !ok {
 		return User{}, NotFound{ID: id}
 	}
@@ -78,18 +78,23 @@ func (s *Service) Get(ctx context.Context, id UserID) (_ User, err error) {
 
 type Handler struct{ Users *Service }
 
+// GetUser is an effect method that stays an http.HandlerFunc: its ctx is
+// r.Context(), and each request gets a span.
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
-	u, err := h.Users.Get(r.Context(), UserID(r.PathValue("id")))
+	ctx, span := trace.Start(r.Context(), "users.Handler.GetUser")
+	defer trace.End(span, nil)
+//line users.ego:49
+	u, err := h.Users.Get(ctx, UserID(r.PathValue("id")))
 	if err == nil {
 		fmt.Fprintf(w, "%s\n", u.Name)
 	} else if e, ok := errors.AsType[NotFound](err); ok {
-//line users.ego:49
+//line users.ego:52
 		http.Error(w, fmt.Sprintf("no user %s", e.ID), http.StatusNotFound)
 	} else if e, ok := errors.AsType[Suspended](err); ok {
-//line users.ego:50
+//line users.ego:53
 		http.Error(w, fmt.Sprintf("suspended until %s", e.Until.Format(time.DateOnly)), http.StatusForbidden)
 	} else if _, ok := errors.AsType[Storage](err); ok {
-//line users.ego:51
+//line users.ego:54
 		http.Error(w, "try again later", http.StatusServiceUnavailable)
 	} else {
 		panic(err)
@@ -99,11 +104,11 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 // GetAll loads users four at a time. Get's errors are passed on: they are
 // the same set.
 //
-//line users.ego:55
+//line users.ego:58
 func (s *Service) GetAll(ctx context.Context, ids []UserID) (_ []User, err error) {
 	ctx, span := trace.Start(ctx, "users.Service.GetAll")
 	defer trace.End(span, &err)
-//line users.ego:58
+//line users.ego:61
 	return scope.Each(ctx, ids, 4, func(ctx context.Context, id UserID) (User, error) { return s.Get(ctx, id) })
 }
 
@@ -111,12 +116,12 @@ func (s *Service) GetAll(ctx context.Context, ids []UserID) (_ []User, err error
 func (s *Service) GetEach(ctx context.Context, ids []UserID) (_ []User, err error) {
 	ctx, span := trace.Start(ctx, "users.Service.GetEach")
 	defer trace.End(span, &err)
-//line users.ego:63
+//line users.ego:66
 	users, err := scope.Each(ctx, ids, 2, s.Get)
 	if err != nil {
 		return nil, fmt.Errorf("get users: %w", err)
 	}
-//line users.ego:64
+//line users.ego:67
 	return users, nil
 }
 
@@ -124,21 +129,82 @@ func (s *Service) GetEach(ctx context.Context, ids []UserID) (_ []User, err erro
 func (s *Service) AllExist(ctx context.Context, ids []UserID) (err error) {
 	ctx, span := trace.Start(ctx, "users.Service.AllExist")
 	defer trace.End(span, &err)
-//line users.ego:69
+//line users.ego:72
 	if _, err := scope.Each(ctx, ids, 8, func(ctx context.Context, id UserID) (struct{}, error) { return struct{}{}, s.exists(ctx, id) }); err != nil {
 		return fmt.Errorf("s.exists: %w", err)
 	}
-//line users.ego:70
+//line users.ego:73
 	return nil
 }
 
 func (s *Service) exists(ctx context.Context, id UserID) (err error) {
 	ctx, span := trace.Start(ctx, "users.Service.exists")
 	defer trace.End(span, &err)
-//line users.ego:74
+//line users.ego:77
 	if _, err := s.Get(ctx, id); err != nil {
 		return fmt.Errorf("s.Get: %w", err)
 	}
-//line users.ego:75
+//line users.ego:78
 	return nil
+}
+
+// Routes registers the handlers, one of them an effect literal.
+func (h *Handler) Routes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /users/{id}", h.GetUser)
+	mux.HandleFunc("GET /users/{id}/name", func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := trace.Start(r.Context(), "users.Handler.Routes.func1")
+		defer trace.End(span, nil)
+//line users.ego:85
+		u, err := h.Users.Get(ctx, UserID(r.PathValue("id")))
+		if err != nil {
+			u = User{Name: "?"}
+		}
+//line users.ego:86
+		fmt.Fprint(w, u.Name)
+	})
+}
+
+// Lookup is shaped like a gRPC method: its ctx is its own parameter.
+func (s *Service) Lookup(ctx context.Context, id UserID) (_ string, err error) {
+	ctx, span := trace.Start(ctx, "users.Service.Lookup")
+	defer trace.End(span, &err)
+//line users.ego:92
+	u, err := s.Get(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("s.Get: %w", err)
+	}
+//line users.ego:93
+	return u.Name, nil
+}
+
+// Names forks one lookup per id. The scope's literal gets its ctx from
+// sc.Context(); the forked literals get a ctx parameter, as tasks need.
+func (s *Service) Names(ctx context.Context, ids []UserID) (_ []string, err error) {
+	ctx, span := trace.Start(ctx, "users.Service.Names")
+	defer trace.End(span, &err)
+//line users.ego:99
+	return scope.Run(ctx, func(sc *scope.Scope) (_ []string, err error) {
+		_, span := trace.Start(sc.Context(), "users.Service.Names.func1")
+		defer trace.End(span, &err)
+//line users.ego:100
+		var fibers []*scope.Fiber[string]
+		for _, id := range ids {
+			fibers = append(fibers, scope.Fork(sc, func(ctx context.Context) (_ string, err error) {
+				ctx, span := trace.Start(ctx, "users.Service.Names.func1.1")
+				defer trace.End(span, &err)
+				return s.Lookup(ctx, id)
+			}))
+		}
+//line users.ego:104
+		var names []string
+		for _, f := range fibers {
+			name, err := f.Join()
+			if err != nil {
+				return nil, fmt.Errorf("f.Join: %w", err)
+			}
+//line users.ego:107
+			names = append(names, name)
+		}
+		return names, nil
+	})
 }

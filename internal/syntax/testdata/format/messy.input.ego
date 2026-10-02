@@ -19,5 +19,8 @@ effect   (s *S)Get( id int )(int,E){
   g := x=>{ return x*2 }
   c := u?.Addr?.City??"none"
   t := if v>1{ "big" }else{ "small" }
+  h := effect(w http.ResponseWriter,r *http.Request){ fmt.Fprint(w, v) }
+  task := effect ()(int,error){return v,nil}
+  e := effect(x)
   return v+w+n,nil
 }

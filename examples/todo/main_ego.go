@@ -14,7 +14,7 @@ import (
 //line main.ego:9
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	code, err := scope.Run(ctx, func(s *scope.Scope) (int, error) { return run(s.Context(), s, os.Args[1:]) })
+	code, err := scope.Run(ctx, func(s *scope.Scope) (int, error) { return run(s, os.Args[1:]) })
 	stop()
 	var v int
 	if err != nil {
@@ -30,8 +30,8 @@ func main() {
 // the database pool when it ends.
 //
 //line main.ego:16
-func run(ctx context.Context, s *scope.Scope, args []string) (_ int, err error) {
-	ctx, span := trace.Start(ctx, "main.run")
+func run(s *scope.Scope, args []string) (_ int, err error) {
+	ctx, span := trace.Start(s.Context(), "main.run")
 	defer trace.End(span, &err)
 //line main.ego:20
 	cmd, err := ParseArgs(args)

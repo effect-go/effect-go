@@ -40,6 +40,10 @@ func (p *parser) parseEgoOperand() ast.Expr {
 			arms, m, tag, l, r := p.parseMatch(true)
 			return &ast.MatchExpr{Match: m, Tag: tag, Lbrace: l, Arms: arms, Rbrace: r}
 		}
+	case "effect":
+		if p.exprLev >= 0 && p.peek() == token.LPAREN && p.isEffectLit() {
+			return p.parseEffectLit()
+		}
 	}
 	if !p.inPattern && p.peek() == scanner.FATARROW {
 		name := p.parseIdent()
@@ -70,6 +74,50 @@ func (p *parser) parseCheck() ast.Expr {
 		}
 	}
 	return x
+}
+
+// isEffectLit reports whether "effect (" at the current position starts a
+// function literal, "effect (params) results { body }", rather than a call
+// of a function named effect: after the parameters, only a result type may
+// come before "{".
+func (p *parser) isEffectLit() bool {
+	s := p.scanner.Lookahead()
+	depth := 0
+	params := true
+	for {
+		_, tok, _ := s.ScanToken()
+		switch tok {
+		case token.LPAREN, token.LBRACK:
+			depth++
+		case token.RPAREN, token.RBRACK:
+			depth--
+			if depth == 0 && tok == token.RPAREN {
+				params = false
+			}
+		case token.LBRACE:
+			return depth == 0 && !params
+		case token.IDENT, token.PERIOD, token.MUL, token.COMMA, token.MAP, token.CHAN, token.ARROW, token.FUNC, token.INT, token.ELLIPSIS:
+		default:
+			if depth == 0 {
+				return false
+			}
+		}
+		if depth < 0 {
+			return false
+		}
+	}
+}
+
+// parseEffectLit parses "effect (params) results { body }".
+func (p *parser) parseEffectLit() ast.Expr {
+	typ := &ast.FuncType{Effect: p.pos}
+	p.next()
+	typ.Params = p.parseParameters(false)
+	typ.Results = p.parseParameters(true)
+	p.exprLev++
+	body := p.parseBody()
+	p.exprLev--
+	return &ast.FuncLit{Type: typ, Body: body}
 }
 
 // isLambdaParams reports whether the "(" at the current position opens the

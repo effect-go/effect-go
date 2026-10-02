@@ -58,7 +58,7 @@ func lam() {
 	_ = g
 }
 
-effect withCtx(ctx int) error { // ERROR "effect functions declare ctx themselves"
+effect withCtx(ctx int) error { // ERROR "ctx is the context: rename this parameter"
 	return nil
 }
 
@@ -83,4 +83,13 @@ effect eachShapes(ids []int) error {
 	check each(ids, 2, (a, b) => one(a)) // ERROR "each takes a function of one item"
 	check each(ids, 2) // ERROR "each takes three arguments"
 	return nil
+}
+
+effect errResult() error {
+	_, err := load()
+	if err != nil {
+		return err
+	}
+	var err error // ERROR "err is already this effect function's error result"
+	return err
 }

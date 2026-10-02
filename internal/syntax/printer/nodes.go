@@ -879,9 +879,15 @@ func (p *printer) expr1(expr ast.Expr, prec1, depth int) {
 
 	case *ast.FuncLit:
 		p.setPos(x.Type.Pos())
-		p.print(token.FUNC)
+		kw := "func"
+		if x.Type.Effect.IsValid() {
+			kw = "effect" // effect-go
+			p.keyword(x.Type.Effect, kw)
+		} else {
+			p.print(token.FUNC)
+		}
 		// See the comment in funcDecl about how the header size is computed.
-		startCol := p.out.Column - len("func")
+		startCol := p.out.Column - len(kw)
 		p.signature(x.Type)
 		p.funcBody(p.distanceFrom(x.Type.Pos(), startCol), blank, x.Body)
 

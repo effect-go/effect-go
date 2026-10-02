@@ -31,7 +31,7 @@ func TestGetUser(t *testing.T) {
 		Now: func() time.Time { return now },
 	}}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /users/{id}", h.GetUser)
+	h.Routes(mux)
 
 	cases := []struct {
 		id   string
@@ -42,6 +42,8 @@ func TestGetUser(t *testing.T) {
 		{"bob", 404, "no user bob"},
 		{"grace", 403, "suspended until 2026-10-03"},
 		{"broken", 503, "try again later"},
+		{"ada/name", 200, "Ada"},
+		{"bob/name", 200, "?"},
 	}
 	for _, c := range cases {
 		rec := httptest.NewRecorder()
@@ -74,5 +76,16 @@ func TestEach(t *testing.T) {
 	}
 	if s.AllExist(t.Context(), []UserID{"ada", "alan"}) != nil || s.AllExist(t.Context(), []UserID{"zed"}) == nil {
 		t.Fatal("AllExist")
+	}
+}
+
+func TestNames(t *testing.T) {
+	s := &Service{Repo: repo{"ada": {ID: "ada", Name: "Ada"}, "alan": {ID: "alan", Name: "Alan"}}, Now: func() time.Time { return now }}
+	names, err := s.Names(t.Context(), []UserID{"ada", "alan"})
+	if err != nil || strings.Join(names, ",") != "Ada,Alan" {
+		t.Fatal(names, err)
+	}
+	if _, err := s.Names(t.Context(), []UserID{"ada", "bob"}); !errors.As(err, new(NotFound)) {
+		t.Fatalf("Names: %v", err)
 	}
 }

@@ -50,7 +50,9 @@ effect (s *Shop) Checkout(id CartID) (Receipt, error) {   // instead of func
 }
 ```
 
-- An `effect` function gets a hidden first parameter `ctx context.Context` and an OpenTelemetry span. Callers in plain Go pass `ctx` explicitly; calls inside effect functions omit it: any call whose callee takes a `context.Context` first and leaves it out gets `ctx`. `ctx` is still in scope if you need it. Don't declare a `ctx` parameter yourself.
+- An `effect` function gets a hidden first parameter `ctx context.Context` and an OpenTelemetry span. Callers in plain Go pass `ctx` explicitly; calls inside effect functions omit it: any call whose callee takes a `context.Context` first and leaves it out gets `ctx`. `ctx` is still in scope if you need it.
+- If the function already has a context, no parameter is added: `ctx` is its `context.Context` parameter (gRPC methods), or else comes from the first parameter with a `Context()` method, such as `*http.Request` or `*scope.Scope`. So `effect (h *Handler) Get(w http.ResponseWriter, r *http.Request)` stays an `http.HandlerFunc`, with `ctx = r.Context()` and a span per request.
+- `effect(w http.ResponseWriter, r *http.Request) { … }` and `effect() (T, error) { … }` are function literals with the same rules: inline handlers, and tasks for `scope.Fork` (which get a `ctx` parameter).
 - Interface methods: `effect Get(id ID) (User, error)` declares `Get(ctx context.Context, id ID)`. From plain Go: `u, err := svc.Get(r.Context(), id)`.
 - To bound several steps with `timeout`, put them in their own effect function: `return timeout(2*time.Second, load(d, id))`.
 - `each(items, 8, x => s.load(x))` calls `s.load` on every item, 8 at a time, and returns the results in order; it fails like `all`. The function can be a method taking `(ctx, item)`: `each(ids, 8, s.users.Get)`.

@@ -175,7 +175,7 @@ func TestEditor(t *testing.T) {
 			to    string
 		}{
 			{"NotFound(e)", 1, "NotFound{ ID UserID }"},
-			{"Users.Get(r", 6, "Get(id UserID) (User, UserError)"},
+			{"Users.Get(UserID", 6, "Get(id UserID) (User, UserError)"},
 			{"Storage(_)", 1, "Storage{ Cause error }"},
 			{"s.Repo.Find", 7, "Find(id UserID)"},
 		} {

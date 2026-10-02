@@ -584,15 +584,28 @@ func (g *fileGen) matchBinding(id *ast.Ident) *ast.CallExpr {
 // headers, implicit ctx arguments, and error sets in signatures.
 func (g *fileGen) computeEdits() {
 	g.edits = nil
+	litNames := map[*ast.FuncLit]string{}
+	for _, d := range g.file.Decls {
+		if fd, ok := d.(*ast.FuncDecl); ok && fd.Body != nil {
+			nameLits(fd.Body, g.pkg.name+"."+funcKey(fd), litNames)
+		}
+	}
 	ast.Inspect(g.file, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.FuncDecl:
-			g.funcHeaderEdits(n.Type, n.Body, n)
+			g.funcHeaderEdits(n.Type, n.Body, g.pkg.name+"."+funcKey(n))
 			if n.Type.Effect.IsValid() && n.Body != nil {
 				g.ctxEdits(n.Body)
 			}
 		case *ast.FuncLit:
-			g.funcHeaderEdits(n.Type, n.Body, nil)
+			name := litNames[n]
+			if name == "" {
+				name = g.pkg.name + ".func" // in a package-level variable
+			}
+			g.funcHeaderEdits(n.Type, n.Body, name)
+			if n.Type.Effect.IsValid() {
+				g.ctxEdits(n.Body)
+			}
 		case *ast.InterfaceType:
 			for _, m := range n.Methods.List {
 				ft, ok := m.Type.(*ast.FuncType)
@@ -624,24 +637,93 @@ func (g *fileGen) computeEdits() {
 	g.edits = slices.CompactFunc(g.edits, func(a, b edit) bool { return a == b })
 }
 
-func (g *fileGen) ctxParamEdit(ft *ast.FuncType) {
+// nameLits names the function literals in body as Go does in stack traces:
+// Outer.func1, Outer.func2, and Outer.func1.1 for one nested in the first.
+func nameLits(body ast.Node, outer string, names map[*ast.FuncLit]string) {
+	i := 0
+	ast.Inspect(body, func(n ast.Node) bool {
+		lit, ok := n.(*ast.FuncLit)
+		if !ok || lit == body {
+			return true
+		}
+		i++
+		name := fmt.Sprintf("%s.func%d", outer, i)
+		if strings.Contains(outer, ".func") {
+			name = fmt.Sprintf("%s.%d", outer, i)
+		}
+		names[lit] = name
+		nameLits(lit, name, names)
+		return false
+	})
+}
+
+// ctxSource returns where an effect function's ctx comes from: its first
+// context.Context parameter, or else the first parameter with a Context()
+// method, such as an *http.Request (r.Context()). It returns "" when the
+// function has neither, and gets a ctx parameter.
+func (g *fileGen) ctxSource(ft *ast.FuncType) string {
+	for _, f := range ft.Params.List {
+		if g.isContextExpr(f.Type) && len(f.Names) > 0 && f.Names[0].Name != "_" {
+			return f.Names[0].Name
+		}
+	}
+	for _, f := range ft.Params.List {
+		if t := g.typeOf(f.Type); t != nil && hasContextMethod(t) && len(f.Names) > 0 && f.Names[0].Name != "_" {
+			return f.Names[0].Name + ".Context()"
+		}
+	}
+	return ""
+}
+
+// isContextExpr reports whether a parameter type is context.Context, from
+// its type, or from its spelling before types are known.
+func (g *fileGen) isContextExpr(x ast.Expr) bool {
+	if t := g.typeOf(x); t != nil {
+		return isContext(t)
+	}
+	sel, ok := x.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "context" && sel.Sel.Name == "Context"
+}
+
+// hasContextMethod reports whether t has a method Context() context.Context.
+func hasContextMethod(t types.Type) bool {
+	obj, _, _ := types.LookupFieldOrMethod(t, true, nil, "Context")
+	fn, ok := obj.(*types.Func)
+	if !ok {
+		return false
+	}
+	sig := fn.Signature()
+	return sig.Params().Len() == 0 && sig.Results().Len() == 1 && isContext(sig.Results().At(0).Type())
+}
+
+// ctxParamEdit adds a ctx parameter to an effect function that has no
+// context of its own, and returns where its ctx comes from.
+func (g *fileGen) ctxParamEdit(ft *ast.FuncType) string {
+	for _, f := range ft.Params.List {
+		for _, n := range f.Names {
+			if n.Name == "ctx" && !g.isContextExpr(f.Type) {
+				g.errorf(n.Pos(), "in an effect function, ctx is the context: rename this parameter")
+			}
+		}
+	}
+	if src := g.ctxSource(ft); src != "" {
+		return src
+	}
 	text := g.pkgRef("context") + ".Context"
 	if len(ft.Params.List) > 0 {
 		text += ", "
 	}
 	g.edits = append(g.edits, edit{g.off(ft.Params.Opening) + 1, g.off(ft.Params.Opening) + 1, "ctx " + text})
-	for _, f := range ft.Params.List {
-		for _, n := range f.Names {
-			if n.Name == "ctx" {
-				g.errorf(n.Pos(), "effect functions declare ctx themselves: remove this parameter")
-			}
-		}
-	}
+	return "ctx"
 }
 
 // funcHeaderEdits rewrites an effect function's header, and an error set
 // result to error.
-func (g *fileGen) funcHeaderEdits(ft *ast.FuncType, body *ast.BlockStmt, decl *ast.FuncDecl) {
+func (g *fileGen) funcHeaderEdits(ft *ast.FuncType, body *ast.BlockStmt, spanName string) {
 	set := g.pkg.resultSet(ft)
 	if !ft.Effect.IsValid() {
 		if set != nil {
@@ -652,7 +734,7 @@ func (g *fileGen) funcHeaderEdits(ft *ast.FuncType, body *ast.BlockStmt, decl *a
 		return
 	}
 	g.edits = append(g.edits, edit{g.off(ft.Effect), g.off(ft.Effect) + len("effect"), "func"})
-	g.ctxParamEdit(ft)
+	src := g.ctxParamEdit(ft)
 	errName := ""
 	if ft.Results != nil && len(ft.Results.List) > 0 {
 		// Name every result, keeping the type expressions verbatim.
@@ -673,6 +755,9 @@ func (g *fileGen) funcHeaderEdits(ft *ast.FuncType, body *ast.BlockStmt, decl *a
 				name := "_ "
 				if isErr {
 					name = "err "
+					if body != nil {
+						g.errResultEdits(body)
+					}
 				}
 				g.edits = append(g.edits, edit{g.off(f.Type.Pos()), g.off(f.Type.Pos()), name})
 			}
@@ -695,10 +780,9 @@ func (g *fileGen) funcHeaderEdits(ft *ast.FuncType, body *ast.BlockStmt, decl *a
 			g.edits = append(g.edits, edit{g.off(l.End()), g.off(l.End()), ")"})
 		}
 	}
-	if body == nil || decl == nil {
+	if body == nil {
 		return
 	}
-	spanName := g.pkg.name + "." + funcKey(decl)
 	tr := g.pkgRef(tracePath)
 	span := "span"
 	if usesName(body, "span") {
@@ -708,8 +792,75 @@ func (g *fileGen) funcHeaderEdits(ft *ast.FuncType, body *ast.BlockStmt, decl *a
 	if errName != "" {
 		end = "&" + errName
 	}
-	text := fmt.Sprintf("\nctx, %s := %s.Start(ctx, %q)\ndefer %s.End(%s, %s)", span, tr, spanName, tr, span, end)
+	ctxVar := "ctx"
+	if src != "ctx" && !g.usesCtx(body) {
+		ctxVar = "_" // ctx is new here, and Go rejects unused variables
+	}
+	text := fmt.Sprintf("\n%s, %s := %s.Start(%s, %q)\ndefer %s.End(%s, %s)", ctxVar, span, tr, src, spanName, tr, span, end)
+	if rest := g.src[g.off(body.Lbrace)+1:]; len(rest) > 0 && rest[0] != '\n' && rest[0] != '\r' {
+		text += "\n" // a one-line body: { return x }
+	}
 	g.edits = append(g.edits, edit{g.off(body.Lbrace) + 1, g.off(body.Lbrace) + 1, text})
+}
+
+// errResultEdits adjusts statements that clash with the err result the
+// compiler gives an effect function: at the top of its body, _, err := f()
+// would declare nothing new, so it becomes _, err = f().
+func (g *fileGen) errResultEdits(body *ast.BlockStmt) {
+	for _, st := range body.List {
+		switch st := st.(type) {
+		case *ast.AssignStmt:
+			if st.Tok != token.DEFINE {
+				continue
+			}
+			onlyErr := true
+			for _, l := range st.Lhs {
+				if id, ok := l.(*ast.Ident); !ok || id.Name != "_" && id.Name != "err" {
+					onlyErr = false
+				}
+			}
+			if onlyErr {
+				g.edits = append(g.edits, edit{g.off(st.TokPos), g.off(st.TokPos) + 2, "="})
+			}
+		case *ast.DeclStmt:
+			if gd, ok := st.Decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+				for _, sp := range gd.Specs {
+					for _, n := range sp.(*ast.ValueSpec).Names {
+						if n.Name == "err" {
+							g.errorf(n.Pos(), "err is already this effect function's error result: use it without declaring it")
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// usesCtx reports whether an effect function's body uses its ctx: by name,
+// through all, race, retry, timeout or each, or as an implicit argument.
+// Effect literals inside have their own.
+func (g *fileGen) usesCtx(body ast.Node) bool {
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			if n.Type.Effect.IsValid() {
+				return false
+			}
+		case *ast.Ident:
+			found = found || n.Name == "ctx"
+		case *ast.CallExpr:
+			if g.builtin(n) != "" {
+				found = true
+			} else if tv, ok := g.tv(n.Fun); ok && !tv.IsType() && !tv.IsBuiltin() {
+				if sig, ok := tv.Type.Underlying().(*types.Signature); ok && g.leavesCtx(n, sig) {
+					found = true
+				}
+			}
+		}
+		return !found
+	})
+	return found
 }
 
 func usesName(n ast.Node, name string) bool {
