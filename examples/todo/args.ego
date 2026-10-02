@@ -13,8 +13,8 @@ import (
 const usage = `usage:
   todo add TITLE [-p low|medium|high] [-due YYYY-MM-DD]
   todo list [-all]
-  todo done ID
-  todo rm ID
+  todo done ID...
+  todo rm ID...
   todo stats`
 
 // An Action is what a command does. Matches on it must handle every one.
@@ -34,7 +34,7 @@ type Command struct {
 	Priority Priority
 	Due      *time.Time
 	All      bool
-	ID       int64
+	IDs      []int64
 }
 
 // ParseArgs parses the command line.
@@ -66,10 +66,13 @@ func ParseArgs(args []string) (Command, TodoError) {
 		"done", "rm" => {
 			cmd.Action = if name == "done" { Complete } else { Remove }
 			check fs.Parse(flags) as Usage
-			if len(words) != 1 {
-				fail Usage{Cause: errors.New(f"{name} takes one ID")}
+			if len(words) == 0 {
+				fail Usage{Cause: errors.New(f"{name} takes the IDs of todos")}
 			}
-			cmd.ID = check strconv.ParseInt(words[0], 10, 64) as Invalid{Reason: f"bad id {words[0]:q}"}
+			for _, w := range words {
+				id := check strconv.ParseInt(w, 10, 64) as Invalid{Reason: f"bad id {w:q}"}
+				cmd.IDs = append(cmd.IDs, id)
+			}
 		}
 		"stats" => {
 			cmd.Action = ShowStats

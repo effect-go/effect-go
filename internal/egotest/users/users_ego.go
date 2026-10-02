@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/effect-go/effect-go/scope"
 	"github.com/effect-go/effect-go/trace"
 )
 
@@ -93,4 +94,51 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	} else {
 		panic(err)
 	}
+}
+
+// GetAll loads users four at a time. Get's errors are passed on: they are
+// the same set.
+//
+//line users.ego:55
+func (s *Service) GetAll(ctx context.Context, ids []UserID) (_ []User, err error) {
+	ctx, span := trace.Start(ctx, "users.Service.GetAll")
+	defer trace.End(span, &err)
+//line users.ego:58
+	return scope.Each(ctx, ids, 4, func(ctx context.Context, id UserID) (User, error) { return s.Get(ctx, id) })
+}
+
+// GetEach takes the method itself, which receives each call's ctx.
+func (s *Service) GetEach(ctx context.Context, ids []UserID) (_ []User, err error) {
+	ctx, span := trace.Start(ctx, "users.Service.GetEach")
+	defer trace.End(span, &err)
+//line users.ego:63
+	users, err := scope.Each(ctx, ids, 2, s.Get)
+	if err != nil {
+		return nil, fmt.Errorf("get users: %w", err)
+	}
+//line users.ego:64
+	return users, nil
+}
+
+// AllExist runs a check that returns only an error on every id.
+func (s *Service) AllExist(ctx context.Context, ids []UserID) (err error) {
+	ctx, span := trace.Start(ctx, "users.Service.AllExist")
+	defer trace.End(span, &err)
+//line users.ego:69
+	if _, err := scope.Each(ctx, ids, 8, func(ctx context.Context, id UserID) (struct{}, error) { return struct{}{}, s.exists(ctx, id) }); err != nil {
+		return fmt.Errorf("s.exists: %w", err)
+	}
+//line users.ego:70
+	return nil
+}
+
+func (s *Service) exists(ctx context.Context, id UserID) (err error) {
+	ctx, span := trace.Start(ctx, "users.Service.exists")
+	defer trace.End(span, &err)
+//line users.ego:74
+	if _, err := s.Get(ctx, id); err != nil {
+		return fmt.Errorf("s.Get: %w", err)
+	}
+//line users.ego:75
+	return nil
 }

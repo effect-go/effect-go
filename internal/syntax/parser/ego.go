@@ -173,6 +173,14 @@ func (p *parser) parseMatch(expr bool) (arms []*ast.MatchArm, match token.Pos, t
 	p.exprLev = -1
 	tag = p.parseRhs()
 	p.exprLev = old
+	lbrace, arms, rbrace = p.parseArms(expr, "match")
+	return
+}
+
+// parseArms parses "{ arms }" of a match, or of an else. In an expression,
+// each arm's body is an expression; in a statement, a block or a simple
+// statement.
+func (p *parser) parseArms(expr bool, context string) (lbrace token.Pos, arms []*ast.MatchArm, rbrace token.Pos) {
 	lbrace = p.expect(token.LBRACE)
 	p.exprLev++
 	for p.tok != token.RBRACE && p.tok != token.EOF {
@@ -195,7 +203,7 @@ func (p *parser) parseMatch(expr bool) (arms []*ast.MatchArm, match token.Pos, t
 		arms = append(arms, arm)
 	}
 	p.exprLev--
-	rbrace = p.expectClosing(token.RBRACE, "match")
+	rbrace = p.expectClosing(token.RBRACE, context)
 	return
 }
 

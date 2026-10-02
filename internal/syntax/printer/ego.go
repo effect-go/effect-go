@@ -44,7 +44,11 @@ func (p *printer) egoExpr(expr ast.Expr, prec1, depth int) bool {
 		p.print(blank)
 		p.setPos(x.Else)
 		p.print(token.ELSE, blank)
-		p.expr1(x.Fallback, token.LowestPrec+1, depth)
+		if x.Fallback == nil {
+			p.arms(x.Lbrace, x.Arms, x.Rbrace)
+		} else {
+			p.expr1(x.Fallback, token.LowestPrec+1, depth)
+		}
 
 	case *ast.CoalesceExpr:
 		paren := prec1 > token.LowestPrec
@@ -142,6 +146,31 @@ func (p *printer) match(pos token.Pos, tag ast.Expr, lbrace token.Pos, arms []*a
 	p.print(blank)
 	p.expr(stripParens(tag))
 	p.print(blank)
+	p.arms(lbrace, arms, rbrace)
+}
+
+// arms prints "{ arms }" of a match or an else, lined up like the values of
+// a composite literal.
+func (p *printer) arms(lbrace token.Pos, arms []*ast.MatchArm, rbrace token.Pos) {
+	if p.oneLine(lbrace, arms, rbrace) {
+		// { A => 1; _ => 0 } written on one line stays on one line.
+		p.setPos(lbrace)
+		p.print(token.LBRACE, blank)
+		for i, a := range arms {
+			if i > 0 {
+				p.print(token.SEMICOLON, blank)
+			}
+			p.exprList(token.NoPos, a.Patterns, 1, 0, a.Arrow, false)
+			p.print(blank)
+			p.setPos(a.Arrow)
+			p.print(scanner.FATARROW, blank)
+			p.expr(a.Body.(ast.Expr))
+		}
+		p.print(blank)
+		p.setPos(rbrace)
+		p.print(token.RBRACE)
+		return
+	}
 	p.setPos(lbrace)
 	p.print(token.LBRACE, indent)
 	var line int
@@ -168,6 +197,20 @@ func (p *printer) match(pos token.Pos, tag ast.Expr, lbrace token.Pos, arms []*a
 	p.linebreak(p.lineFor(rbrace), 1, ignore, true)
 	p.setPos(rbrace)
 	p.print(token.RBRACE)
+}
+
+// oneLine reports whether arms were written on one line, with expression
+// bodies and no comments.
+func (p *printer) oneLine(lbrace token.Pos, arms []*ast.MatchArm, rbrace token.Pos) bool {
+	if p.lineFor(lbrace) != p.lineFor(rbrace) {
+		return false
+	}
+	for _, a := range arms {
+		if _, ok := a.Body.(ast.Expr); !ok || a.Comment != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // egoStmt prints an effect-go statement. It reports false for other nodes.

@@ -852,9 +852,146 @@ func (g *fileGen) combinator(x *ast.CallExpr) []types.Type {
 			g.w.str(", ")
 			vals = []types.Type{g.task(x.Args[1])}
 			g.w.str(")")
+		case "each":
+			vals = g.each(x)
 		}
 	})
 	return vals
+}
+
+// eachLambda returns the x => call(x) of each(items, limit, x => call(x)),
+// or nil if each is given a function value or isn't well formed.
+func eachLambda(c *ast.CallExpr) *ast.LambdaExpr {
+	if len(c.Args) != 3 {
+		return nil
+	}
+	l, ok := c.Args[2].(*ast.LambdaExpr)
+	if !ok || countParams(l) != 1 {
+		return nil
+	}
+	if _, ok := l.Body.(ast.Expr); !ok {
+		return nil
+	}
+	return l
+}
+
+// each renders each(items, limit, x => call(x)) as scope.Each, with the
+// call in a function of its own ctx and the item. The function can also be
+// a value taking (ctx, item), such as a method.
+func (g *fileGen) each(x *ast.CallExpr) []types.Type {
+	if len(x.Args) != 3 {
+		g.errorf(x.Pos(), "each takes three arguments: each(items, limit, x => call(x))")
+		g.w.str("nil")
+		return nil
+	}
+	items, limit, f := x.Args[0], x.Args[1], x.Args[2]
+	l := eachLambda(x)
+	if l == nil {
+		if _, ok := f.(*ast.LambdaExpr); ok {
+			g.errorf(f.Pos(), "each takes a function of one item, with one call for its body: x => call(x)")
+			g.w.str("nil")
+			return nil
+		}
+		// A function value: its type gives the result.
+		if !g.r.final {
+			g.w.str("_egoEachF(")
+		} else {
+			g.w.str(g.pkgRef(scopePath) + ".Each(ctx, ")
+		}
+		g.node(items)
+		g.w.str(", ")
+		g.node(limit)
+		g.w.str(", ")
+		g.node(f)
+		g.w.str(")")
+		if sig, ok := typeUnder[*types.Signature](g.typeOf(f)); ok && sig.Results().Len() == 2 {
+			return []types.Type{types.NewSlice(sig.Results().At(0).Type())}
+		}
+		return nil
+	}
+	body := l.Body.(ast.Expr)
+	param := l.Params.List[0]
+	name := param.Names[0].Name
+	r := g.branchType(body) // nil: the body returns only an error
+	errOnly := r == nil && g.typeOf(body) != nil
+	if errOnly {
+		r = types.NewStruct(nil, nil)
+	}
+	if !g.r.final {
+		// The item comes from a range, which types it without inference.
+		rs := "any"
+		if r != nil {
+			rs = g.typeString(r)
+		}
+		g.w.str("_egoEach(")
+		g.node(limit)
+		g.w.str(", func() " + rs + " { for _, " + name + " := range ")
+		g.node(items)
+		g.w.str(" { _egoUse(" + name + ")\n")
+		if errOnly {
+			g.w.str("_egoUse(")
+			g.node(body)
+			g.w.str(")\nreturn struct{}{} }\n")
+		} else {
+			g.w.str("return _egoV(")
+			g.node(body)
+			g.w.str(") }\n")
+		}
+		g.w.str("panic(0) })")
+		if r == nil {
+			return nil
+		}
+		return []types.Type{types.NewSlice(r)}
+	}
+	var elem types.Type
+	if t, ok := typeUnder[*types.Slice](g.typeOf(items)); ok {
+		elem = t.Elem()
+	} else if t, ok := typeUnder[*types.Array](g.typeOf(items)); ok {
+		elem = t.Elem()
+	} else {
+		g.errorf(items.Pos(), "each needs a slice or an array of items")
+	}
+	if r == nil {
+		g.errorf(body.Pos(), "a branch must be a call returning (value, error) or error")
+		r = types.NewStruct(nil, nil)
+	}
+	g.w.str(g.pkgRef(scopePath) + ".Each(ctx, ")
+	g.node(items)
+	g.w.str(", ")
+	g.node(limit)
+	g.w.str(", func(ctx " + g.pkgRef("context") + ".Context, ")
+	g.node(param.Names[0])
+	switch {
+	case param.Type != nil:
+		g.w.str(" ")
+		g.node(param.Type)
+	case elem != nil:
+		g.w.str(" " + g.typeString(elem))
+	}
+	g.w.str(") (" + g.typeString(r) + ", error) { return ")
+	if errOnly {
+		g.w.str("struct{}{}, ")
+	}
+	saved := g.fn
+	g.fn = &funcState{outer: saved, ctx: true, used: map[string]bool{}, temps: map[string]bool{}}
+	if saved != nil {
+		g.fn.used = saved.used
+		g.fn.temps = saved.temps
+	}
+	g.node(body)
+	g.fn = saved
+	g.w.str(" })")
+	return []types.Type{types.NewSlice(r)}
+}
+
+// typeUnder returns t's underlying type as a T.
+func typeUnder[T types.Type](t types.Type) (T, bool) {
+	var zero T
+	if t == nil {
+		return zero, false
+	}
+	u, ok := t.Underlying().(T)
+	return u, ok
 }
 
 // draftBranch renders a branch for a draft: its value, through _egoV.
@@ -932,6 +1069,11 @@ func (g *fileGen) autoLabel(x ast.Expr) string {
 	case "retry", "timeout":
 		if len(c.Args) == 2 {
 			return g.autoLabel(c.Args[1])
+		}
+		return ""
+	case "each":
+		if l := eachLambda(c); l != nil {
+			return g.autoLabel(l.Body.(ast.Expr))
 		}
 		return ""
 	}

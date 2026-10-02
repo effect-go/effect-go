@@ -34,8 +34,8 @@ effect (c *CLI) run(cmd Command) error {
 			fmt.Fprintln(c.out, f"added #{t.ID}: {t.Title}")
 		}
 		List      => check c.list(cmd.All)
-		Complete  => check c.svc.Done(cmd.ID)
-		Remove    => check c.svc.Remove(cmd.ID)
+		Complete  => check each(cmd.IDs, 4, id => c.svc.Done(id))
+		Remove    => check each(cmd.IDs, 4, id => c.svc.Remove(id))
 		ShowStats => {
 			s := check c.svc.Stats()
 			fmt.Fprintln(c.out, f"{s.Open} open, {s.Done} done, {s.Overdue} overdue")

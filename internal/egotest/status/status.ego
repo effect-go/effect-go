@@ -2,6 +2,7 @@ package status
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 )
@@ -56,4 +57,24 @@ func Remote(s string) (int, PayError) {
 func Pay(amount int) (string, PayError) {
 	r := check Charge(amount)
 	return r, nil
+}
+
+// Settle recovers from a declined charge and returns the other errors,
+// labelled.
+func Settle(amount int) (string, error) {
+	r := check Charge(amount) "settle {amount}" else { Declined(d) => f"skipped: {d.Reason}" }
+	return r, nil
+}
+
+// State handles every case of the set, so it needs no check.
+func State(amount int) (s string) {
+	s = Charge(amount) else { Declined(_) => "declined"; Expired(_), Gateway(_) => "retry later" }
+	return s
+}
+
+// Clamp saturates numbers out of range: strconv.ErrRange is found inside
+// the *strconv.NumError that wraps it.
+func Clamp(s string) (int, error) {
+	n := check strconv.Atoi(s) else { strconv.ErrRange => math.MaxInt }
+	return n, nil
 }

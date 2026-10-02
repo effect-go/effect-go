@@ -1980,7 +1980,12 @@ func (p *parser) parseSimpleStmt(mode int) (ast.Stmt, bool) {
 				// effect-go: x := f() else fallback
 				e := &ast.ElseExpr{X: y[0], Else: p.pos}
 				p.next()
-				e.Fallback = p.parseRhs()
+				if p.tok == token.LBRACE {
+					// x := check f() else { Case(e) => value }
+					e.Lbrace, e.Arms, e.Rbrace = p.parseArms(true, "else")
+				} else {
+					e.Fallback = p.parseRhs()
+				}
 				y[0] = e
 			}
 		}

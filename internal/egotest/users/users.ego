@@ -51,3 +51,26 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		Storage(_)   => http.Error(w, "try again later", http.StatusServiceUnavailable)
 	}
 }
+
+// GetAll loads users four at a time. Get's errors are passed on: they are
+// the same set.
+effect (s *Service) GetAll(ids []UserID) ([]User, UserError) {
+	return each(ids, 4, id => s.Get(id))
+}
+
+// GetEach takes the method itself, which receives each call's ctx.
+effect (s *Service) GetEach(ids []UserID) ([]User, error) {
+	users := check each(ids, 2, s.Get) "get users"
+	return users, nil
+}
+
+// AllExist runs a check that returns only an error on every id.
+effect (s *Service) AllExist(ids []UserID) error {
+	check each(ids, 8, id => s.exists(id))
+	return nil
+}
+
+effect (s *Service) exists(id UserID) error {
+	check s.Get(id)
+	return nil
+}

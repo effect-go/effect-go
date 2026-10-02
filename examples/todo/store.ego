@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -50,7 +52,9 @@ var errBadURL = errors.New("bad database URL")
 
 // Connect opens the pool, waiting for the database, and creates the table.
 effect Connect(cfg Config) (*pgxpool.Pool, error) {
-	db := check retry(connectRetry, open(cfg.DatabaseURL)) "connect to the database"
+	w := cfg.Err ?? io.Discard
+	policy := connectRetry.Tap((n, err, wait) => fmt.Fprintln(w, f"waiting for the database (attempt {n + 1} in {wait.Round(time.Millisecond)})"))
+	db := check retry(policy, open(cfg.DatabaseURL)) "connect to the database"
 	check db.Exec(schema) "create the todos table"
 	return db, nil
 }
@@ -79,19 +83,21 @@ effect (s *PgStore) List() ([]Todo, error) {
 	return pgx.CollectRows(rows, pgx.RowToStructByName[Todo])
 }
 
+// Complete marks a todo done. One already done keeps its first time.
 effect (s *PgStore) Complete(id int64, at time.Time) (bool, error) {
-	tag := check s.db.Exec(`UPDATE todos SET done_at = $2 WHERE id = $1 AND done_at IS NULL`, id, at)
-	if tag.RowsAffected() > 0 {
-		return true, nil
-	}
-	var exists bool
-	check s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM todos WHERE id = $1)`, id).Scan(&exists)
-	return exists, nil
+	return s.found(`UPDATE todos SET done_at = coalesce(done_at, $2) WHERE id = $1 RETURNING true`, id, at)
 }
 
 effect (s *PgStore) Delete(id int64) (bool, error) {
-	tag := check s.db.Exec(`DELETE FROM todos WHERE id = $1`, id)
-	return tag.RowsAffected() > 0, nil
+	return s.found(`DELETE FROM todos WHERE id = $1 RETURNING true`, id)
+}
+
+// found runs a statement that returns a row for the todo it changed, and
+// reports whether there was one.
+effect (s *PgStore) found(sql string, args ...any) (bool, error) {
+	rows := check s.db.Query(sql, args...)
+	found := check pgx.CollectExactlyOneRow(rows, pgx.RowTo[bool]) else { pgx.ErrNoRows => false }
+	return found, nil
 }
 
 effect (s *PgStore) Count(f Filter, now time.Time) (int, error) {

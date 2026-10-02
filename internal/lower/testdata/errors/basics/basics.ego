@@ -61,3 +61,26 @@ func lam() {
 effect withCtx(ctx int) error { // ERROR "effect functions declare ctx themselves"
 	return nil
 }
+
+func loadE() (int, E) { return 0, nil }
+
+func elseArms() (int, error) {
+	a := loadE() else { A(_) => 1 } // ERROR "match on E doesn't handle B"
+	b := load() else { errors.ErrUnsupported => 2 } // ERROR "these arms don't cover every error"
+	c := check load() else 3 // ERROR "else with a fallback handles every error, so there is nothing to check"
+	d := check load() else { nil => 4 } // ERROR "an else arm can't match nil"
+	return a + b + c + d, nil
+}
+
+func one(int) (int, error) { return 0, nil }
+
+func eachNoCtx(ids []int) error {
+	check each(ids, 2, id => one(id)) // ERROR "each needs a ctx"
+	return nil
+}
+
+effect eachShapes(ids []int) error {
+	check each(ids, 2, (a, b) => one(a)) // ERROR "each takes a function of one item"
+	check each(ids, 2) // ERROR "each takes three arguments"
+	return nil
+}

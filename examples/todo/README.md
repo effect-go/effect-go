@@ -9,7 +9,7 @@ export TODO_DATABASE_URL=postgres://localhost:5432/todo?sslmode=disable
 ./todo add buy milk -p high -due 2026-10-10
 ./todo add -p low water plants
 ./todo list            # most urgent first; overdue items are marked
-./todo done 1
+./todo done 1 3        # several at once, four at a time
 ./todo list -all
 ./todo stats           # three counts, queried in parallel
 ```
@@ -32,7 +32,9 @@ Exit codes: 1 for a missing todo, 2 for bad input, 3 when the database fails.
 | Exhaustive `match`: on errors, on enums, on strings, as an expression | `Report`, `CLI.run` (every `Action`), `ParsePriority`, `PgStore.Count` |
 | Enums without data | `Action`, `Priority`, `Filter` |
 | `all`: three queries in parallel | `Service.Stats` |
-| `retry` with a schedule that skips errors that won't go away | `Connect` and `connectRetry` in [store.ego](store.ego) |
+| `retry` with a schedule that skips errors that won't go away, and `Tap` to say it's waiting | `Connect` and `connectRetry` in [store.ego](store.ego) |
+| `each`: one call per ID, four at a time | `CLI.run` for `done` and `rm` |
+| `check … else { arms }`: a sentinel error becomes a value | `PgStore.found` (`pgx.ErrNoRows => false`) |
 | `timeout` around a whole command | `CLI.Run` |
 | Command-line mistakes reported before connecting | `ParseArgs` in [args.ego](args.ego), called by `run` in [main.ego](main.ego) |
 | Lambdas, with types inferred, even through a generic function | `Service.List`, `MemStore`, `connectRetry`, `scope.Run(ctx, s => …)` in [main.ego](main.ego) |

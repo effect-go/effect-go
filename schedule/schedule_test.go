@@ -3,9 +3,13 @@ package schedule
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func delays(s Schedule, n int) []time.Duration {
@@ -71,19 +75,32 @@ var (
 func TestRetrySucceedsAfterFailures(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0
+		var waits []time.Duration
+		policy := Max(Exponential(100*time.Millisecond), Recurs(5)).Tap(func(n int, err error, wait time.Duration) {
+			waits = append(waits, wait)
+		})
+		rec := tracetest.NewSpanRecorder()
+		ctx, span := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)).Tracer("test").Start(t.Context(), "call")
 		start := time.Now()
-		v, err := Retry(t.Context(), Max(Exponential(100*time.Millisecond), Recurs(5)), func(context.Context) (string, error) {
+		v, err := Retry(ctx, policy, func(context.Context) (string, error) {
 			calls++
 			if calls < 3 {
 				return "", errFlaky
 			}
 			return "ok", nil
 		})
+		span.End()
 		if err != nil || v != "ok" || calls != 3 {
 			t.Fatalf("got %q %v after %d calls", v, err, calls)
 		}
 		if took := time.Since(start); took != 300*time.Millisecond {
 			t.Fatalf("waited %v, want 100ms + 200ms", took)
+		}
+		if !slices.Equal(waits, []time.Duration{100 * time.Millisecond, 200 * time.Millisecond}) {
+			t.Fatalf("Tap saw %v", waits)
+		}
+		if ev := rec.Ended()[0].Events(); len(ev) != 2 || ev[1].Name != "retry" {
+			t.Fatalf("span events %v, want one per retry", ev)
 		}
 	})
 }

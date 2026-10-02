@@ -11,6 +11,9 @@ import (
 	"math"
 	"math/rand/v2"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 // Schedule is a retry policy. The zero Schedule never retries.
@@ -111,10 +114,24 @@ func (s Schedule) UpTo(d time.Duration) Schedule {
 	}}
 }
 
+// Tap calls fn before each retry with the number of failures so far, the
+// last error and the delay before the next attempt: for logs and metrics.
+// Put it last, after Jittered or UpTo, so it sees the delay Retry waits.
+func (s Schedule) Tap(fn func(n int, err error, wait time.Duration)) Schedule {
+	return Schedule{func(n int, err error) (time.Duration, bool) {
+		d, ok := s.Next(n, err)
+		if ok {
+			fn(n, err, d)
+		}
+		return d, ok
+	}}
+}
+
 // Retry calls task until it succeeds or the schedule stops, and returns the
 // last error. It stops at once if ctx is cancelled, including while waiting
-// between attempts. It waits with time.Timer, so tests can run it on fake
-// time with testing/synctest.
+// between attempts. Each retry is an event on the span in ctx, with the
+// error and the delay. Retry waits with time.Timer, so tests can run it on
+// fake time with testing/synctest.
 func Retry[T any](ctx context.Context, s Schedule, task func(context.Context) (T, error)) (T, error) {
 	var zero T
 	for n := 1; ; n++ {
@@ -129,6 +146,11 @@ func Retry[T any](ctx context.Context, s Schedule, task func(context.Context) (T
 		if !ok {
 			return zero, err
 		}
+		oteltrace.SpanFromContext(ctx).AddEvent("retry", oteltrace.WithAttributes(
+			attribute.Int("retry.failures", n),
+			attribute.String("retry.error", err.Error()),
+			attribute.String("retry.wait", d.String()),
+		))
 		t := time.NewTimer(d)
 		select {
 		case <-ctx.Done():

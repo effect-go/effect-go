@@ -1,6 +1,7 @@
 package lower
 
 import (
+	"go/token"
 	"go/types"
 	"strings"
 
@@ -76,29 +77,15 @@ type matchPlan struct {
 	blank   bool // has a _ arm
 	hasNil  bool
 	setName string
+	rest    string // statement for errors no arm matches; panic if empty
 }
 
 // plan analyzes a match, reports missing cases, and hoists a tag with side
 // effects into a variable.
 func (g *fileGen) plan(tag ast.Expr, arms []*ast.MatchArm, isExpr bool) *matchPlan {
 	p := &matchPlan{arms: arms}
-	hasCase := false
-	for _, a := range arms {
-		ps := g.patterns(a)
-		p.pats = append(p.pats, ps)
-		for _, pt := range ps {
-			switch pt.kind {
-			case patBlank:
-				p.blank = true
-			case patNil:
-				p.hasNil = true
-			case patCase:
-				hasCase = true
-			case patValue:
-			}
-		}
-	}
 	tt := g.typeOf(tag)
+	hasCase := g.planArms(p)
 	switch {
 	case hasCase && (tt == nil || implementsError(tt)):
 		p.mode = modeErrors
@@ -107,75 +94,8 @@ func (g *fileGen) plan(tag ast.Expr, arms []*ast.MatchArm, isExpr bool) *matchPl
 	default:
 		p.mode = modeValues
 	}
-
-	// Exhaustiveness.
 	if !p.blank && g.r.final {
-		switch p.mode {
-		case modeErrors, modeSum:
-			set, cases := sumCases(tt)
-			if set == nil {
-				for _, ps := range p.pats {
-					for _, pt := range ps {
-						if pt.kind == patCase && set == nil {
-							if ct := g.typeOf(pt.typ); ct != nil {
-								if s := setOf(ct); s != nil {
-									set, cases = sumCases(s)
-								}
-							}
-						}
-					}
-				}
-			}
-			if set != nil {
-				p.setName = set.Obj().Name()
-				covered := map[string]bool{}
-				for _, ps := range p.pats {
-					for _, pt := range ps {
-						if pt.kind == patCase {
-							covered[lastName(pt.typ)] = true
-							if ct := g.typeOf(pt.typ); ct != nil && setOf(ct) != set {
-								g.errorf(pt.typ.Pos(), "%s is not a case of %s", g.text(pt.typ), set.Obj().Name())
-							}
-						}
-					}
-				}
-				var missing []string
-				for _, c := range cases {
-					if !covered[c.Name()] {
-						missing = append(missing, c.Name())
-					}
-				}
-				if len(missing) > 0 {
-					g.errorf(tag.Pos(), "match on %s doesn't handle %s: add an arm for each, or a _ arm", set.Obj().Name(), strings.Join(missing, ", "))
-				}
-			}
-			if isExpr && p.mode == modeErrors && !p.hasNil {
-				g.errorf(tag.Pos(), "a match expression on an error needs a nil arm (or a _ arm)")
-			}
-		case modeValues:
-			consts := enumConsts(tt)
-			if len(consts) == 0 {
-				g.errorf(tag.Pos(), "match on a %s needs a _ arm: only error sets, enums and constants of a named type can be checked for missing cases", typeName(tt))
-				break
-			}
-			covered := map[*types.Const]bool{}
-			for _, ps := range p.pats {
-				for _, pt := range ps {
-					if c, ok := g.objectOf(pt.expr).(*types.Const); ok {
-						covered[c] = true
-					}
-				}
-			}
-			var missing []string
-			for _, c := range consts {
-				if !covered[c] {
-					missing = append(missing, c.Name())
-				}
-			}
-			if len(missing) > 0 {
-				g.errorf(tag.Pos(), "match on %s doesn't handle %s: add an arm for each, or a _ arm", typeName(tt), strings.Join(missing, ", "))
-			}
-		}
+		g.exhaustive(p, tt, tag.Pos(), isExpr)
 	}
 
 	// The tag is evaluated once.
@@ -191,6 +111,97 @@ func (g *fileGen) plan(tag ast.Expr, arms []*ast.MatchArm, isExpr bool) *matchPl
 		p.tag = g.renderStr(tag)
 	}
 	return p
+}
+
+// planArms reads the patterns of p's arms, and reports whether one is a
+// case pattern.
+func (g *fileGen) planArms(p *matchPlan) (hasCase bool) {
+	for _, a := range p.arms {
+		ps := g.patterns(a)
+		p.pats = append(p.pats, ps)
+		for _, pt := range ps {
+			switch pt.kind {
+			case patBlank:
+				p.blank = true
+			case patNil:
+				p.hasNil = true
+			case patCase:
+				hasCase = true
+			case patValue:
+			}
+		}
+	}
+	return hasCase
+}
+
+// exhaustive reports the cases a match without a _ arm doesn't handle.
+func (g *fileGen) exhaustive(p *matchPlan, tt types.Type, at token.Pos, isExpr bool) {
+	switch p.mode {
+	case modeErrors, modeSum:
+		set, cases := sumCases(tt)
+		if set == nil {
+			for _, ps := range p.pats {
+				for _, pt := range ps {
+					if pt.kind == patCase && set == nil {
+						if ct := g.typeOf(pt.typ); ct != nil {
+							if s := setOf(ct); s != nil {
+								set, cases = sumCases(s)
+							}
+						}
+					}
+				}
+			}
+		}
+		if set != nil {
+			p.setName = set.Obj().Name()
+			covered := map[string]bool{}
+			for _, ps := range p.pats {
+				for _, pt := range ps {
+					if pt.kind == patCase {
+						covered[lastName(pt.typ)] = true
+						if ct := g.typeOf(pt.typ); ct != nil && setOf(ct) != set {
+							g.errorf(pt.typ.Pos(), "%s is not a case of %s", g.text(pt.typ), set.Obj().Name())
+						}
+					}
+				}
+			}
+			var missing []string
+			for _, c := range cases {
+				if !covered[c.Name()] {
+					missing = append(missing, c.Name())
+				}
+			}
+			if len(missing) > 0 {
+				g.errorf(at, "match on %s doesn't handle %s: add an arm for each, or a _ arm", set.Obj().Name(), strings.Join(missing, ", "))
+			}
+		}
+		if isExpr && p.mode == modeErrors && !p.hasNil {
+			g.errorf(at, "a match expression on an error needs a nil arm (or a _ arm)")
+		}
+	case modeValues:
+		consts := enumConsts(tt)
+		if len(consts) == 0 {
+			g.errorf(at, "match on a %s needs a _ arm: only error sets, enums and constants of a named type can be checked for missing cases", typeName(tt))
+			break
+		}
+		covered := map[*types.Const]bool{}
+		for _, ps := range p.pats {
+			for _, pt := range ps {
+				if c, ok := g.objectOf(pt.expr).(*types.Const); ok {
+					covered[c] = true
+				}
+			}
+		}
+		var missing []string
+		for _, c := range consts {
+			if !covered[c] {
+				missing = append(missing, c.Name())
+			}
+		}
+		if len(missing) > 0 {
+			g.errorf(at, "match on %s doesn't handle %s: add an arm for each, or a _ arm", typeName(tt), strings.Join(missing, ", "))
+		}
+	}
 }
 
 func typeName(t types.Type) string {
@@ -305,8 +316,15 @@ func (g *fileGen) chain(p *matchPlan, isExpr bool, body func(*ast.MatchArm)) {
 					g.w.str("); ok")
 				}
 			case patValue:
-				g.w.str(p.tag + " == ")
-				g.node(pt.expr)
+				if p.mode == modeErrors {
+					// A sentinel error such as io.EOF, wrapped or not.
+					g.w.str(errors + ".Is(" + p.tag + ", ")
+					g.node(pt.expr)
+					g.w.str(")")
+				} else {
+					g.w.str(p.tag + " == ")
+					g.node(pt.expr)
+				}
 			case patBlank: // handled above
 			}
 			g.w.str(" {\n")
@@ -322,6 +340,8 @@ func (g *fileGen) chain(p *matchPlan, isExpr bool, body func(*ast.MatchArm)) {
 	case blankArm != nil:
 		g.w.str("} else {\n")
 		body(blankArm)
+	case p.rest != "":
+		g.w.str("} else {\n" + p.rest + "\n")
 	case p.hasNil || isExpr:
 		g.w.str("} else {\npanic(" + p.tag + ")\n")
 	default:
@@ -392,6 +412,11 @@ func (g *fileGen) draftMatch(tag ast.Expr, arms []*ast.MatchArm, body func(*ast.
 	g.w.str("_egoUse(")
 	g.node(tag)
 	g.w.str(")\n")
+	g.draftArms(t, arms, body)
+}
+
+// draftArms renders arms matching the value t for a draft.
+func (g *fileGen) draftArms(t string, arms []*ast.MatchArm, body func(*ast.MatchArm)) {
 	for _, a := range arms {
 		for _, pt := range g.patterns(a) {
 			switch pt.kind {

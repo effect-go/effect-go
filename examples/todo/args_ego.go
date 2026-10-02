@@ -16,8 +16,8 @@ import (
 const usage = `usage:
   todo add TITLE [-p low|medium|high] [-due YYYY-MM-DD]
   todo list [-all]
-  todo done ID
-  todo rm ID
+  todo done ID...
+  todo rm ID...
   todo stats`
 
 // An Action is what a command does. Matches on it must handle every one.
@@ -57,7 +57,7 @@ type Command struct {
 	Priority Priority
 	Due      *time.Time
 	All      bool
-	ID       int64
+	IDs      []int64
 }
 
 // ParseArgs parses the command line.
@@ -118,25 +118,28 @@ func ParseArgs(args []string) (Command, error) {
 			return Command{}, Usage{Cause: err}
 		}
 //line args.ego:69
-		if len(words) != 1 {
-			return Command{}, Usage{Cause: errors.New(fmt.Sprintf("%s takes one ID", name))}
+		if len(words) == 0 {
+			return Command{}, Usage{Cause: errors.New(fmt.Sprintf("%s takes the IDs of todos", name))}
 		}
-		v3, err := strconv.ParseInt(words[0], 10, 64)
-		if err != nil {
-			return Command{}, Invalid{Reason: fmt.Sprintf("bad id %q", words[0])}
+		for _, w := range words {
+			id, err := strconv.ParseInt(w, 10, 64)
+			if err != nil {
+				return Command{}, Invalid{Reason: fmt.Sprintf("bad id %q", w)}
+			}
+//line args.ego:74
+			cmd.IDs = append(cmd.IDs, id)
 		}
-		cmd.ID = v3
 
 	case "stats":
 
-//line args.ego:75
+//line args.ego:78
 		cmd.Action = ShowStats
 		if err := fs.Parse(flags); err != nil {
 			return Command{}, Usage{Cause: err}
 		}
 
 	default:
-//line args.ego:78
+//line args.ego:81
 		return Command{}, Usage{Cause: errors.New(fmt.Sprintf("unknown command %q", name))}
 	}
 	return cmd, nil
@@ -167,32 +170,32 @@ func Report(w io.Writer, err error) int {
 		return 0
 	} else if e, ok := errors.AsType[NotFound](err); ok {
 
-//line args.ego:107
+//line args.ego:110
 		fmt.Fprintln(w, e)
 		return 1
 
 	} else if e, ok := errors.AsType[Invalid](err); ok {
 
-//line args.ego:111
+//line args.ego:114
 		fmt.Fprintln(w, e)
 		return 2
 
 	} else if e, ok := errors.AsType[Usage](err); ok {
 
-//line args.ego:115
+//line args.ego:118
 		fmt.Fprintln(w, e)
 		fmt.Fprintln(w, usage)
 		return 2
 
 	} else if e, ok := errors.AsType[Storage](err); ok {
 
-//line args.ego:120
+//line args.ego:123
 		fmt.Fprintln(w, e)
 		return 3
 
 	} else {
 
-//line args.ego:124
+//line args.ego:127
 		fmt.Fprintln(w, err) // a timeout
 		return 1
 

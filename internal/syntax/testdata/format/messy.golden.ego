@@ -11,6 +11,11 @@ effect (s *S) Get(id int) (int, E) {
 		fail B{}
 	}
 	w := s.load(id) else 0
+	p := check s.port(id) as A else {
+		B(_) => 3000
+		A(e) => e.X
+	}
+	q := s.port(id) else { _ => 0 }
 	n := must strconv.Atoi("1")
 	r := match v {
 		1 => "one"

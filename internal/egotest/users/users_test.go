@@ -59,3 +59,20 @@ func TestStorageErrorKeepsItsCause(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestEach(t *testing.T) {
+	s := &Service{Repo: repo{"ada": {ID: "ada", Name: "Ada"}, "alan": {ID: "alan", Name: "Alan"}}, Now: func() time.Time { return now }}
+	us, err := s.GetAll(t.Context(), []UserID{"ada", "alan"})
+	if err != nil || len(us) != 2 || us[1].Name != "Alan" {
+		t.Fatal(us, err)
+	}
+	if _, err := s.GetAll(t.Context(), []UserID{"ada", "bob"}); !errors.As(err, new(NotFound)) {
+		t.Fatalf("GetAll: %v", err)
+	}
+	if _, err := s.GetEach(t.Context(), []UserID{"bob"}); err == nil || err.Error() != "get users: not found (ID bob)" {
+		t.Fatalf("GetEach: %v", err)
+	}
+	if s.AllExist(t.Context(), []UserID{"ada", "alan"}) != nil || s.AllExist(t.Context(), []UserID{"zed"}) == nil {
+		t.Fatal("AllExist")
+	}
+}

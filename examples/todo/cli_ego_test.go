@@ -126,7 +126,12 @@ func commands(s *session) {
 	expect("frobnicate", 2, `unknown command "frobnicate"`, "usage:")
 	expect("", 2, "no command", "usage:")
 	expect("list -x", 2, "flag provided but not defined: -x", "usage:")
-	expect("done 1 2", 2, "done takes one ID")
+	expect("done", 2, "done takes the IDs of todos")
+	expect("add a", 0, "added #4")
+	expect("add b", 0, "added #5")
+	expect("done 4 5", 0)
+	expect("stats", 0, "1 open, 3 done, 0 overdue")
+	expect("rm 4 5 99", 1, "no todo #99")
 	expect("list -all", 0)
 }
 
@@ -136,9 +141,16 @@ func TestNoDatabase(t *testing.T) {
 		"postgres://nobody@127.0.0.1:1/todo?connect_timeout=1": "connect to the database",
 		"not a url": "bad database URL",
 	} {
-		_, err := scope.Run(t.Context(), func(s *scope.Scope) (*CLI, error) { return BuildCLI(s.Context(), s, Config{DatabaseURL: url}) })
+		var log bytes.Buffer
+		_, err := scope.Run(t.Context(), func(s *scope.Scope) (*CLI, error) {
+			return BuildCLI(s.Context(), s, Config{DatabaseURL: url, Err: &log})
+		})
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Error(fmt.Sprintf("%s: err %v, want %q", url, err, want))
+		}
+		// Only a database that may still be starting is waited for.
+		if waited := strings.Contains(log.String(), "waiting for the database"); waited != (url != "not a url") {
+			t.Error(fmt.Sprintf("%s: log %q", url, log.String()))
 		}
 	}
 }

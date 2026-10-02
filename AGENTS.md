@@ -11,6 +11,7 @@
 | `x := check f(a) as Storage` | return the error as the case `Storage{Cause: err}` of this function's error set |
 | `x := check f(a) as Invalid{Reason: "bad {a}"}` | the same, with fields of your own; the cause still goes in an error field if the case has one |
 | `x := f(a) else fallback` | on error, use `fallback` |
+| `x := check f(a) else { NotFound(_) => 0; io.EOF => 0 }` | the arms give the value for the errors they match (cases as in `match`, sentinels with `errors.Is`); other errors are returned as by `check`. Without `check` the arms must cover every error |
 | `x := must f(a)` | on error, panic |
 | `check err` | return `err` if it isn't nil (for an error value you already have) |
 | `fail NotFound{ID: id}` / `fail "bad {id}"` | return this error, with zero values for the other results |
@@ -52,8 +53,9 @@ effect (s *Shop) Checkout(id CartID) (Receipt, error) {   // instead of func
 - An `effect` function gets a hidden first parameter `ctx context.Context` and an OpenTelemetry span. Callers in plain Go pass `ctx` explicitly; calls inside effect functions omit it: any call whose callee takes a `context.Context` first and leaves it out gets `ctx`. `ctx` is still in scope if you need it. Don't declare a `ctx` parameter yourself.
 - Interface methods: `effect Get(id ID) (User, error)` declares `Get(ctx context.Context, id ID)`. From plain Go: `u, err := svc.Get(r.Context(), id)`.
 - To bound several steps with `timeout`, put them in their own effect function: `return timeout(2*time.Second, load(d, id))`.
+- `each(items, 8, x => s.load(x))` calls `s.load` on every item, 8 at a time, and returns the results in order; it fails like `all`. The function can be a method taking `(ctx, item)`: `each(ids, 8, s.users.Get)`.
 - `all(a(), b())` runs calls in parallel (up to 4, any types; more must share a type) and returns all values; the first failure cancels the others, and the error joins every real failure. `race(a(), b())`: first success wins, losers are cancelled; if all fail, the error joins them all. `retry(policy, f())` with a `schedule.Schedule`. `timeout(d, f())` fails with an error matching `context.DeadlineExceeded`. Arguments are calls, run lazily with their own `ctx`; they nest: `all(a(), retry(p, b()))`. They need an effect function (or a `ctx` in scope). They return `(values…, error)`: use `check` (a label goes after the closing parenthesis), `else`, or `return timeout(…)`. Neither `all` nor `race` adds a label. A panic in a branch re-panics in the caller.
-- Policies: `schedule.Exponential(100*time.Millisecond)` waits 100ms, 200ms, 400ms…; `schedule.Recurs(3)` allows at most 3 retries; `schedule.Max(a, b)` continues while both do, with the longer delay (so `Max(Exponential(d), Recurs(3))` is "back off, 3 times"); `.Jittered()` spreads delays ±20% (all of these are `Schedule` methods, usable anywhere, including a package-level `var`); `.While(func(error) bool)` stops on errors it rejects; `.UpTo(d)` caps each delay.
+- Policies: `schedule.Exponential(100*time.Millisecond)` waits 100ms, 200ms, 400ms…; `schedule.Recurs(3)` allows at most 3 retries; `schedule.Max(a, b)` continues while both do, with the longer delay (so `Max(Exponential(d), Recurs(3))` is "back off, 3 times"); `.Jittered()` spreads delays ±20% (all of these are `Schedule` methods, usable anywhere, including a package-level `var`); `.While(func(error) bool)` stops on errors it rejects; `.UpTo(d)` caps each delay; `.Tap((n, err, wait) => log(…))` runs before each retry (put it last). Every retry is also an event on the current span.
 
 ## Shorthand
 
@@ -81,4 +83,4 @@ Providers are ordinary constructors returning `T`, `(T, error)` or `(T, cleanup,
 
 ## Runtime from plain Go
 
-`scope.All2..All4`, `scope.Race`, `scope.Timeout`, `schedule.Retry`, `scope.Run`/`Fork`/`Acquire`, `trace.Start`/`trace.End(span, &err)`: the dialect lowers to exactly these.
+`scope.All2..All4`, `scope.Each`, `scope.Race`, `scope.Timeout`, `schedule.Retry`, `scope.Run`/`Fork`/`Acquire`, `trace.Start`/`trace.End(span, &err)`: the dialect lowers to exactly these.

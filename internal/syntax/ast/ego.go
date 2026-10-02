@@ -18,11 +18,16 @@ type (
 		Case  Expr      // error set case after "as": a type, or a *CompositeLit; or nil
 	}
 
-	// An ElseExpr is "X else Fallback": on failure, use Fallback.
+	// An ElseExpr is "X else Fallback": on failure, use Fallback. Or
+	// "X else { arms }": the arms match errors as in a match, and give the
+	// value for the errors they match. X may be a CheckExpr.
 	ElseExpr struct {
 		X        Expr
 		Else     token.Pos
-		Fallback Expr
+		Fallback Expr // nil when there are arms
+		Lbrace   token.Pos
+		Arms     []*MatchArm
+		Rbrace   token.Pos
 	}
 
 	// An IfExpr is "if Cond { Then } else { Else }" used as a value. Else
@@ -143,7 +148,12 @@ func (x *CheckExpr) End() token.Pos {
 	return x.X.End()
 }
 func (x *ElseExpr) Pos() token.Pos { return x.X.Pos() }
-func (x *ElseExpr) End() token.Pos { return x.Fallback.End() }
+func (x *ElseExpr) End() token.Pos {
+	if x.Fallback == nil {
+		return x.Rbrace + 1
+	}
+	return x.Fallback.End()
+}
 func (x *IfExpr) Pos() token.Pos   { return x.If }
 func (x *IfExpr) End() token.Pos {
 	if x.ElseL.IsValid() {
@@ -196,7 +206,10 @@ func walkEgo(v Visitor, n Node) bool {
 		}
 	case *ElseExpr:
 		Walk(v, n.X)
-		Walk(v, n.Fallback)
+		if n.Fallback != nil {
+			Walk(v, n.Fallback)
+		}
+		walkArms(v, n.Arms)
 	case *IfExpr:
 		Walk(v, n.Cond)
 		Walk(v, n.Then)

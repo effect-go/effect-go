@@ -65,6 +65,10 @@ The compiler is tested in three ways:
   - **String literals are allowed inside f-string interpolations:** `f"until {t.Format("2006-01-02")}"`. The agent test hit this.
   - **The runtime packages are imported automatically** (`scope`, `schedule`, `trace`, `layer`). Also from the agent test: without the import, a lambda passed to `schedule.While` couldn't be typed.
   - **Dialect test packages live outside `testdata`,** because gopls doesn't report diagnostics for packages under `testdata`.
+- **After the milestones, from writing the todo example and comparing with Effect v4:**
+  - `each(items, limit, x => call(x))` and `scope.Each`: Effect's `forEach` with `concurrency`.
+  - `check f() else { Case(_) => value }`: Effect's `catchTag`, written with `else` and `match` arms rather than a new keyword (`catch` would read as exceptions).
+  - `Schedule.Tap` and a span event per retry: Effect's `Schedule.tap`.
 - **Tests can be written in the dialect.** `x_test.ego` files, both in-package and external (`package x_test`), are type-checked the way `go test` builds them. `ego test` regenerates, then runs `go test`.
 - **A statement-level `match` panics on an error that is outside the set,** unless it has a `_` arm. An `else if err != nil { panic(err) }` makes the "closed set" promise checkable at run time.
 

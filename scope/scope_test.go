@@ -66,6 +66,51 @@ func TestAllCancelsSiblingsOnFailure(t *testing.T) {
 	})
 }
 
+func TestEachKeepsOrderAndLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var running, most atomic.Int32
+		start := time.Now()
+		got, err := Each(t.Context(), []int{1, 2, 3, 4, 5, 6}, 2, func(ctx context.Context, n int) (int, error) {
+			most.Store(max(most.Load(), running.Add(1)))
+			defer running.Add(-1)
+			return sleep(time.Duration(n)*10*time.Millisecond, n*n, nil)(ctx)
+		})
+		if err != nil || len(got) != 6 || got[0] != 1 || got[5] != 36 {
+			t.Fatalf("got %v %v", got, err)
+		}
+		if most.Load() != 2 {
+			t.Fatalf("%d calls at once, want 2", most.Load())
+		}
+		if took := time.Since(start); took != 120*time.Millisecond {
+			t.Fatalf("took %v, want 120ms: two workers, each taking the next item", took)
+		}
+		if got, err := Each(t.Context(), []int(nil), 4, func(context.Context, int) (int, error) { return 0, errA }); got == nil || len(got) != 0 || err != nil {
+			t.Fatalf("no items: %v %v", got, err)
+		}
+	})
+}
+
+func TestEachStopsAtTheFirstFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		_, err := Each(t.Context(), []int{1, 2, 3, 4, 5}, 2, func(ctx context.Context, n int) (int, error) {
+			calls.Add(1)
+			if n == 1 {
+				return sleep(10*time.Millisecond, 0, errA)(ctx)
+			}
+			return sleep(time.Second, n, nil)(ctx)
+		})
+		if err != errA || calls.Load() != 2 {
+			t.Fatalf("err %v after %d calls, want errA after 2: the others never start", err, calls.Load())
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := Each(ctx, []int{1}, 1, func(ctx context.Context, n int) (int, error) { return n, nil }); !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled parent: %v", err)
+		}
+	})
+}
+
 func TestAllKeepsEveryRealFailure(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		_, _, err := All2(t.Context(), sleep(10*time.Millisecond, 0, errA), sleep(10*time.Millisecond, 0, errB))

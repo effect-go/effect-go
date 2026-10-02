@@ -30,7 +30,11 @@ func (g *fileGen) lowerStmt(s ast.Stmt) {
 				g.check(s.Lhs, s.Tok, x)
 				return
 			case *ast.ElseExpr:
-				g.elseStmt(s.Lhs, s.Tok, x)
+				if x.Arms != nil {
+					g.elseArms(s.Lhs, s.Tok, x)
+				} else {
+					g.elseStmt(s.Lhs, s.Tok, x)
+				}
 				return
 			case *ast.IfExpr, *ast.MatchExpr, *ast.CoalesceExpr, *ast.OptSelectorExpr:
 				if g.r.final && len(s.Lhs) == 1 && (s.Tok == token.DEFINE || s.Tok == token.ASSIGN) {
@@ -359,6 +363,9 @@ func (g *fileGen) passesSet(x ast.Expr, set *ast.SumDecl) bool {
 		return true
 	case "retry", "timeout":
 		return len(c.Args) == 2 && g.passesSet(c.Args[1], set)
+	case "each":
+		l := eachLambda(c)
+		return l != nil && g.passesSet(l.Body.(ast.Expr), set)
 	}
 	var name string
 	switch f := c.Fun.(type) {
@@ -380,6 +387,10 @@ func (g *fileGen) passesSet(x ast.Expr, set *ast.SumDecl) bool {
 
 // elseStmt lowers x := f() else fallback.
 func (g *fileGen) elseStmt(lhs []ast.Expr, tok token.Token, e *ast.ElseExpr) {
+	if c, ok := e.X.(*ast.CheckExpr); ok {
+		g.errorf(c.Pos(), "else with a fallback handles every error, so there is nothing to %s: drop it, or give else arms", map[bool]string{false: "check", true: "must"}[c.Must])
+		e = &ast.ElseExpr{X: c.X, Else: e.Else, Fallback: e.Fallback}
+	}
 	if !g.r.final {
 		g.lhs(lhs)
 		g.w.str(" " + tok.String() + " _egoCo(_egoV(")
@@ -419,6 +430,88 @@ func (g *fileGen) elseStmt(lhs []ast.Expr, tok token.Token, e *ast.ElseExpr) {
 	g.w.str("; err != nil {\n")
 	g.lowerInto(target, false, t, e.Fallback)
 	g.w.str("} else {\n" + target + " = " + v + "\n}")
+}
+
+// elseArms lowers x := check f() else { Case(e) => value; … }. The arms
+// give the value for the errors they match; check returns the others, must
+// panics on them, and with neither the arms must handle every error.
+func (g *fileGen) elseArms(lhs []ast.Expr, tok token.Token, e *ast.ElseExpr) {
+	c, _ := e.X.(*ast.CheckExpr)
+	call := e.X
+	if c != nil {
+		call = c.X
+	}
+	if len(lhs) != 1 {
+		g.errorf(e.Pos(), "else needs a single variable")
+		return
+	}
+	for _, a := range e.Arms {
+		if _, ok := a.Body.(ast.Expr); !ok {
+			g.errorf(a.Body.Pos(), "an else arm gives a value: write one expression")
+			return
+		}
+	}
+	if !g.r.final {
+		if c != nil {
+			g.draftCheck(lhs, tok, c)
+		} else {
+			g.lhs(lhs)
+			g.w.str(", _ " + tok.String() + " ")
+			g.value(call)
+		}
+		g.w.str("\n")
+		target := g.renderStr(lhs[0])
+		g.draftArms("error(nil)", e.Arms, func(a *ast.MatchArm) {
+			g.w.str(target + " = ")
+			g.node(a.Body)
+			g.w.str("\n")
+		})
+		return
+	}
+	callW := &writer{}
+	saved := g.w
+	g.w = callW
+	vals, hasErr, known := g.value(call)
+	g.w = saved
+	if known && (!hasErr || len(vals) != 1) {
+		g.errorf(call.Pos(), "else needs a call returning (value, error)")
+	}
+	var t types.Type
+	if len(vals) == 1 {
+		t = vals[0]
+	}
+	p := &matchPlan{arms: e.Arms, mode: modeErrors, tag: "err", rest: "panic(err)"}
+	g.planArms(p)
+	if p.hasNil {
+		g.errorf(e.Lbrace, "an else arm can't match nil: else only sees errors")
+	}
+	switch {
+	case c != nil && !c.Must:
+		if g.fn == nil || !g.fn.hasErr {
+			g.errorf(c.Pos(), "check needs a function that returns an error: use must, or else")
+		}
+		p.rest = g.ret(g.wrap(c, "err"))
+	case c == nil && !p.blank:
+		g.exhaustive(p, nil, e.Lbrace, false)
+		if p.setName == "" {
+			g.errorf(e.Lbrace, "these arms don't cover every error: add a _ arm, or write check f() else { … } to return the others")
+		}
+	}
+
+	// x, err := f(); if err != nil { arms }, through a temporary for =.
+	target := g.renderStr(lhs[0])
+	v := target
+	if tok != token.DEFINE {
+		v = g.temp("v")
+	}
+	g.w.str(v + ", err := ")
+	g.w.add(callW)
+	g.w.str("\nif err != nil {\n")
+	g.chain(p, false, func(a *ast.MatchArm) { g.armBody(a, v, t) })
+	g.w.str("}")
+	if v != target {
+		g.w.str("\n" + target + " " + tok.String() + " " + v)
+	}
 }
 
 // fail lowers fail X.

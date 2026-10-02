@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"time"
 
@@ -19,7 +20,7 @@ import (
 // Store keeps the todos. Its methods are effect methods: they take a ctx,
 // which callers in effect functions pass without writing it.
 //
-//line store.ego:11
+//line store.ego:13
 type Store interface {
 	Insert(ctx context.Context, t Todo) (Todo, error)
 	List(ctx context.Context) ([]Todo, error)
@@ -51,7 +52,7 @@ func (v Filter) String() string {
 
 // PgStore is the PostgreSQL store.
 //
-//line store.ego:28
+//line store.ego:30
 type PgStore struct{ db *pgxpool.Pool }
 
 func NewPgStore(db *pgxpool.Pool) *PgStore { return &PgStore{db} }
@@ -78,23 +79,31 @@ var errBadURL = errors.New("bad database URL")
 func Connect(ctx context.Context, cfg Config) (_ *pgxpool.Pool, err error) {
 	ctx, span := trace.Start(ctx, "main.Connect")
 	defer trace.End(span, &err)
-//line store.ego:53
-	db, err := schedule.Retry(ctx, connectRetry, func(ctx context.Context) (*pgxpool.Pool, error) { return open(ctx, cfg.DatabaseURL) })
+//line store.ego:55
+	w := cfg.Err
+	if w == nil {
+		w = io.Discard
+	}
+//line store.ego:56
+	policy := connectRetry.Tap(func(n int, err error, wait time.Duration) {
+		fmt.Fprintln(w, fmt.Sprintf("waiting for the database (attempt %d in %v)", n+1, wait.Round(time.Millisecond)))
+	})
+	db, err := schedule.Retry(ctx, policy, func(ctx context.Context) (*pgxpool.Pool, error) { return open(ctx, cfg.DatabaseURL) })
 	if err != nil {
 		return nil, fmt.Errorf("connect to the database: %w", err)
 	}
-//line store.ego:54
+//line store.ego:58
 	if _, err := db.Exec(ctx, schema); err != nil {
 		return nil, fmt.Errorf("create the todos table: %w", err)
 	}
-//line store.ego:55
+//line store.ego:59
 	return db, nil
 }
 
 func open(ctx context.Context, url string) (_ *pgxpool.Pool, err error) {
 	ctx, span := trace.Start(ctx, "main.open")
 	defer trace.End(span, &err)
-//line store.ego:59
+//line store.ego:63
 	pc, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, errors.Join(errBadURL, err)
@@ -103,7 +112,7 @@ func open(ctx context.Context, url string) (_ *pgxpool.Pool, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("pgxpool.NewWithConfig: %w", err)
 	}
-//line store.ego:64
+//line store.ego:68
 	if err := db.Ping(ctx); err != nil {
 		db.Close()
 		return nil, err
@@ -114,63 +123,70 @@ func open(ctx context.Context, url string) (_ *pgxpool.Pool, err error) {
 func (s *PgStore) Insert(ctx context.Context, t Todo) (_ Todo, err error) {
 	ctx, span := trace.Start(ctx, "main.PgStore.Insert")
 	defer trace.End(span, &err)
-//line store.ego:72
+//line store.ego:76
 	row := s.db.QueryRow(ctx, `INSERT INTO todos (title, priority, due) VALUES ($1, $2, $3) RETURNING id, created_at`, t.Title, t.Priority, t.Due)
 	if err := row.Scan(&t.ID, &t.CreatedAt); err != nil {
 		return Todo{}, fmt.Errorf("row.Scan: %w", err)
 	}
-//line store.ego:74
+//line store.ego:78
 	return t, nil
 }
 
 func (s *PgStore) List(ctx context.Context) (_ []Todo, err error) {
 	ctx, span := trace.Start(ctx, "main.PgStore.List")
 	defer trace.End(span, &err)
-//line store.ego:78
+//line store.ego:82
 	rows, err := s.db.Query(ctx, `SELECT id, title, priority, due, done_at, created_at FROM todos`)
 	if err != nil {
 		return nil, fmt.Errorf("db.Query: %w", err)
 	}
-//line store.ego:79
+//line store.ego:83
 	return pgx.CollectRows(rows, pgx.RowToStructByName[Todo])
 }
 
+// Complete marks a todo done. One already done keeps its first time.
 func (s *PgStore) Complete(ctx context.Context, id int64, at time.Time) (_ bool, err error) {
 	ctx, span := trace.Start(ctx, "main.PgStore.Complete")
 	defer trace.End(span, &err)
-//line store.ego:83
-	tag, err := s.db.Exec(ctx, `UPDATE todos SET done_at = $2 WHERE id = $1 AND done_at IS NULL`, id, at)
-	if err != nil {
-		return false, fmt.Errorf("db.Exec: %w", err)
-	}
-//line store.ego:84
-	if tag.RowsAffected() > 0 {
-		return true, nil
-	}
-	var exists bool
-	if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM todos WHERE id = $1)`, id).Scan(&exists); err != nil {
-		return false, fmt.Errorf("QueryRow.Scan: %w", err)
-	}
-//line store.ego:89
-	return exists, nil
+	return s.found(ctx, `UPDATE todos SET done_at = coalesce(done_at, $2) WHERE id = $1 RETURNING true`, id, at)
 }
 
+//line store.ego:91
 func (s *PgStore) Delete(ctx context.Context, id int64) (_ bool, err error) {
 	ctx, span := trace.Start(ctx, "main.PgStore.Delete")
 	defer trace.End(span, &err)
-//line store.ego:93
-	tag, err := s.db.Exec(ctx, `DELETE FROM todos WHERE id = $1`, id)
+	return s.found(ctx, `DELETE FROM todos WHERE id = $1 RETURNING true`, id)
+}
+
+// found runs a statement that returns a row for the todo it changed, and
+// reports whether there was one.
+//
+//line store.ego:95
+func (s *PgStore) found(ctx context.Context, sql string, args ...any) (_ bool, err error) {
+	ctx, span := trace.Start(ctx, "main.PgStore.found")
+	defer trace.End(span, &err)
+//line store.ego:98
+	rows, err := s.db.Query(ctx, sql, args...)
 	if err != nil {
-		return false, fmt.Errorf("db.Exec: %w", err)
+		return false, fmt.Errorf("db.Query: %w", err)
 	}
-//line store.ego:94
-	return tag.RowsAffected() > 0, nil
+//line store.ego:99
+	found, err := pgx.CollectExactlyOneRow(rows, pgx.RowTo[bool])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			found = false
+		} else {
+			return false, fmt.Errorf("pgx.CollectExactlyOneRow: %w", err)
+		}
+	}
+//line store.ego:100
+	return found, nil
 }
 
 func (s *PgStore) Count(ctx context.Context, f Filter, now time.Time) (_ int, err error) {
 	ctx, span := trace.Start(ctx, "main.PgStore.Count")
 	defer trace.End(span, &err)
-//line store.ego:98
+//line store.ego:104
 	var where string
 	switch f {
 	case Open:
@@ -182,7 +198,7 @@ func (s *PgStore) Count(ctx context.Context, f Filter, now time.Time) (_ int, er
 	default:
 		panic(f)
 	}
-//line store.ego:103
+//line store.ego:109
 	var n int
 	var args []any
 	if f == Overdue {
@@ -190,10 +206,10 @@ func (s *PgStore) Count(ctx context.Context, f Filter, now time.Time) (_ int, er
 	} else {
 		args = nil
 	}
-//line store.ego:105
+//line store.ego:111
 	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM todos WHERE `+where, args...).Scan(&n); err != nil {
 		return 0, fmt.Errorf("QueryRow.Scan: %w", err)
 	}
-//line store.ego:106
+//line store.ego:112
 	return n, nil
 }

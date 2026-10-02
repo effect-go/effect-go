@@ -7,6 +7,7 @@ func prelude(pkg string) []byte {
 	return []byte("package " + pkg + `
 
 import (
+	_ego_context "context"
 	_ego_time "time"
 	_ego_schedule "` + schedulePath + `"
 )
@@ -24,5 +25,7 @@ func _egoOne[T any](...T) (v T)                                      { return }
 func _egoAs[T any](any) (v T)                                        { return }
 func _egoCo[T any](T, T) (v T)                                       { return }
 func _egoUse(...any)                                                 {}
+func _egoEach[R any](int, func() R) (v []R, err error)               { return }
+func _egoEachF[T, R any]([]T, int, func(_ego_context.Context, T) (R, error)) (v []R, err error) { return }
 `)
 }

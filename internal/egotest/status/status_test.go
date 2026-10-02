@@ -3,6 +3,7 @@ package status
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"testing"
 )
@@ -37,6 +38,21 @@ func TestStatus(t *testing.T) {
 	}
 	if _, err := Remote("x"); !errors.Is(err, strconv.ErrSyntax) {
 		t.Fatalf("Remote: %v", err)
+	}
+	if r, err := Settle(0); r != "skipped: nothing to charge" || err != nil {
+		t.Fatal(r, err)
+	}
+	if _, err := Settle(500); err == nil || err.Error() != "settle 500: gateway: timeout" {
+		t.Fatalf("Settle: %v", err)
+	}
+	if State(0) != "declined" || State(500) != "retry later" || State(1) != "ok" {
+		t.Fatal(State(0), State(500), State(1))
+	}
+	if n, err := Clamp("99999999999999999999"); n != math.MaxInt || err != nil {
+		t.Fatal(n, err)
+	}
+	if _, err := Clamp("x"); !errors.Is(err, strconv.ErrSyntax) {
+		t.Fatalf("Clamp: %v", err)
 	}
 	defer func() {
 		if recover() == nil {

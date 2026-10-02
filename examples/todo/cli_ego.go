@@ -60,12 +60,12 @@ func (c *CLI) run(ctx context.Context, cmd Command) (err error) {
 		}
 	case Complete:
 //line cli.ego:37
-		if err := c.svc.Done(ctx, cmd.ID); err != nil {
+		if _, err := scope.Each(ctx, cmd.IDs, 4, func(ctx context.Context, id int64) (struct{}, error) { return struct{}{}, c.svc.Done(ctx, id) }); err != nil {
 			return fmt.Errorf("svc.Done: %w", err)
 		}
 	case Remove:
 //line cli.ego:38
-		if err := c.svc.Remove(ctx, cmd.ID); err != nil {
+		if _, err := scope.Each(ctx, cmd.IDs, 4, func(ctx context.Context, id int64) (struct{}, error) { return struct{}{}, c.svc.Remove(ctx, id) }); err != nil {
 			return fmt.Errorf("svc.Remove: %w", err)
 		}
 	case ShowStats:

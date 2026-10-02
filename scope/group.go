@@ -6,6 +6,7 @@ import (
 	"runtime/debug"
 	"runtime/pprof"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -105,6 +106,38 @@ func All[T any](ctx context.Context, tasks ...Task[T]) ([]T, error) {
 	g := newGroup(ctx)
 	for i, t := range tasks {
 		g.spawn(func(ctx context.Context) (err error) { res[i], err = t(ctx); return })
+	}
+	if err := g.wait(); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// Each calls f on every item, at most limit at a time, and returns the
+// results in the order of items. Failures work as in All: the first one
+// cancels the calls in progress and the items not yet started, and the
+// error holds every real failure. A limit below 1 means one at a time.
+func Each[T, R any](ctx context.Context, items []T, limit int, f func(context.Context, T) (R, error)) ([]R, error) {
+	res := make([]R, len(items))
+	var next atomic.Int64
+	g := newGroup(ctx)
+	for range min(max(limit, 1), len(items)) {
+		g.spawn(func(ctx context.Context) error {
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= len(items) {
+					return nil
+				}
+				if ctx.Err() != nil {
+					return context.Cause(ctx)
+				}
+				v, err := f(ctx, items[i])
+				if err != nil {
+					return err
+				}
+				res[i] = v
+			}
+		})
 	}
 	if err := g.wait(); err != nil {
 		return nil, err

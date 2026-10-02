@@ -5,13 +5,14 @@ package status
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 )
 
 // PayError is the error set Declined | Expired | Gateway.
 //
-//line status.ego:9
+//line status.ego:10
 type PayError interface {
 	error
 	isPayError()
@@ -37,7 +38,7 @@ func (e Gateway) Error() string { return fmt.Sprintf("gateway: %v", e.Cause) }
 
 func (e Gateway) Unwrap() error { return e.Cause }
 
-//line status.ego:15
+//line status.ego:16
 func Code(err error) int {
 	var code int
 	if err == nil {
@@ -51,7 +52,7 @@ func Code(err error) int {
 	} else {
 		panic(err)
 	}
-//line status.ego:22
+//line status.ego:23
 	return code
 }
 
@@ -67,7 +68,7 @@ func Describe(err error) string {
 	return v
 }
 
-//line status.ego:33
+//line status.ego:34
 func Charge(amount int) (string, error) {
 	if amount <= 0 {
 		return "", Declined{Reason: "nothing to charge"}
@@ -84,7 +85,7 @@ func Amount(s string) (int, error) {
 	if err != nil {
 		return 0, Declined{Reason: fmt.Sprintf("bad amount %q", s)}
 	}
-//line status.ego:46
+//line status.ego:47
 	return n, nil
 }
 
@@ -94,7 +95,7 @@ func Remote(s string) (int, error) {
 	if err != nil {
 		return 0, Gateway{Cause: err}
 	}
-//line status.ego:52
+//line status.ego:53
 	return n, nil
 }
 
@@ -104,6 +105,55 @@ func Pay(amount int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-//line status.ego:58
+//line status.ego:59
 	return r, nil
+}
+
+// Settle recovers from a declined charge and returns the other errors,
+// labelled.
+func Settle(amount int) (string, error) {
+	r, err := Charge(amount)
+	if err != nil {
+		if d, ok := errors.AsType[Declined](err); ok {
+			r = fmt.Sprintf("skipped: %s", d.Reason)
+		} else {
+			return "", fmt.Errorf("settle %v: %w", amount, err)
+		}
+	}
+//line status.ego:66
+	return r, nil
+}
+
+// State handles every case of the set, so it needs no check.
+func State(amount int) (s string) {
+	v, err := Charge(amount)
+	if err != nil {
+		if _, ok := errors.AsType[Declined](err); ok {
+			v = "declined"
+		} else if _, ok := errors.AsType[Expired](err); ok {
+			v = "retry later"
+		} else if _, ok := errors.AsType[Gateway](err); ok {
+			v = "retry later"
+		} else {
+			panic(err)
+		}
+	}
+	s = v
+//line status.ego:72
+	return s
+}
+
+// Clamp saturates numbers out of range: strconv.ErrRange is found inside
+// the *strconv.NumError that wraps it.
+func Clamp(s string) (int, error) {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		if errors.Is(err, strconv.ErrRange) {
+			n = math.MaxInt
+		} else {
+			return 0, fmt.Errorf("strconv.Atoi: %w", err)
+		}
+	}
+//line status.ego:79
+	return n, nil
 }
