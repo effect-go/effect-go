@@ -47,14 +47,18 @@ type Result struct {
 }
 
 // HasInjectors reports whether dir has injector files.
-func HasInjectors(dir string) bool {
+func HasInjectors(dir string) bool { return len(InjectorFiles(dir)) > 0 }
+
+// InjectorFiles returns the paths of dir's injector files.
+func InjectorFiles(dir string) []string {
+	var paths []string
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".go") && isInjectorFile(filepath.Join(dir, e.Name())) {
-			return true
+		if path := filepath.Join(dir, e.Name()); strings.HasSuffix(e.Name(), ".go") && isInjectorFile(path) {
+			paths = append(paths, path)
 		}
 	}
-	return false
+	return paths
 }
 
 func isInjectorFile(path string) bool {

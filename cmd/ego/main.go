@@ -4,6 +4,7 @@
 //	ego fmt [-l] [-w] [paths] format .ego files (default: the current directory, recursively)
 //	ego test [args]           ego generate, then go test with the same arguments
 //	ego vet [packages]        go vet, then the effect-go analyzers
+//	ego eject [-w] [packages] turn the packages into plain Go, for good
 //	ego lsp                   run the language server proxy in front of gopls
 //	ego version
 package main
@@ -23,6 +24,7 @@ Usage:
 	ego fmt [-l] [-w] [paths]            format .ego files (default ./...)
 	ego test [go test flags] [packages]  ego generate, then go test with the same arguments
 	ego vet [packages]                   go vet, then the effect-go analyzers
+	ego eject [-w] [packages]            turn .ego files into plain .go files for good (prints the plan without -w)
 	ego lsp                              language server: gopls with .ego support
 	ego version
 `)
@@ -48,6 +50,8 @@ func main() {
 		err = testCmd(args)
 	case "vet":
 		err = vetCmd(args)
+	case "eject":
+		err = ejectCmd(args)
 	case "lsp":
 		err = lspCmd(args)
 	case "version":
