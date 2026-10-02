@@ -1,97 +1,114 @@
 # effect-go
 
-Structured concurrency, typed errors, retries and resource cleanup for Go: a plain Go library, plus an optional dialect that removes the noise around them.
+**Concurrent Go that cleans up after itself.** Run calls in parallel, retry
+them, give them a deadline, and get every error back, without goroutines
+left running or a `ctx` passed by mistake.
 
-Loading a page from four services (parallel calls, a retried call, two CDNs raced, a 2-second budget) takes 72 lines with errgroup and backoff. Two calls failing at once report only the first error, a panic in one call crashes the process, and the losing CDN request is still running after the function returns. With effect-go:
+Use it as a plain Go library, or write `.ego` files: Go plus a few keywords
+that compile back to ordinary Go.
+
+## Before and after
+
+Two calls in parallel, with errgroup:
+
+```go
+func Load(ctx context.Context, d Deps, id string) (Page, error) {
+	g, gctx := errgroup.WithContext(ctx)
+	var user User
+	var orders []Order
+	g.Go(func() (err error) {
+		user, err = d.Users.Get(gctx, id)
+		return err
+	})
+	g.Go(func() (err error) {
+		orders, err = d.Orders.ForUser(gctx, id)
+		return err
+	})
+	if err := g.Wait(); err != nil {
+		return Page{}, err
+	}
+	return Page{User: user, Orders: orders}, nil
+}
+```
+
+If both calls fail, you only see the first error. A panic in either one
+crashes the whole program. And passing `ctx` instead of `gctx` compiles
+fine, but then a failure doesn't cancel the other call.
+
+The same in effect-go:
 
 ```go
 effect Load(d Deps, id string) (Page, error) {
-	return timeout(2*time.Second, load(d, id))
-}
-
-effect load(d Deps, id string) (Page, error) {
-	user, orders, recs := check all(d.Users.Get(id), d.Orders.ForUser(id), retry(recsRetry, d.Recs.For(id)))
-	banner := check race(d.CDN.Primary(user.Banner), d.CDN.Mirror(user.Banner)) "banner"
-	return Page{User: user, Orders: orders, Recs: recs, Banner: banner}, nil
+	user, orders := check all(d.Users.Get(id), d.Orders.ForUser(id))
+	return Page{User: user, Orders: orders}, nil
 }
 ```
 
-Every failure is reported, a panic comes back to the caller with its stack, nothing outlives the call, and `ctx` can't be the wrong one. `ego generate` compiles this to [the Go you'd write by hand](examples/dashboard/dashboard_ego.go) with the library, and the [same tests](examples/dashboard/dashboard_test.go) run against all three versions.
+Both errors come back, a panic returns to the caller with its stack trace,
+the right `ctx` is passed for you, and `Load` gets a tracing span.
+`ego generate` turns this into [the Go you'd have written by hand](examples/dashboard/dashboard_ego.go),
+which you commit like any other code.
 
-## The library (plain Go)
-
-```bash
-go get github.com/effect-go/effect-go
-```
-
-| Package | What it gives you |
-|---|---|
-| [`scope`](scope) | `All2`–`All4` and `All` (parallel; the first failure cancels the rest; every real failure is kept), `Each` (the same over a slice, with a concurrency limit), `Race` (losers cancelled and awaited), `Timeout`, and `Run`/`Fork`/`Acquire`/`Defer` for fibers and resources released in reverse order, and `Main` for a program's main function. Panics come back as `*scope.Panic` with the original stack. |
-| [`schedule`](schedule) | Retry policies as values: `Exponential`, `Spaced`, `Recurs`, `Min`, `Max`, `.Jittered()`, `.While(retryable)`, `.UpTo(d)`, `.Tap(fn)`, `.Delayed()`, and `Retry`, which records each retry on the current span, and `Repeat`, for loops that run until their context ends. Testable on fake time with `testing/synctest`. |
-| [`trace`](trace) | One OpenTelemetry span per call: `ctx, span := trace.Start(ctx, name)` and `defer trace.End(span, &err)`, which also records panics. `LogHandler` adds trace and span IDs to `slog` records. |
-| [`layer`](layer) | Dependency graphs wired at build time, like wire, with lifecycles: each provider runs once, a missing provider is a build error, finalizers run in reverse order. Worth it when a graph is wide and tests swap parts of it; for a short chain of constructors, plain code is shorter. |
-
-The library needs Go 1.26 and depends only on OpenTelemetry.
-
-## The dialect
-
-`.ego` files are Go plus:
-- **errors and concurrency**, the reason for the dialect:
-  - `check`/`must`/`else`/`fail` for errors (`else { Case(_) => value }` recovers chosen cases);
-  - error sets and `enum` with exhaustive `match`: a function returning an error set returns only its cases, so a `match` on its errors can't miss one;
-  - `effect` functions (implicit `ctx` and a span);
-  - `all`/`race`/`retry`/`repeat`/`timeout`/`each`;
-- **shorthand**, which you can ignore: short lambdas `x => …`, `if` and `match` as expressions, `f"…"` strings, and `?.`/`??`.
-
-[AGENTS.md](AGENTS.md) is the whole language on one page.
+## Try it
 
 ```bash
 go install github.com/effect-go/effect-go/cmd/ego@latest
-ego new example.com/hello   # a small HTTP service to start from, with AGENTS.md
-ego generate ./...   # x.ego -> x_ego.go, committed; layers_ego.go for injectors
-ego test ./...       # ego generate, then go test with the same arguments
-ego fmt -w .         # formats .ego files
-ego eject -w ./...   # leave: turns the .ego files into plain .go files, for good
+ego new example.com/hello
+cd hello && ego test ./... && go run .
 ```
 
-The generated code is plain, gofmt'd Go with `//line` directives, so compiler errors, `go vet`, panics and the debugger point at the `.ego` source. Go code calls it like any other package.
+`ego new` creates a small HTTP service to explore. [AGENTS.md](AGENTS.md)
+is the whole language on one page, for you and for coding agents.
 
-Editors: `ego lsp` is a language server that runs gopls on the generated Go and maps positions back, for hover, go to definition, diagnostics, rename and format-on-save. [editors/vscode](editors/vscode) is a VS Code extension for it; [docs/editors.md](docs/editors.md) sets up GoLand, Neovim and Helix.
+## What's in it
 
-In a real codebase: [miniflux's feed refreshing, ported](docs/case-study-miniflux.md). Its shutdown went from 18 s to 0 s with one slow feed, and its background loops now stop.
+**The library**, for plain Go (`go get github.com/effect-go/effect-go`):
+- [`scope`](scope): run calls in parallel (`All2`, `Each`, `Race`), with a
+  deadline (`Timeout`), and close resources in order when you're done
+  (`Run`, `Defer`, `Main`).
+- [`schedule`](schedule): retry policies as values, like "back off
+  exponentially, at most 3 times" (`Retry`), and loops that stop with
+  their context (`Repeat`).
+- [`trace`](trace): an OpenTelemetry span per call, and `slog` records that
+  carry trace IDs.
+- [`layer`](layer): dependency wiring checked at build time, for large
+  graphs that tests vary.
 
-To start: [docs/adopting.md](docs/adopting.md) goes from the library alone to the dialect one file at a time, and back out with `ego eject`.
+**The dialect**, in `.ego` files:
+- **Errors**: `check f()` returns the error for you; error sets list a
+  service's failures, and `match` makes sure you handle each one.
+- **Concurrency**: `effect` functions pass `ctx` for you, and
+  `all`, `race`, `retry`, `repeat`, `timeout` and `each` replace
+  hand-written goroutines.
+- **Shorthand**, if you like it: `x => x.ID`, `f"{n} items"`, `a ?? b`.
 
-Analyzers, for plain Go too: `ego vet ./...` runs `go vet`, then checks exhaustive switches over sum types and enums, child tasks that use their parent's context (the errgroup `ctx`/`gctx` bug), and fibers that are never joined.
+## Safe to try
+
+- **The output is plain Go.** It's committed next to your `.ego` files, and
+  the rest of your code calls it like any other package.
+- **Leaving is one command.** `ego eject -w ./...` turns your `.ego` files
+  into ordinary `.go` files, for good.
+- **Start small.** Use the library in one place, then turn one file into
+  `.ego`. [docs/adopting.md](docs/adopting.md) shows the steps.
+- **Your editor keeps working.** `ego lsp` gives `.ego` files gopls's hover,
+  go to definition, diagnostics and rename. There's a
+  [VS Code extension](editors/vscode), and [setup for other editors](docs/editors.md).
+- **Errors point at your code.** Compiler errors, panics and the debugger
+  show `.ego` lines.
+
+In a real codebase: we ported [miniflux's feed refreshing](docs/case-study-miniflux.md).
+With one slow feed, its shutdown went from 18 seconds to instant.
 
 ## Status
 
-v0.1: young, and meant to be used. What you can count on:
-- **Nothing breaks by itself.** The generated Go is committed, so a new effect-go release changes nothing until you run `ego generate`, and `ego eject` leaves for good.
-- **Before v1.0, breaking changes come only in minor versions** (v0.2, v0.3…), for the library and the dialect alike, each with a [changelog](CHANGELOG.md) entry saying how to update. Patch versions only fix bugs.
-- **New Go releases are supported within a month.** The parser is a copy of Go's, and CI checks the newest Go every week.
+effect-go is young (v0.1) and meant to be used. A new release never
+changes your build until you run `ego generate`. Before v1.0, breaking
+changes only come in minor versions (v0.2, v0.3…), each with a
+[changelog](CHANGELOG.md) entry saying how to update. New Go releases are
+supported within a month.
 
-Contributions: [CONTRIBUTING.md](CONTRIBUTING.md). What's built and tested:
-- the runtime library;
-- the compiler, formatter, language server and VS Code extension;
-- layers and the analyzers;
-- the demos in [examples](examples).
+Questions, ideas and bug reports are welcome in the issues. To contribute
+code, see [CONTRIBUTING.md](CONTRIBUTING.md). The design notes are in
+[docs/assessment.md](docs/assessment.md).
 
-The plan, its gates and their results are in [docs/assessment.md](docs/assessment.md), [docs/milestone-1.md](docs/milestone-1.md) and [docs/milestones-2-7.md](docs/milestones-2-7.md). Known limitations:
-- `?.` can't follow a call.
-- Coverage reports the generated Go, not `.ego` lines: run it with `ego test -cover` (plain `go test -cover` gives positions `go tool cover` can't read).
-- The language server needs gopls on the PATH.
-
-## Layout
-
-| Path | |
-|---|---|
-| `scope`, `schedule`, `trace`, `layer` | the library |
-| `cmd/ego` | the command |
-| `internal/syntax` | Go's scanner, parser, AST and printer, extended with the dialect |
-| `internal/lower` | the compiler from `.ego` to Go |
-| `internal/layers` | the wiring generator |
-| `internal/lsp` | the gopls proxy |
-| `analysis` | the vet analyzers |
-| `internal/egotest` | dialect test packages: each `.ego` file's generated Go is committed and tested |
-| `examples` | the users service and the dashboard, in plain Go and in the dialect, and [todo](examples/todo), a CLI on PostgreSQL (a separate module) |
+MIT licensed.

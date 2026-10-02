@@ -18,6 +18,20 @@ Two kinds of tests skip themselves without what they need:
 - the todo example's PostgreSQL tests, without `TODO_TEST_DATABASE_URL`.
   The example is a module of its own: run `go test ./...` in `examples/todo`.
 
+## Where things are
+
+| Path | |
+|---|---|
+| `scope`, `schedule`, `trace`, `layer` | the library |
+| `cmd/ego` | the command |
+| `internal/syntax` | Go's scanner, parser, AST and printer, extended with the dialect |
+| `internal/lower` | the compiler from `.ego` to Go |
+| `internal/layers` | the wiring generator |
+| `internal/lsp` | the gopls proxy |
+| `analysis` | the `ego vet` analyzers |
+| `internal/egotest` | dialect test packages, whose generated Go is committed and tested |
+| `examples` | the users service and the dashboard, in plain Go and in the dialect, and [todo](examples/todo), a CLI on PostgreSQL |
+
 ## Changing the compiler
 
 The compiler is `internal/lower`. The packages in `internal/egotest` and the
