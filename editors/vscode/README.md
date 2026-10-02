@@ -10,8 +10,13 @@ Install the tools, then the extension:
 go install github.com/effect-go/effect-go/cmd/ego@latest
 go install golang.org/x/tools/gopls@latest
 cd editors/vscode && npm install && npx @vscode/vsce package
-code --install-extension effect-go-0.1.0.vsix
+code --install-extension effect-go-0.2.0.vsix
 ```
+
+Generated files: Go needs `x_ego.go` in the same directory as `x.ego` (a
+directory is a package), so the explorer nests each one under its `.ego`
+file. Set `ego.hideGenerated` to hide them from the explorer and search
+altogether.
 
 Settings: `ego.path` and `ego.goplsPath` if the commands aren't on your PATH.
 Keep the Go extension installed: it handles `.go` files, including the

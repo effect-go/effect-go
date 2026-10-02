@@ -2,36 +2,79 @@
   "name": "effect-go",
   "displayName": "effect-go",
   "description": "Language support for effect-go (.ego) files: highlighting, and gopls features through ego lsp.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "effect-go",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/effect-go/effect-go" },
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Programming Languages"],
-  "activationEvents": ["onLanguage:ego"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/effect-go/effect-go"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:ego",
+    "workspaceContains:**/*.ego"
+  ],
   "main": "./extension.js",
   "contributes": {
     "languages": [
       {
         "id": "ego",
-        "aliases": ["effect-go", "ego"],
-        "extensions": [".ego"],
+        "aliases": [
+          "effect-go",
+          "ego"
+        ],
+        "extensions": [
+          ".ego"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
-      { "language": "ego", "scopeName": "source.ego", "path": "./syntaxes/ego.tmLanguage.json" }
+      {
+        "language": "ego",
+        "scopeName": "source.ego",
+        "path": "./syntaxes/ego.tmLanguage.json"
+      }
     ],
     "configuration": {
       "title": "effect-go",
       "properties": {
-        "ego.path": { "type": "string", "default": "ego", "description": "Path to the ego command." },
-        "ego.goplsPath": { "type": "string", "default": "gopls", "description": "Path to gopls, which ego lsp runs." }
+        "ego.path": {
+          "type": "string",
+          "default": "ego",
+          "description": "Path to the ego command."
+        },
+        "ego.goplsPath": {
+          "type": "string",
+          "default": "gopls",
+          "description": "Path to gopls, which ego lsp runs."
+        },
+        "ego.hideGenerated": {
+          "type": "boolean",
+          "default": false,
+          "description": "Hide the generated _ego.go files in this workspace's explorer and search (adds them to files.exclude). By default they're nested under their .ego file instead."
+        }
       }
     },
     "configurationDefaults": {
-      "[ego]": { "editor.formatOnSave": true, "editor.insertSpaces": false, "editor.tabSize": 4 }
+      "[ego]": {
+        "editor.formatOnSave": true,
+        "editor.insertSpaces": false,
+        "editor.tabSize": 4
+      },
+      "explorer.fileNesting.enabled": true,
+      "explorer.fileNesting.patterns": {
+        "*.ego": "${capture}_ego.go",
+        "*_test.ego": "${capture}_ego_test.go"
+      }
     }
   },
-  "dependencies": { "vscode-languageclient": "^9.0.1" }
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
 }
