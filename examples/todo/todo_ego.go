@@ -70,6 +70,14 @@ func (Invalid) isTodoError() {}
 
 func (e Invalid) Error() string { return fmt.Sprintf("%v", e.Reason) }
 
+type Usage struct{ Cause error }
+
+func (Usage) isTodoError() {}
+
+func (e Usage) Error() string { return fmt.Sprintf("%v", e.Cause) }
+
+func (e Usage) Unwrap() error { return e.Cause }
+
 type Storage struct{ Cause error }
 
 func (Storage) isTodoError() {}
@@ -80,7 +88,7 @@ func (e Storage) Unwrap() error { return e.Cause }
 
 // Overdue reports whether t is still open after its due date.
 //
-//line todo.ego:38
+//line todo.ego:39
 func (t Todo) Overdue(now time.Time) bool {
 	return t.DoneAt == nil && t.Due != nil && t.Due.Before(now.Truncate(24*time.Hour))
 }

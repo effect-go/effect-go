@@ -108,8 +108,10 @@ func commands(s *session) {
 	expect("add -p urgent x", 2, `unknown priority "urgent"`)
 	expect("add -due tomorrow x", 2, `bad due date "tomorrow"`)
 	expect("add", 2, "a todo needs a title")
-	expect("frobnicate", 2, "usage:")
-	expect("", 2, "usage:")
+	expect("frobnicate", 2, `unknown command "frobnicate"`, "usage:")
+	expect("", 2, "no command", "usage:")
+	expect("list -x", 2, "flag provided but not defined: -x", "usage:")
+	expect("done 1 2", 2, "done and rm take one ID")
 }
 
 // A database that never answers is a readable error, after the retries.

@@ -40,45 +40,40 @@ const usage = `usage:
   todo rm ID
   todo stats`
 
-var errUsage = errors.New(usage)
-
 // Run runs one command, gives it 10 seconds, and returns the exit code.
 func (c *CLI) Run(ctx context.Context, args []string) (_ int) {
 	ctx, span := trace.Start(ctx, "main.CLI.Run")
 	defer trace.End(span, nil)
-//line cli.ego:39
+//line cli.ego:37
 	_, err := scope.Timeout(ctx, 10*time.Second, func(ctx context.Context) (struct{}, error) { return struct{}{}, c.dispatch(ctx, args) })
 	if err == nil {
 		return 0
 	} else if e, ok := errors.AsType[NotFound](err); ok {
-//line cli.ego:42
+//line cli.ego:40
 		fmt.Fprintln(c.err, e)
 	} else if e, ok := errors.AsType[Invalid](err); ok {
 
-//line cli.ego:44
+//line cli.ego:42
 		fmt.Fprintln(c.err, e)
+		return 2
+
+	} else if e, ok := errors.AsType[Usage](err); ok {
+
+//line cli.ego:46
+		fmt.Fprintln(c.err, e)
+		fmt.Fprintln(c.err, usage)
 		return 2
 
 	} else if e, ok := errors.AsType[Storage](err); ok {
 
-//line cli.ego:48
+//line cli.ego:51
 		fmt.Fprintln(c.err, e)
 		return 3
 
 	} else {
-
-//line cli.ego:52
+//line cli.ego:54
 		fmt.Fprintln(c.err, err)
-		var v int
-		if errors.Is(err, errUsage) {
-			v = 2
-		} else {
-			v = 1
-		}
-		return v
-
 	}
-//line cli.ego:56
 	return 1
 }
 
@@ -87,7 +82,7 @@ func (c *CLI) dispatch(ctx context.Context, args []string) (err error) {
 	defer trace.End(span, &err)
 //line cli.ego:60
 	if len(args) == 0 {
-		return errUsage
+		return Usage{Cause: errors.New("no command")}
 	}
 	cmd, args := args[0], args[1:]
 	switch cmd {
@@ -132,7 +127,7 @@ func (c *CLI) dispatch(ctx context.Context, args []string) (err error) {
 		}
 	default:
 //line cli.ego:76
-		return errUsage
+		return Usage{Cause: errors.New(fmt.Sprintf("unknown command %q", cmd))}
 	}
 	return nil
 }
@@ -147,23 +142,24 @@ func (c *CLI) add(ctx context.Context, args []string) (err error) {
 	due := fs.String("due", "", "due date")
 	title, rest := firstArg(args)
 	if err := fs.Parse(rest); err != nil {
-		return errUsage
+		return Usage{Cause: err}
 	}
+//line cli.ego:88
 	p, err := ParsePriority(*prio)
 	if err != nil {
 		return fmt.Errorf("ParsePriority: %w", err)
 	}
-//line cli.ego:91
+//line cli.ego:89
 	d, err := ParseDue(*due)
 	if err != nil {
 		return fmt.Errorf("ParseDue: %w", err)
 	}
-//line cli.ego:92
+//line cli.ego:90
 	t, err := c.svc.Add(ctx, title, p, d)
 	if err != nil {
 		return fmt.Errorf("svc.Add: %w", err)
 	}
-//line cli.ego:93
+//line cli.ego:91
 	fmt.Fprintln(c.out, fmt.Sprintf("added #%d: %s", t.ID, t.Title))
 	return nil
 }
@@ -171,18 +167,19 @@ func (c *CLI) add(ctx context.Context, args []string) (err error) {
 func (c *CLI) list(ctx context.Context, args []string) (err error) {
 	ctx, span := trace.Start(ctx, "main.CLI.list")
 	defer trace.End(span, &err)
-//line cli.ego:98
+//line cli.ego:96
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	all := fs.Bool("all", false, "include done todos")
 	if err := fs.Parse(args); err != nil {
-		return errUsage
+		return Usage{Cause: err}
 	}
+//line cli.ego:100
 	todos, err := c.svc.List(ctx, *all)
 	if err != nil {
 		return fmt.Errorf("svc.List: %w", err)
 	}
-//line cli.ego:105
+//line cli.ego:101
 	if len(todos) == 0 {
 		fmt.Fprintln(c.out, "nothing to do")
 	}
@@ -194,12 +191,12 @@ func (c *CLI) list(ctx context.Context, args []string) (err error) {
 		} else {
 			mark = " "
 		}
-//line cli.ego:111
+//line cli.ego:107
 		due := ""
 		if t.Due != nil {
 			due = t.Due.Format(time.DateOnly)
 		}
-//line cli.ego:112
+//line cli.ego:108
 		if t.Overdue(now) {
 			due += " (overdue)"
 		}
@@ -211,12 +208,12 @@ func (c *CLI) list(ctx context.Context, args []string) (err error) {
 func (c *CLI) stats(ctx context.Context) (err error) {
 	ctx, span := trace.Start(ctx, "main.CLI.stats")
 	defer trace.End(span, &err)
-//line cli.ego:121
+//line cli.ego:117
 	s, err := c.svc.Stats(ctx)
 	if err != nil {
 		return fmt.Errorf("svc.Stats: %w", err)
 	}
-//line cli.ego:122
+//line cli.ego:118
 	fmt.Fprintln(c.out, fmt.Sprintf("%d open, %d done, %d overdue", s.Open, s.Done, s.Overdue))
 	return nil
 }
@@ -243,7 +240,7 @@ func firstArg(args []string) (string, []string) {
 // id reads the ID argument of done and rm.
 func id(args []string) (int64, error) {
 	if len(args) != 1 {
-		return 0, errUsage
+		return 0, Usage{Cause: errors.New("done and rm take one ID")}
 	}
 	n, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
