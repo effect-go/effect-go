@@ -1,0 +1,7 @@
+level=INFO msg="Running database migrations" current_version=0 latest_version=134
+level=INFO msg="Created new admin user" username=admin user_id=1
+level=INFO msg="Starting HTTP server" listen_address=127.0.0.1:18081
+level=INFO msg="[API] User authenticated successfully with the Basic HTTP Authentication" authentication_successful=true client_ip=127.0.0.1 user_agent=curl/8.7.1 username=admin request_uri=/v1/feeds
+level=INFO msg="[API] User authenticated successfully with the Basic HTTP Authentication" authentication_successful=true client_ip=127.0.0.1 user_agent=curl/8.7.1 username=admin request_uri=/v1/feeds/refresh
+level=INFO msg="Created a batch of feeds" batch_size=0 rows_count=1 skipped_feeds_count=0 jobs_count=1
+level=INFO msg="Triggered a manual refresh of all feeds from the API" user_id=1 nb_jobs=1

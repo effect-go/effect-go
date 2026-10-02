@@ -23,11 +23,13 @@ That is five files and about 360 lines. The other 80,000 lines stay plain Go and
 | Background loops left running until the process exits | 3 (feed scheduler, cleanup scheduler, systemd watchdog) | 0: they stop first |
 | A span per feed refresh | no | yes |
 | miniflux's tests | 1,925 pass | 1,925 pass (`-race` on the ported packages) |
-| Lines of code in the ported files | 282 | 312 in `.ego` (the same behaviour in plain Go, as generated: 368) |
+| Lines of code in the ported files | 282 | 277 in `.ego` (the same behaviour in plain Go, as generated: 340) |
 
 **How we measured.** We ran miniflux on a throwaway PostgreSQL with one feed, served by a local server that answers the first request and then hangs. We started a refresh of all feeds through the API, sent SIGTERM two seconds later, and timed the exit. Miniflux's HTTP client timeout was 20 s, its default. Before the port, nothing could interrupt the refresh, so shutdown waited until the client timeout fired and then recorded the timeout as the feed's error.
 
-**What the lines don't show.** The ported files are 30 lines longer than the originals because they do more: every loop now stops when asked. Hand-written Go with the same behaviour is the generated code, which is 18% longer than the `.ego` source, with one span per function included.
+**What the lines show.** The ported files do more than the originals (every loop now stops when asked, and every step has a span) in slightly fewer lines. Hand-written Go with the same behaviour is the generated code, which is 23% longer than the `.ego` source.
+
+The first version of the port was 30 lines *longer* than the original, because each of its three ticker loops (feed scheduler, cleanup scheduler, watchdog) was written out with `select` on the context. That's how `repeat` and `scope.Main` came about: the port showed the gaps, and both are now in the library and the dialect.
 
 ## What changed
 
@@ -57,7 +59,30 @@ effect daemon(s *scope.Scope, store *storage.Storage) (struct{}, error) {
 }
 ```
 
-`startDaemon` runs this in `scope.Run` with a context that SIGINT and SIGTERM cancel. Every service returns when that context ends. The scope then closes the HTTP servers, then the pool, in reverse order of creation, as the original did by hand.
+`startDaemon` is `scope.Main(s => daemon(s, store))`: a scope whose context SIGINT and SIGTERM cancel. Every service returns when that context ends. The scope then closes the HTTP servers, then the pool, in reverse order of creation, as the original did by hand.
+
+### The schedulers: `repeat` instead of ticker loops
+
+Before:
+
+```go
+func feedScheduler(store *storage.Storage, pool *worker.Pool, frequency time.Duration, batchSize, errorLimit, limitPerHost int) {
+	for range time.Tick(frequency) {
+		…
+	}
+}
+```
+
+After:
+
+```go
+check all(
+	repeat(schedule.Spaced(config.Opts.PollingFrequency()).Delayed(), pushBatch(store, pool)),
+	repeat(schedule.Spaced(config.Opts.CleanupFrequency()).Delayed(), cleanup(store)),
+)
+```
+
+`repeat` calls the function after each delay of the schedule; `.Delayed()` waits before the first call, as `time.Tick` does. The loops stop when the context ends, which `time.Tick` never did. The systemd watchdog is a `repeat` too.
 
 ### The batch refresh: `each` instead of a hand-made pool
 
