@@ -39,7 +39,9 @@ a sum type or an enum, and fibers never joined.
 ## 3. One file in the dialect
 
 Every Go file is a valid `.ego` file. Rename one, and use the dialect where
-it removes noise:
+it removes noise. Start with what plain Go can't check: `check`, an error
+set for the service's failures, and `effect` functions with `all`, `retry`
+or `timeout`. The shorthand (`x => …`, `f"…"`, `?.`) can wait.
 
 ```bash
 git mv service.go service.ego

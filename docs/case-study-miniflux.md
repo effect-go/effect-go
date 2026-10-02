@@ -161,7 +161,7 @@ recorded := match err {
 }
 ```
 
-A new case won't compile until both matches handle it. Writing the first one also brought out an inconsistency nobody had to face before: an error while *reading* the response (`Body`) isn't recorded on the feed, while an error *getting* it (`Fetch`) is. We kept that behaviour; the arm now says so, where a maintainer can see it and decide.
+A new case won't compile until both matches handle it: we checked by adding one, and both matches failed to compile. `localize` takes its error as a `RefreshError`, so it can match without a `_` arm, and every caller must pass an error of the set. Writing the first one also brought out an inconsistency nobody had to face before: an error while *reading* the response (`Body`) isn't recorded on the feed, while an error *getting* it (`Fetch`) is. We kept that behaviour; the arm now says so, where a maintainer can see it and decide.
 
 The queries only the refresh uses became `effect` methods: `WeeklyFeedEntryCount`, `UpdateFeedError` and `RefreshFeedEntries`, whose per-entry transactions now start with `BeginTx(ctx, nil)`. A stopped refresh rolls back the entry in progress and stops.
 
