@@ -1,10 +1,26 @@
 // Package consumer calls another .ego package's effect functions.
 package consumer
 
-import "github.com/effect-go/effect-go/internal/egotest/multi"
+import (
+	"github.com/effect-go/effect-go/internal/egotest/multi"
+	"github.com/effect-go/effect-go/internal/egotest/users"
+)
 
 effect Words(text string) (int, error) {
 	s := multi.NewStore[string, int]()
 	n := check multi.Count(s, text) "count words"
 	return n, nil
+}
+
+// Status maps a user lookup to an HTTP status. users.Service.Get returns
+// UserError, so the match needs no _ arm, and a case added to UserError
+// won't compile until it has one here.
+effect Status(s *users.Service, id users.UserID) int {
+	_, err := s.Get(id)
+	return match err {
+		nil                => 200
+		users.NotFound(_)  => 404
+		users.Suspended(_) => 403
+		users.Storage(_)   => 503
+	}
 }

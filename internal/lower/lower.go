@@ -135,9 +135,10 @@ func Generate(cfg Config) (*Result, error) {
 	}
 
 	// In-package tests are checked with the package, as go test does.
+	under := p
 	if len(p.testFiles) > 0 {
-		v := p.variant(append(slices.Clone(p.files), p.testFiles...), append(slices.Clone(p.goFiles), p.testGo...), p.path, p.name)
-		ti, err = v.run(res, p.testFiles)
+		under = p.variant(append(slices.Clone(p.files), p.testFiles...), append(slices.Clone(p.goFiles), p.testGo...), p.path, p.name)
+		ti, err = under.run(res, p.testFiles)
 		if err != nil {
 			return nil, err
 		}
@@ -149,6 +150,7 @@ func Generate(cfg Config) (*Result, error) {
 		v := p.variant(p.xtestFiles, p.xtestGo, p.path+"_test", p.name+"_test")
 		if ti != nil && ti.pkg != nil {
 			v.override = map[string]*types.Package{p.path: ti.pkg}
+			v.overrideSigs = map[string]map[string]*setSig{p.path: under.sigs}
 		}
 		if _, err := v.run(res, p.xtestFiles); err != nil {
 			return nil, err

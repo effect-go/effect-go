@@ -38,6 +38,9 @@ func (e Gateway) Error() string { return fmt.Sprintf("gateway: %v", e.Cause) }
 
 func (e Gateway) Unwrap() error { return e.Cause }
 
+// Code maps a payment's result to an HTTP status. err is declared as a
+// PayError, so the match needs no _ arm.
+//
 //line status.ego:16
 func Code(err error) int {
 	var code int
@@ -52,7 +55,7 @@ func Code(err error) int {
 	} else {
 		panic(err)
 	}
-//line status.ego:23
+//line status.ego:25
 	return code
 }
 
@@ -68,7 +71,7 @@ func Describe(err error) string {
 	return v
 }
 
-//line status.ego:34
+//line status.ego:36
 func Charge(amount int) (string, error) {
 	if amount <= 0 {
 		return "", Declined{Reason: "nothing to charge"}
@@ -85,7 +88,7 @@ func Amount(s string) (int, error) {
 	if err != nil {
 		return 0, Declined{Reason: fmt.Sprintf("bad amount %q", s)}
 	}
-//line status.ego:47
+//line status.ego:49
 	return n, nil
 }
 
@@ -95,7 +98,7 @@ func Remote(s string) (int, error) {
 	if err != nil {
 		return 0, Gateway{Cause: err}
 	}
-//line status.ego:53
+//line status.ego:55
 	return n, nil
 }
 
@@ -105,7 +108,7 @@ func Pay(amount int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-//line status.ego:59
+//line status.ego:61
 	return r, nil
 }
 
@@ -120,7 +123,7 @@ func Settle(amount int) (string, error) {
 			return "", fmt.Errorf("settle %v: %w", amount, err)
 		}
 	}
-//line status.ego:66
+//line status.ego:68
 	return r, nil
 }
 
@@ -139,7 +142,7 @@ func State(amount int) (s string) {
 		}
 	}
 	s = v
-//line status.ego:72
+//line status.ego:74
 	return s
 }
 
@@ -154,6 +157,6 @@ func Clamp(s string) (int, error) {
 			return 0, fmt.Errorf("strconv.Atoi: %w", err)
 		}
 	}
-//line status.ego:79
+//line status.ego:81
 	return n, nil
 }

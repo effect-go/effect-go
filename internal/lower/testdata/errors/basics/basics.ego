@@ -1,6 +1,11 @@
 package basics
 
-import "errors"
+import (
+	"errors"
+	"io"
+	"os"
+	"time"
+)
 
 error E {
 	A{ Cause error }
@@ -38,10 +43,88 @@ func inner() (int, error) {
 }
 
 func handle(err error) {
+	match err { // ERROR "err can hold errors that aren't cases of E \(it's a parameter\): declare it as E, or add a _ arm"
+		nil  => println("ok")
+		A(_) => println("a")
+	}
+}
+
+func setOnly() (int, E) { return 0, B{} }
+
+// The errors come from setOnly, so these need no _ arm.
+func closed() string {
+	_, err := setOnly()
+	if err == nil {
+		_, err = setOnly()
+	}
 	match err { // ERROR "doesn't handle B"
 		nil  => println("ok")
 		A(_) => println("a")
 	}
+	n := setOnly() else { A(_) => 1; B(_) => 2 }
+	_ = n
+	m := match err { nil => 1; A(_) => 2 } // ERROR "doesn't handle B"
+	_ = m
+	return match err {
+		nil  => "ok"
+		A(_) => "a"
+		B(_) => "b"
+	}
+}
+
+// A parameter declared as E holds only E's cases.
+func code(err E) int {
+	return match err {
+		nil  => 0
+		A(_) => 1
+		B(_) => 2
+	}
+}
+
+func codes() int {
+	_, err := setOnly()
+	_, other := load()
+	return code(err) + code(nil) + code(B{}) + code(other) // ERROR "other can hold errors that aren't cases of E \(it comes from load\), and code takes only E"
+}
+
+func fromLibrary() string {
+	_, err := os.ReadFile("x")
+	n := load() else { A(_) => 1; B(_) => 2 } // ERROR "these arms don't cover every error"
+	_ = n
+	return match err { // ERROR "err can hold errors that aren't cases of E \(it comes from os.ReadFile\)"
+		nil  => "ok"
+		A(_) => "a"
+		B(_) => "b"
+	}
+}
+
+func returns(which int) (int, E) {
+	_, err := load()
+	switch which {
+	case 0:
+		return 0, io.EOF // ERROR "io.EOF is not a case of E: return one of its cases"
+	case 1:
+		return 0, err // ERROR "err is not a case of E"
+	case 2:
+		return load() // ERROR "load\(\) may fail with errors that aren't cases of E"
+	case 3:
+		return setOnly()
+	}
+	return 0, if which > 9 { A{} } else { nil }
+}
+
+func named() (n int, err E) { // ERROR "err can be given errors that aren't cases of E \(it's assigned io.EOF\)"
+	err = io.EOF
+	return
+}
+
+effect one(x int) (int, E) { return x, nil }
+
+effect cancellable(xs []int) ([]int, E) {
+	ys := check each(xs, 2, x => one(x)) // ERROR "each can fail with a cancellation, which isn't a case of E"
+	ys = check each(xs, 2, x => one(x)) as A
+	y := check timeout(time.Second, one(1)) as A
+	return append(ys, y), nil
 }
 
 func header() int {

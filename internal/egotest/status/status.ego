@@ -13,7 +13,9 @@ error PayError {
 	Gateway{ Cause error }
 }
 
-func Code(err error) int {
+// Code maps a payment's result to an HTTP status. err is declared as a
+// PayError, so the match needs no _ arm.
+func Code(err PayError) int {
 	code := match err {
 		nil         => http.StatusOK
 		Declined(_) => http.StatusPaymentRequired

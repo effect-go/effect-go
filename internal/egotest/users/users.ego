@@ -55,10 +55,11 @@ effect (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetAll loads users four at a time. Get's errors are passed on: they are
-// the same set.
+// GetAll loads users four at a time. Get's errors pass through, as they
+// are the same set; each's own cancellation becomes Storage.
 effect (s *Service) GetAll(ids []UserID) ([]User, UserError) {
-	return each(ids, 4, id => s.Get(id))
+	users := check each(ids, 4, id => s.Get(id)) as Storage
+	return users, nil
 }
 
 // GetEach takes the method itself, which receives each call's ctx.

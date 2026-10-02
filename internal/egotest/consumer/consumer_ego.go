@@ -5,22 +5,47 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
-
 	"github.com/effect-go/effect-go/internal/egotest/multi"
+	"github.com/effect-go/effect-go/internal/egotest/users"
+
 	"github.com/effect-go/effect-go/trace"
 )
 
-//line consumer.ego:6
+//line consumer.ego:9
 func Words(ctx context.Context, text string) (_ int, err error) {
 	ctx, span := trace.Start(ctx, "consumer.Words")
 	defer trace.End(span, &err)
-//line consumer.ego:7
+//line consumer.ego:10
 	s := multi.NewStore[string, int]()
 	n, err := multi.Count(ctx, s, text)
 	if err != nil {
 		return 0, fmt.Errorf("count words: %w", err)
 	}
-//line consumer.ego:9
+//line consumer.ego:12
 	return n, nil
+}
+
+// Status maps a user lookup to an HTTP status. users.Service.Get returns
+// UserError, so the match needs no _ arm, and a case added to UserError
+// won't compile until it has one here.
+func Status(ctx context.Context, s *users.Service, id users.UserID) (_ int) {
+	ctx, span := trace.Start(ctx, "consumer.Status")
+	defer trace.End(span, nil)
+//line consumer.ego:19
+	_, err := s.Get(ctx, id)
+	var v int
+	if err == nil {
+		v = 200
+	} else if _, ok := errors.AsType[users.NotFound](err); ok {
+		v = 404
+	} else if _, ok := errors.AsType[users.Suspended](err); ok {
+		v = 403
+	} else if _, ok := errors.AsType[users.Storage](err); ok {
+		v = 503
+	} else {
+		panic(err)
+	}
+	return v
 }

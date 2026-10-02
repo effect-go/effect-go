@@ -16,7 +16,7 @@
 | `check err` | return `err` if it isn't nil (for an error value you already have) |
 | `fail NotFound{ID: id}` / `fail "bad {id}"` | return this error, with zero values for the other results |
 
-`check` and `must` only start a statement or the right side of `=`/`:=`. `check f()` and `must f()` alone drop the other results. A function using `check` or `fail` must return an `error` (or an error set) last. Inside a function that returns an error set, every `check` needs `as Case`, unless the callee returns the same set.
+`check` and `must` only start a statement or the right side of `=`/`:=`. `check f()` and `must f()` alone drop the other results. A function using `check` or `fail` must return an `error` (or an error set) last. A function that returns an error set returns only its cases: every `check` needs `as Case` unless the callee returns the same set, and `return` gives `nil`, a case, or a call returning the set. `timeout` and `each` can fail with a cancellation of their own, so they need `as Case` too: `check each(ids, 4, s.Get) as Storage` passes `Get`'s errors through and makes the cancellation a `Storage`.
 
 ## Error sets, enums, match
 
@@ -36,7 +36,7 @@ match err {                         // statement; on errors it uses errors.AsTyp
 code := match c { Red => 1; _ => 0 }   // expression form: every arm is one value
 ```
 
-`match` must cover every case of an error set, enum or named-constant type, or have a `_` arm. On a plain `error`, the set is the one the cases belong to. Functions declared to return `(T, UserError)` compile to `(T, error)`; `fail` takes one of its cases. An error that matches no arm panics.
+`match` must cover every case of an error set, enum or named-constant type, or have a `_` arm. A match on an `error` can leave out `_` only if the error can't be anything else: it comes from a function declared to return the set (from any package), or from a variable only assigned such errors, or it is a parameter declared as the set. Otherwise (a parameter of type `error`, an error from plain Go) it needs `_`. Functions declared to return `(T, UserError)` compile to `(T, error)`; `fail` takes one of its cases. A parameter declared as `UserError` compiles to `error`, and callers in `.ego` must pass an error of the set: `func Code(err UserError) int { return match err {…} }`.
 
 ## effect functions and concurrency
 

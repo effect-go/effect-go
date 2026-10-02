@@ -198,6 +198,13 @@ func (g *fileGen) check(lhs []ast.Expr, tok token.Token, c *ast.CheckExpr) {
 		handle = "panic(err)"
 	default:
 		handle = g.ret(g.wrap(c, "err"))
+		if call, ok := ast.Unparen(c.X).(*ast.CallExpr); ok && c.Case != nil && g.fn != nil && g.fn.set != nil {
+			if set := g.fn.set; g.isErrorSet(g.innerSet(call), set) {
+				// timeout or each of calls returning this set: their errors
+				// pass through, and the case holds the cancellation.
+				handle = "if _, ok := " + g.pkgRef("errors") + ".AsType[" + set.Name.Name + "](err); ok {\n" + g.ret("err") + "\n}\n" + handle
+			}
+		}
 	}
 
 	switch {
@@ -321,7 +328,11 @@ func (g *fileGen) wrap(c *ast.CheckExpr, err string) string {
 	}
 	if set != nil {
 		if !g.passesSet(c.X, set) {
-			g.errorf(c.Pos(), "this function returns %s: write check … as <case>", set.Name.Name)
+			if call, ok := ast.Unparen(c.X).(*ast.CallExpr); ok && (g.builtin(call) == "timeout" || g.builtin(call) == "each") {
+				g.errorf(c.Pos(), "%s can fail with a cancellation, which isn't a case of %s: write check … as <case> for it", g.builtin(call), set.Name.Name)
+			} else {
+				g.errorf(c.Pos(), "this function returns %s: write check … as <case>", set.Name.Name)
+			}
 		}
 		return err
 	}
@@ -344,45 +355,6 @@ func (g *fileGen) wrap(c *ast.CheckExpr, err string) string {
 func (g *fileGen) inSet(t types.Type, set *ast.SumDecl) bool {
 	s := setOf(t)
 	return s != nil && s.Obj().Name() == set.Name.Name
-}
-
-// passesSet reports whether a call returns the same error set, so its
-// error can be passed on as it is.
-func (g *fileGen) passesSet(x ast.Expr, set *ast.SumDecl) bool {
-	c, ok := ast.Unparen(x).(*ast.CallExpr)
-	if !ok {
-		return false
-	}
-	switch g.builtin(c) {
-	case "all", "race":
-		for _, a := range c.Args {
-			if !g.passesSet(a, set) {
-				return false
-			}
-		}
-		return true
-	case "retry", "repeat", "timeout":
-		return len(c.Args) == 2 && g.passesSet(c.Args[1], set)
-	case "each":
-		l := eachLambda(c)
-		return l != nil && g.passesSet(l.Body.(ast.Expr), set)
-	}
-	var name string
-	switch f := c.Fun.(type) {
-	case *ast.Ident:
-		name = f.Name
-	case *ast.SelectorExpr:
-		name = f.Sel.Name
-		if t := g.typeOf(f.X); t != nil {
-			if p, ok := t.(*types.Pointer); ok {
-				t = p.Elem()
-			}
-			if n, ok := types.Unalias(t).(*types.Named); ok {
-				name = n.Obj().Name() + "." + name
-			}
-		}
-	}
-	return g.pkg.setFuncs[name] == set
 }
 
 // elseStmt lowers x := f() else fallback.
@@ -492,8 +464,9 @@ func (g *fileGen) elseArms(lhs []ast.Expr, tok token.Token, e *ast.ElseExpr) {
 		}
 		p.rest = g.ret(g.wrap(c, "err"))
 	case c == nil && !p.blank:
-		g.exhaustive(p, nil, e.Lbrace, false)
-		if p.setName == "" {
+		if set := g.argSet(call); set != nil {
+			g.exhaustive(p, set, nil, e.Lbrace, false)
+		} else {
 			g.errorf(e.Lbrace, "these arms don't cover every error: add a _ arm, or write check f() else { … } to return the others")
 		}
 	}
@@ -543,7 +516,7 @@ func (g *fileGen) fail(s *ast.FailStmt) {
 		}
 	default:
 		if g.r.final && g.fn != nil && g.fn.set != nil {
-			if t := g.typeOf(x); t != nil && !g.inSet(t, g.fn.set) && !isErrorSet(t, g.fn.set) {
+			if t := g.typeOf(x); t != nil && !g.inSet(t, g.fn.set) && !g.isErrorSet(t, g.fn.set) {
 				g.errorf(x.Pos(), "%s is not a case of %s", types.TypeString(t, func(*types.Package) string { return "" }), g.fn.set.Name.Name)
 			}
 		}
@@ -552,11 +525,6 @@ func (g *fileGen) fail(s *ast.FailStmt) {
 		return
 	}
 	g.w.str(g.ret(errText))
-}
-
-func isErrorSet(t types.Type, set *ast.SumDecl) bool {
-	n, ok := types.Unalias(t).(*types.Named)
-	return ok && n.Obj().Name() == set.Name.Name
 }
 
 // checkValue lowers check err, for an error value: return it if it isn't

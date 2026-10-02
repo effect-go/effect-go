@@ -2,7 +2,6 @@ package lower
 
 import (
 	"fmt"
-	"github.com/effect-go/effect-go/internal/typeutil"
 	goast "go/ast"
 	"go/build"
 	"go/token"
@@ -19,6 +18,8 @@ import (
 	"golang.org/x/tools/go/packages"
 
 	"github.com/effect-go/effect-go/internal/syntax/ast"
+	"github.com/effect-go/effect-go/internal/syntax/parser"
+	"github.com/effect-go/effect-go/internal/typeutil"
 )
 
 // An Importer loads the packages a package imports, from export data, and
@@ -29,6 +30,8 @@ type Importer struct {
 	pkgs   map[string]*types.Package
 	errs   map[string]string
 	stamps map[string]time.Time // modification times of the loaded workspace files
+	files  map[string][]string  // the Go files of each loaded package
+	sigs   map[string]map[string]*setSig
 }
 
 func NewImporter() *Importer { return &Importer{pkgs: map[string]*types.Package{}} }
@@ -65,11 +68,14 @@ func (im *Importer) load(dir string, paths []string) error {
 	im.pkgs = map[string]*types.Package{}
 	im.errs = map[string]string{}
 	im.stamps = map[string]time.Time{}
+	im.files = map[string][]string{}
+	im.sigs = map[string]map[string]*setSig{}
 	goroot, modcache := filepath.Join(runtime.GOROOT(), "src"), os.Getenv("GOMODCACHE")
 	if modcache == "" {
 		modcache = filepath.Join(build.Default.GOPATH, "pkg", "mod")
 	}
 	packages.Visit(loaded, nil, func(p *packages.Package) {
+		im.files[p.PkgPath] = p.GoFiles
 		// Workspace packages can change while the editor runs.
 		for _, f := range p.GoFiles {
 			if strings.HasPrefix(f, goroot) || strings.HasPrefix(f, modcache) {
@@ -109,6 +115,43 @@ func (im *Importer) Import(path string) (*types.Package, error) {
 		return nil, fmt.Errorf("%s", msg)
 	}
 	return nil, fmt.Errorf("package %s not loaded", path)
+}
+
+// setSigs returns the functions and methods that an imported package's
+// .ego files declare with an error set in their signature.
+func (im *Importer) setSigs(path string) map[string]*setSig {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+	if s, ok := im.sigs[path]; ok {
+		return s
+	}
+	var files []*ast.File
+	sums := map[string]*ast.SumDecl{}
+	for _, f := range im.files[path] {
+		base, ok := strings.CutSuffix(f, "_ego.go")
+		if !ok {
+			continue
+		}
+		src, err := os.ReadFile(base + ".ego")
+		if err != nil {
+			continue
+		}
+		af, err := parser.ParseFile(token.NewFileSet(), base+".ego", src, 0)
+		if err != nil {
+			continue
+		}
+		files = append(files, af)
+		for _, d := range af.Decls {
+			if sd, ok := d.(*ast.SumDecl); ok {
+				sums[sd.Name.Name] = sd
+			}
+		}
+	}
+	s := setSigs(files, sums)
+	if im.sigs != nil {
+		im.sigs[path] = s
+	}
+	return s
 }
 
 // typeInfo is the result of type-checking one draft of the package.

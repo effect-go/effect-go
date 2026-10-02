@@ -70,14 +70,13 @@ const (
 )
 
 type matchPlan struct {
-	mode    matchMode
-	tag     string // source of the tag, or of the variable holding it
-	arms    []*ast.MatchArm
-	pats    [][]pattern
-	blank   bool // has a _ arm
-	hasNil  bool
-	setName string
-	rest    string // statement for errors no arm matches; panic if empty
+	mode   matchMode
+	tag    string // source of the tag, or of the variable holding it
+	arms   []*ast.MatchArm
+	pats   [][]pattern
+	blank  bool // has a _ arm
+	hasNil bool
+	rest   string // statement for errors no arm matches; panic if empty
 }
 
 // plan analyzes a match, reports missing cases, and hoists a tag with side
@@ -95,7 +94,7 @@ func (g *fileGen) plan(tag ast.Expr, arms []*ast.MatchArm, isExpr bool) *matchPl
 		p.mode = modeValues
 	}
 	if !p.blank && g.r.final {
-		g.exhaustive(p, tt, tag.Pos(), isExpr)
+		g.exhaustive(p, tt, tag, tag.Pos(), isExpr)
 	}
 
 	// The tag is evaluated once.
@@ -135,7 +134,9 @@ func (g *fileGen) planArms(p *matchPlan) (hasCase bool) {
 }
 
 // exhaustive reports the cases a match without a _ arm doesn't handle.
-func (g *fileGen) exhaustive(p *matchPlan, tt types.Type, at token.Pos, isExpr bool) {
+// For a match on a plain error, from is where the error comes from: it
+// must be known to hold only errors of the set the arms' cases belong to.
+func (g *fileGen) exhaustive(p *matchPlan, tt types.Type, from ast.Expr, at token.Pos, isExpr bool) {
 	switch p.mode {
 	case modeErrors, modeSum:
 		set, cases := sumCases(tt)
@@ -143,7 +144,7 @@ func (g *fileGen) exhaustive(p *matchPlan, tt types.Type, at token.Pos, isExpr b
 			for _, ps := range p.pats {
 				for _, pt := range ps {
 					if pt.kind == patCase && set == nil {
-						if ct := g.typeOf(pt.typ); ct != nil {
+						if ct := g.caseType(pt.typ); ct != nil {
 							if s := setOf(ct); s != nil {
 								set, cases = sumCases(s)
 							}
@@ -151,15 +152,27 @@ func (g *fileGen) exhaustive(p *matchPlan, tt types.Type, at token.Pos, isExpr b
 					}
 				}
 			}
+			if set != nil && p.mode == modeErrors && from != nil {
+				if src, why := g.errSource(from); !sameSet(src, set) {
+					fix := "add a _ arm"
+					if why == whyParam {
+						fix = "declare it as " + set.Obj().Name() + ", or add a _ arm"
+					}
+					if why != "" {
+						why = " (" + why + ")"
+					}
+					g.errorf(at, "%s can hold errors that aren't cases of %s%s: %s", g.text(from), set.Obj().Name(), why, fix)
+					return
+				}
+			}
 		}
 		if set != nil {
-			p.setName = set.Obj().Name()
 			covered := map[string]bool{}
 			for _, ps := range p.pats {
 				for _, pt := range ps {
 					if pt.kind == patCase {
 						covered[lastName(pt.typ)] = true
-						if ct := g.typeOf(pt.typ); ct != nil && setOf(ct) != set {
+						if ct := g.caseType(pt.typ); ct != nil && setOf(ct) != set {
 							g.errorf(pt.typ.Pos(), "%s is not a case of %s", g.text(pt.typ), set.Obj().Name())
 						}
 					}
@@ -202,6 +215,40 @@ func (g *fileGen) exhaustive(p *matchPlan, tt types.Type, at token.Pos, isExpr b
 			g.errorf(at, "match on %s doesn't handle %s: add an arm for each, or a _ arm", typeName(tt), strings.Join(missing, ", "))
 		}
 	}
+}
+
+// caseType returns the type a case pattern names. The patterns of match
+// expressions aren't in the drafts, so it also looks the name up.
+func (g *fileGen) caseType(x ast.Expr) types.Type {
+	if t := g.typeOf(x); t != nil {
+		return t
+	}
+	if g.r.ti == nil {
+		return nil
+	}
+	scope := g.r.ti.pkg.Scope()
+	if sel, ok := x.(*ast.SelectorExpr); ok {
+		id, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return nil
+		}
+		scope = nil
+		for _, imp := range g.r.ti.pkg.Imports() {
+			if g.names[imp.Path()] == id.Name {
+				scope = imp.Scope()
+			}
+		}
+		if scope == nil {
+			return nil
+		}
+		x = sel.Sel
+	}
+	if id, ok := x.(*ast.Ident); ok {
+		if tn, ok := scope.Lookup(id.Name).(*types.TypeName); ok {
+			return tn.Type()
+		}
+	}
+	return nil
 }
 
 func typeName(t types.Type) string {

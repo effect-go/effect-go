@@ -68,8 +68,13 @@ func TestEach(t *testing.T) {
 	if err != nil || len(us) != 2 || us[1].Name != "Alan" {
 		t.Fatal(us, err)
 	}
-	if _, err := s.GetAll(t.Context(), []UserID{"ada", "bob"}); !errors.As(err, new(NotFound)) {
+	if _, err := s.GetAll(t.Context(), []UserID{"ada", "bob"}); !errors.As(err, new(NotFound)) || errors.As(err, new(Storage)) {
 		t.Fatalf("GetAll: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := s.GetAll(ctx, []UserID{"ada"}); !errors.As(err, new(Storage)) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("GetAll, cancelled: %v", err)
 	}
 	if _, err := s.GetEach(t.Context(), []UserID{"bob"}); err == nil || err.Error() != "get users: not found (ID bob)" {
 		t.Fatalf("GetEach: %v", err)
