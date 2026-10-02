@@ -4,6 +4,7 @@
 
 ## TL;DR
 
+- **The dialect's goal is readability.** Every addition is sugar that removes noise from the source. Where that conflicts with Go's habit of making things explicit (implicit `ctx` in `effect` functions, for example), the dialect chooses less noise and says so.
 - **Port what Effect guarantees, not how it works inside.** Effect's fiber runtime, lazy values and TestClock exist because JavaScript has no threads, no cancellation and eager Promises. Go already has goroutines, `context`, `defer` and `testing/synctest`.
 - **Lower everything to direct-style Go**: the code you would write by hand (`if err != nil`, explicit `ctx`, goroutines). Never lower to `FlatMap` chains. Effect v4 itself recommends `Effect.gen`/`Effect.fn` over chains of combinators.
 - **Build only what Go has refused**: error-handling syntax, closed error sets and sum types, nil-safe access, short anonymous functions, `match` and `if` as expressions, and string interpolation. Go is shipping the rest itself.
@@ -13,7 +14,7 @@
   - structured concurrency with a Cause model;
   - schedules;
   - scoped resources;
-  - `Effect.fn`-style traced functions.
+  - `Effect.fn`-style functions, declared with `effect` instead of `func`: a span per call, with `ctx` passed implicitly.
 - **The main cost is tooling** (a gopls proxy), not the runtime.
 
 ## 1. What Go developers complain about
@@ -49,7 +50,7 @@ Read first-hand from [LLMS.md](https://github.com/Effect-TS/effect/blob/main/LLM
 | Effect v4 idiom | Go equivalent | Verdict |
 |---|---|---|
 | `Effect.gen` for inline code | Ordinary sequential Go | Comes free; Go is already direct style |
-| `Effect.fn("name")` adds a span and stack frames; `fnUntraced` for hot paths | A `traced func` marker lowered to OpenTelemetry span start/end plus error recording; an ordinary function otherwise | **Keep, as a core feature** |
+| `Effect.fn("name")` adds a span and stack frames; `fnUntraced` for hot paths | Functions declared with `effect` instead of `func`: an implicit `ctx` parameter, plus OpenTelemetry span start/end with error recording; an ordinary function otherwise | **Keep, as a core feature** |
 | `Context.Service` with a `static layer`: the constructor effect `yield*`s its dependencies, and methods are `Effect<A, E>` with no requirements | A struct holding its dependencies, plus a constructor | **Keep.** Go's idiom already matches. |
 | `Layer.provide` / `provideMerge`: unsatisfied requirements are type errors, each layer is built once and torn down in order | Generated wiring (wire-style), checked at compile time, with finalizers on an app `Scope` | **Keep, as code generation** (§4.3) |
 | `Effect.acquireRelease` inside a layer | `scope.Acquire(open, close)`, released last-in first-out | **Keep** |
@@ -77,7 +78,7 @@ Read first-hand from [LLMS.md](https://github.com/Effect-TS/effect/blob/main/LLM
    - Every continuation needs explicit types, so a type checker is needed anyway.
    - Stack traces turn into `func1.func2.func3`.
    - It costs 19× (§5).
-3. **`effect!` becomes a prefix `check`**, with `as` for labels and reasons, plus `else`, `must` and a `fail` statement. Error labels are there from day one. `?` is kept for nil-safe access (`?.` and `??`), the meaning it has in TypeScript.
+3. **`effect!` becomes a prefix `check`**, with automatic error labels, optional custom ones and `as` for reasons, plus `else`, `must` and a `fail` statement. Error labels are there from day one. `?` is kept for nil-safe access (`?.` and `??`), the meaning it has in TypeScript.
 4. **No custom scheduler and no fiber runtime.** `Fiber[T]` is a typed handle over a goroutine and `context.WithCancelCause`.
 5. **Interruption is cooperative**, because Go [declined killable goroutines](https://github.com/golang/go/issues/50678). Interrupting a fiber means:
    - cancel its context with a cause;
@@ -107,7 +108,7 @@ Read first-hand from [LLMS.md](https://github.com/Effect-TS/effect/blob/main/LLM
 
 Three layers, each useful on its own.
 
-### 4.1 Runtime library (plain Go 1.27)
+### 4.1 Runtime library (plain Go, targeting 1.26)
 
 A sketch, not a final API:
 
@@ -143,7 +144,7 @@ func (s Schedule) While(retryable func(error) bool) Schedule
 func Retry[T any](ctx context.Context, s Schedule, task scope.Task[T]) (T, error)
 ```
 
-`Cause` implements `error` and `Unwrap() []error`, so `errors.Is` and `errors.As` work across parallel failures. Fibers carry pprof labels, so goroutine dumps and the leak profile show which fiber leaked.
+**As built in week 1:** the Cause model is `scope.KindOf(err)`, which returns Fail, Die or Interrupt, plus a `*scope.Panic` that carries the original stack. Parallel failures are combined with `errors.Join`, so `errors.Is` and `errors.As` see every one of them. Fibers carry pprof labels, so goroutine dumps and the leak profile show which fiber leaked.
 
 ### 4.2 Analyzers (go/analysis)
 
@@ -197,14 +198,17 @@ Every addition answers something Go has refused, lowers to the Go you'd write by
 
 | You write | Meaning | Lowers to |
 |---|---|---|
-| `x := check f()` | if `f` fails, return its error | `x, err := f()`, then `if err != nil { return …, err }` |
-| `x := check f() as "load cart"` | return the error with a label added | `… return …, fmt.Errorf("load cart: %w", err)` |
+| `x := check s.carts.Load(id)` | if the call fails, return its error, labelled with the call | `x, err := s.carts.Load(ctx, id)`, then `if err != nil { return …, fmt.Errorf("carts.Load: %w", err) }` |
+| `x := check s.carts.Load(id) "load cart {id}"` | the same, with your own label | `… return …, fmt.Errorf("load cart %v: %w", id, err)` |
 | `x := check f() as Storage` | return it as a case of this function's error set | `… return …, Storage{Cause: err}` |
 | `x := f() else fallback` | on failure, use `fallback` and carry on | `… if err != nil { x = fallback }` |
 | `x := must f()` | panic: this should never fail | `… if err != nil { panic(err) }` |
 | `fail NotFound{ID: id}` | return this error | `return User{}, NotFound{ID: id}`, with the empty values filled in |
 
 - **`check` comes from the Go team's own 2018 draft design**, without its `handle` blocks. It plays the role of `yield*` in `Effect.gen`: every call that can fail is marked where it starts.
+- **Labels are automatic.** Without one, `check` labels the error with the call it wraps: the last two parts of its name (`carts.Load`, `os.ReadFile`). For `retry` and `timeout`, the label comes from the inner call. `all` and `race` pass on the failing branch's error unchanged.
+- **A custom label is a string right after the call.** Its `{…}` interpolates without an `f`, because a label has no plain-Go meaning to protect. The same goes for `fail "no user {id}"`.
+- **`as` is only for error-set cases**, as in `check f() as Storage`.
 - **`check` and `must` only start a statement or the right side of `:=`**, so every early return is visible at the start of its line.
 - **Why not `yield`:** since Go 1.23 every iterator receives a callback named `yield`, and `yield(v)` sends a value out. Reusing the word for "take the value in, or return the error" would read backwards to Go developers.
 - **`must` follows Go's `Must` naming** (`regexp.MustCompile`, `template.Must`). `else` and `must` handle the error locally, so they also work in functions that don't return one.
@@ -286,7 +290,7 @@ line := fmt.Sprintf("%.2f %s", amount, currency)
 - **Only `f"…"` strings interpolate,** so plain Go strings (JSON with braces, for example) keep their meaning. Go declined interpolation in the language itself ([golang/go#34174](https://github.com/golang/go/issues/34174)).
 - **Literal braces and percent signs:** `{{` and `}}` write literal braces, and a `%` in the text becomes `%%`.
 - **Format verbs:** the verb comes from the value's type (`%s`, `%d`, `%v`), and `{x:spec}` passes a format spec through.
-- **It works anywhere a string does,** including labels: `check … as f"load cart {id}"`.
+- **It works anywhere a string does.** `check` labels and `fail` messages interpolate even without the `f`.
 
 **Missing values: `?.` and `??` (v1).**
 
@@ -316,13 +320,21 @@ if !ok {
 **Concurrency and tracing.**
 - **`all` / `race` / `retry` / `timeout`** take their arguments lazily. Each argument becomes a task, with `ctx` rebound to the child's context.
 - **They are predeclared names,** like Go's `min` and `max`, so your own `retry` or `all` takes precedence.
-- **`traced func`** is the equivalent of `Effect.fn`: one span per call, with its error recorded.
+- **`effect`** declares a function the way `func` does, and is the equivalent of `Effect.fn`: `effect (s *Shop) Checkout(id CartID) (Receipt, error)`.
+  - **Implicit `ctx`.** The generated function takes `ctx context.Context` as its first parameter, but the source doesn't declare it and calls don't pass it.
+  - **Calls get `ctx` for you.** Inside an effect function, a call whose callee's first parameter is a `context.Context` and that leaves it out receives the current `ctx`. This works for plain Go APIs too (`db.QueryContext(q)`), and reads the signatures from go/types.
+  - **Branches get their own.** Inside `all`, `race`, `retry` and `timeout`, the `ctx` passed is the branch's, so the "wrong context" bug can't be written.
+  - **`ctx` is still in scope** for code that wants it explicitly, and an explicit argument is never replaced.
+  - **One span per call**, named after the function, with its error recorded.
+  - **From plain Go, it's an ordinary function** that takes `ctx` first. Interface methods are marked the same way: `effect Get(id UserID) (User, error)`.
+  - **`effect` replaces `func` rather than prefixing it**, so it reads as its own kind of declaration. Searching for `func Checkout` no longer finds these functions; search for `Checkout(` instead.
+  - **Panics still re-panic** (§3). An effect function doesn't turn panics into errors; only branches of `all`/`race` bring them back to the caller.
 
 Lowering rules:
 - **Each source statement becomes one contiguous block of Go, in the same order.** Expression forms put their temporaries at the start of that block. This keeps source maps simple; Dingo's own notes call reverse mapping "fundamentally broken" once one line expands into many.
 - **Output is committed** and gofmt'd, starts with `// Code generated … DO NOT EDIT.`, and carries `//line` directives.
 - **Generated signatures return `error`**, so they work with every `func() (T, error)` API. The closed set is expressed as a sealed interface plus a doc comment.
-- **The parser accepts every valid Go file unchanged.** Each addition starts with something that isn't valid Go at that spot (`check x`, `must x`, `as`, `else` after an expression, `=>`, `f"`, `?.`, `??`, `match`, `traced`, `error Name {`). Predeclared names (`all`, `race`, `retry`, `timeout`, `fail`) give way to your own declarations.
+- **The parser accepts every valid Go file unchanged.** Each addition starts with something that isn't valid Go at that spot (`check x`, `must x`, `as`, `else` after an expression, `=>`, `f"`, `?.`, `??`, `match`, `effect Name(`, `error Name {`). Predeclared names (`all`, `race`, `retry`, `timeout`, `fail`) give way to your own declarations.
 - **The grammar never needs types; lowering does.** Anonymous functions, expression temporaries, f-string verbs, `?.` chains and the closures inside `all` read their types from go/types.
 
 Example (the syntax is illustrative only):
@@ -334,8 +346,8 @@ error UserError {
     Storage{ Cause error }
 }
 
-traced func (s *UserService) Get(ctx context.Context, id UserID) (User, UserError) {
-    u, ok := check s.repo.FindByID(ctx, id) as Storage
+effect (s *UserService) Get(id UserID) (User, UserError) {
+    u, ok := check s.repo.FindByID(id) as Storage
     if !ok {
         fail NotFound{ID: id}
     }
@@ -371,8 +383,8 @@ func (e Storage) Unwrap() error { return e.Cause }
 // Error() methods omitted.
 
 func (s *UserService) Get(ctx context.Context, id UserID) (_ User, err error) {
-	ctx, span := tracer.Start(ctx, "UserService.Get")
-	defer func() { endSpan(span, err) }()
+	ctx, span := trace.Start(ctx, "UserService.Get")
+	defer trace.End(span, &err) // also records a panic, then lets it continue
 	u, ok, err := s.repo.FindByID(ctx, id)
 	if err != nil {
 		return User{}, Storage{Cause: err}
@@ -388,9 +400,9 @@ Lazy arguments:
 
 ```go
 // source
-user, orders := check all(s.users.Get(ctx, id), s.orders.ForUser(ctx, id)) as "load dashboard"
+user, orders := check all(s.users.Get(id), s.orders.ForUser(id)) "load dashboard"
 
-// generated: each closure shadows ctx, so a child can't use the parent's context by mistake
+// generated: each closure takes its own ctx, and the calls inside it receive that one
 user, orders, err := scope.All2(ctx,
 	func(ctx context.Context) (User, error) { return s.users.Get(ctx, id) },
 	func(ctx context.Context) ([]Order, error) { return s.orders.ForUser(ctx, id) },
@@ -460,7 +472,7 @@ cd experiments/runtime-bench && go test -bench . -benchmem -count=5
 
 | Project | What it is | Status (2026-10) |
 |---|---|---|
-| [Dingo](https://github.com/MadAppGang/dingo) | `?`, enums, match, lambdas, `?.`/`??`, gopls proxy | 1.9k★; mostly one author; one commit in Sep 2026; missed its 1.0 target |
+| [Dingo](https://github.com/MadAppGang/dingo) | `?` with `Result` types, enums, match, lambdas, `?.`/`??`, gopls proxy, VS Code extension, agent docs | 1.9k★, Apache 2.0, started Nov 2025. One maintainer (384 of 387 commits). Fast until Jan 2026 (v0.3→v0.9), then bursts in Mar, Jul (v0.14) and Sep 2026; issues from Jul–Aug unanswered. Missed its 1.0 target |
 | [Lisette](https://github.com/ivov/lisette) | New language compiling to Go, with its own type inference and LSP | 1.5k★, active; Go code can't call it yet |
 | [XGo](https://github.com/goplus/xgo) | Successor to Go+, with a gopls fork | 9.4k★, active |
 | [Borgo](https://github.com/borgo-lang/borgo) | Rust-like language compiling to Go | 4.6k★; dead since 2024; no license |
@@ -472,10 +484,16 @@ cd experiments/runtime-bench && go test -bench . -benchmem -count=5
 | [failsafe-go](https://github.com/failsafe-go/failsafe-go), [backoff](https://github.com/cenkalti/backoff) | Retry policies | Policies stack, but there is no schedule algebra |
 | [fx](https://pkg.go.dev/go.uber.org/fx), [wire](https://github.com/google/wire) | Dependency injection | fx: runtime reflection plus lifecycle hooks. wire: compile-time, archived |
 
+What Dingo tells us (checked 2026-10-01):
+- **There is demand.** Nearly 2,000 stars in under a year, with no company behind it.
+- **A sugar-only dialect seems to stall.** After the launch spike it slowed to occasional maintenance and never gained a second regular contributor.
+- **Our v1 shorthand overlaps with it.** Short functions, `match` expressions and `?.`/`??` are Dingo's territory. What only EffectGo has is the Effect part: `effect` functions with implicit `ctx`, structured concurrency, per-service error sets, schedules and checked wiring. That's what to lead with.
+- **Reuse its code, don't depend on it.** It's Apache 2.0, so its parser and gopls proxy can be studied and borrowed with attribution. With a single maintainer, it isn't a foundation to build on.
+
 ## 8. Risks
 
 - **Tooling budget**, mainly the gopls proxy, plus keeping the forked parser and printer in step with each Go release.
-- **Go culture:** "boring is good", and dialects fragment a team's coding style.
+- **Go culture:** "boring is good", and dialects fragment a team's coding style. Implicit `ctx` hides a parameter that Go makes explicit on purpose.
 - **LLMs know Go but not the dialect.** Keep it a strict superset of Go that one page of docs can teach.
 - **Typed errors still carry a versioning cost.** Reason errors contain it but don't remove it.
 - **Feature creep.** The dialect is now about a dozen additions. Each one costs editor support and a line in AGENTS.md, and the whole language still has to fit on one page.
@@ -484,32 +502,46 @@ cd experiments/runtime-bench && go test -bench . -benchmem -count=5
 
 ## 9. Milestones (about 7 weeks, each with a go/no-go gate)
 
-1. **Week 1: runtime library** (`scope`, `Cause`, `schedule`, `Acquire`), tested with `synctest` and the goroutine-leak profile. Write both demos (the repository service and the dashboard) in plain Go.
+How the plan is ordered:
+- **Riskiest first.** Editor support decides whether a dialect gets used, so it's tested in week 2, before most of the syntax exists.
+- **Library first.** The runtime ships as a plain Go library before the dialect. It's useful without new syntax, and its users become the dialect's first audience.
+- **Lead with what only EffectGo does.** v0 is the Effect part. The everyday shorthand that overlaps with Dingo comes last.
+- **Target Go 1.26,** the oldest supported release, for the runtime and the generated code. Companies often lag one version. Tests may use 1.27 tools such as the goroutine-leak profile.
+
+0. **Before any code (1–2 days):**
+   - Choose the name and the first audience. The module path, CLI, file extension and import paths all follow from it, and change expensively later.
+   - Read Dingo's parser and gopls proxy, and decide what to borrow.
+1. **Week 1: runtime library** (`scope`, `Cause`, `schedule`, `Acquire`, `trace`), tested with `synctest` and the goroutine-leak profile. Write both demos (the repository service and the dashboard) in plain Go.
    - *Gate:* clearly better than errgroup + backoff on the dashboard demo.
-2. **Weeks 2–3: dialect v0**: `check`, `else`, `must` and `fail`, error sets with exhaustive `match` statements, `traced func`, and `all`/`race`/`retry`/`timeout`. These need little type information.
-   - Build the forked parser and `ego fmt` together, on the same syntax tree.
-   - *Gate:* the generated code passes your own code review, and the demos are at least 30% shorter.
+   - Release it as a plain Go library, usable without the dialect.
+2. **Week 2: parser and editor spike.**
+   - The forked parser and `ego fmt`, on the same syntax tree.
+   - `ego generate` lowering just `check` and `effect` with implicit `ctx`.
+   - A minimal gopls proxy, using templ's architecture and whatever Dingo's proxy offers.
+   - *Gate:* in VS Code, on a file using `check` and `effect`, go-to-definition, hover, diagnostics and format-on-save all work.
    - *Gate:* `ego fmt` leaves its own output unchanged, and formats every `.go` file in the standard library exactly as gofmt does.
-3. **Week 4: layer code generation**: the graph checked at compile time, finalizers on a scope, and a test graph that swaps one provider.
+   - If the editor gate fails: stop adding syntax, and ship the library, the analyzers and the layer code generation, all of which are plain Go.
+3. **Weeks 3–4: the rest of dialect v0**: `else`, `must` and `fail`, error sets with exhaustive `match` statements, and `all`/`race`/`retry`/`timeout`. Add rename to the proxy.
+   - *Gate:* the generated code passes your own code review, and the demos are at least 30% shorter.
+   - *Gate:* an agent given only the one-page AGENTS.md writes correct EffectGo for both demos. That page ships with the release.
+4. **Week 5: layer code generation**: the graph checked at compile time, finalizers on a scope, and a test graph that swaps one provider.
    - *Gate:* a missing provider is a build error with a readable message, and shutdown order is correct under `synctest`.
-4. **Week 5: gopls proxy spike**, using templ's architecture.
-   - *Gate:* hover, go-to-definition, diagnostics, rename and format-on-save all work on the demos.
-   - If not: stop adding syntax, and ship the library, the analyzers and the layer code generation, all of which are plain Go.
-5. **Weeks 6–7: dialect v1**: short anonymous functions, `match` and `if` as expressions, string interpolation, and `?.`/`??`. They need type information from go/types, so they come after the tooling gate.
-   - *Gate:* every feature lowers to Go you'd accept in review, `ego fmt` handles it, and the AGENTS.md cheat sheet still fits on one page.
-   - *Gate:* an agent given only that page writes correct EffectGo for both demos.
+5. **Weeks 6–7: dialect v1**: short anonymous functions, `match` and `if` as expressions, string interpolation, and `?.`/`??`. They need type information from go/types.
+   - *Gate:* every feature lowers to Go you'd accept in review, `ego fmt` and the proxy handle it, and the AGENTS.md cheat sheet still fits on one page.
+   - *Gate:* the agent test from v0 still passes with the new features.
 
 ## 10. Open questions
 
 - Should generated signatures return `error` (interop) or the sealed type (precision)? Current choice: `error`.
 - Should unexported functions declare their error sets or have them inferred?
 - How is the dependency graph declared: a wire-style marker call (valid Go) or a dialect `layer` block?
-- Is implicit `ctx` threading worth an experiment? It removes plumbing but hides a parameter.
+- Should implicit `ctx` reach plain Go functions that take a `context.Context` (current choice), or only other effect functions?
+- Is there an anonymous form of `effect` (for goroutines and callbacks), and how is it spelled?
 - Anonymous functions: `=>` (TypeScript, C#) or `->` (Kotlin, Java)? And should a single parameter be allowed without parentheses (`u => !u.Active`)?
 - Should an `if` expression allow statements before its final value, or stay one expression per branch?
 - Should f-strings support format specs (`{amount:.2f}`) from the start, or only plain values?
 - Where should code be allowed to turn panics into values?
-- The project name.
+- The project name and first audience (decided in step 0 of §9, before any code).
 
 ## Sources
 

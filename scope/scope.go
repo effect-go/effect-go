@@ -1,0 +1,163 @@
+// Package scope runs tasks concurrently without leaking them. Every
+// goroutine it starts has stopped by the time the call that started it
+// returns, a failure cancels the work that depends on it, and a panic comes
+// back to the caller with its original stack.
+//
+// Cancellation is cooperative, as everywhere in Go: a task stops early only
+// if it watches its context.
+package scope
+
+import (
+	"context"
+	"errors"
+	"sync"
+)
+
+// Scope owns the fibers and resources started inside Run. When Run returns,
+// the scope interrupts the fibers that are still running, waits for them,
+// and releases its resources in reverse order.
+type Scope struct {
+	parent   context.Context
+	ctx      context.Context
+	cancel   context.CancelCauseFunc
+	wg       sync.WaitGroup
+	mu       sync.Mutex
+	closed   bool
+	fibers   []joinable
+	releases []func(context.Context) error
+}
+
+// Context is the scope's context. It is cancelled when Run returns.
+func (s *Scope) Context() context.Context { return s.ctx }
+
+// Run calls body with a new scope, and closes the scope when body returns
+// or panics. Errors from releasing resources are joined to body's error.
+func Run[T any](ctx context.Context, body func(s *Scope) (T, error)) (res T, err error) {
+	s := &Scope{parent: ctx}
+	s.ctx, s.cancel = context.WithCancelCause(ctx)
+	defer func() {
+		r := recover()
+		cerr := s.close()
+		if r != nil {
+			panic(r)
+		}
+		if cerr != nil {
+			err = errors.Join(err, cerr)
+		}
+	}()
+	return body(s)
+}
+
+func (s *Scope) close() error {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.cancel(errClosed)
+	s.wg.Wait()
+
+	// Resources may need I/O to close, so they get a context that keeps the
+	// parent's values but isn't cancelled.
+	ctx := context.WithoutCancel(s.parent)
+	var errs []error
+	for i := len(s.releases) - 1; i >= 0; i-- {
+		if err := s.releases[i](ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	// A panic in a fiber nobody joined would otherwise be lost.
+	for _, f := range s.fibers {
+		if p := f.unjoinedPanic(); p != nil {
+			panic(p)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Scope) add() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		panic("scope: Fork after Run returned")
+	}
+	s.wg.Add(1)
+}
+
+type joinable interface{ unjoinedPanic() *Panic }
+
+// Fiber is a task running in the background of a scope.
+type Fiber[T any] struct {
+	done   chan struct{}
+	cancel context.CancelCauseFunc
+	mu     sync.Mutex
+	joined bool
+	val    T
+	err    error
+}
+
+// Fork starts task in the background. It stops when the scope closes, if
+// it hasn't finished before.
+func Fork[T any](s *Scope, task Task[T]) *Fiber[T] {
+	s.add()
+	ctx, cancel := context.WithCancelCause(s.ctx)
+	f := &Fiber[T]{done: make(chan struct{}), cancel: cancel}
+	s.mu.Lock()
+	s.fibers = append(s.fibers, f)
+	s.mu.Unlock()
+	go func() {
+		defer s.wg.Done()
+		defer close(f.done)
+		defer cancel(nil)
+		label(ctx)
+		f.err = protect(ctx, func(ctx context.Context) (err error) { f.val, err = task(ctx); return })
+	}()
+	return f
+}
+
+// Join waits for the fiber and returns its result. If the fiber panicked,
+// Join re-panics with a *Panic that carries the original stack.
+func (f *Fiber[T]) Join() (T, error) {
+	<-f.done
+	f.mu.Lock()
+	f.joined = true
+	f.mu.Unlock()
+	if p, ok := f.err.(*Panic); ok {
+		panic(p)
+	}
+	return f.val, f.err
+}
+
+// Interrupt cancels the fiber with cause and waits for it to stop.
+func (f *Fiber[T]) Interrupt(cause error) {
+	if cause == nil {
+		cause = ErrInterrupted
+	}
+	f.cancel(cause)
+	<-f.done
+}
+
+// Done is closed when the fiber has stopped.
+func (f *Fiber[T]) Done() <-chan struct{} { return f.done }
+
+func (f *Fiber[T]) unjoinedPanic() *Panic {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if p, ok := f.err.(*Panic); ok && !f.joined {
+		return p
+	}
+	return nil
+}
+
+// Acquire opens a resource and registers release to run when the scope
+// closes. Resources are released last-in first-out, after every fiber in the
+// scope has stopped.
+func Acquire[T any](s *Scope, open Task[T], release func(context.Context, T) error) (T, error) {
+	v, err := open(s.ctx)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	s.mu.Lock()
+	s.releases = append(s.releases, func(ctx context.Context) error { return release(ctx, v) })
+	s.mu.Unlock()
+	return v, nil
+}
