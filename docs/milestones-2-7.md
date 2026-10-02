@@ -12,7 +12,7 @@
 | **2.** Editor: go to definition, hover, diagnostics and format-on-save on a file using `check` and `effect` | Pass against gopls v0.23.0, driven by a test client that speaks LSP like VS Code does ([proxy_test.go](../internal/lsp/proxy_test.go)). Rename (planned for weeks 3–4) passes too. |
 | **3–4.** The generated code passes review | Pass. The dashboard compiles to the code written by hand with the library, down to the closures and labels; `users.ego` compiles to the same code as `users.go`. |
 | **3–4.** The demos are at least 30% shorter | Pass. Dashboard: 72 lines with errgroup + backoff, 34 with the library, 17 in the dialect. Users: 66 lines, then 44 (33% shorter). |
-| **3–4.** An agent given only AGENTS.md writes correct effect-go for both demos | Pass. See [examples/agenttest](../examples/agenttest/README.md). |
+| **3–4.** An agent given only AGENTS.md writes correct effect-go for both demos | Pass. The first agent compiled both demos on its second try. After fixes from its feedback, a fresh agent compiled both on the first try. Both runs passed the hidden tests. See [examples/agenttest](../examples/agenttest/README.md). |
 | **5.** A missing provider is a build error with a readable message | Pass: `inject.go:8:2: Missing: no provider for *DB, needed by NewService`. Ambiguous providers, cycles and unused providers passed directly to `Build` are errors too. |
 | **5.** Shutdown order is correct under synctest | Pass ([app_test.go](../internal/egotest/app/app_test.go)). |
 | **6–7.** Each v1 feature lowers to Go you'd accept in review, and `ego fmt` and the proxy handle it | Pass. See [report.ego](../internal/egotest/report/report.ego) and its generated file. The proxy test hovers inside lambdas and f-strings. |

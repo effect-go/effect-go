@@ -17,3 +17,7 @@ fixes: string literals inside f-string interpolations now work, runtime
 packages such as `schedule` are imported automatically (which also lets a
 lambda's types be inferred there), and AGENTS.md now states labels, retry
 counts, `race`'s errors and `timeout`'s error.
+
+A second run, after those fixes, with a fresh agent and the same spec
+([run2](run2)): both files compiled on the first `ego generate` run and
+passed the same hidden tests.

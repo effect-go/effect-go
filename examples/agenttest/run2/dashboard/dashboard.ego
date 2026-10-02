@@ -1,0 +1,28 @@
+package dashboard
+
+import (
+	"errors"
+	"time"
+)
+
+// recsPolicy backs off from 100ms with jitter, at most 3 retries, and never
+// retries a rejected request.
+var recsPolicy = schedule.Max(
+	schedule.Exponential(100*time.Millisecond).Jittered(),
+	schedule.Recurs(3),
+).While(err => !errors.Is(err, ErrRejected))
+
+// Load builds the dashboard page for user id, giving up after 2 seconds.
+effect Load(d Deps, id string) (Page, error) {
+	return timeout(2*time.Second, load(d, id))
+}
+
+effect load(d Deps, id string) (Page, error) {
+	user, orders, recs := check all(
+		d.Users.Get(id),
+		d.Orders.ForUser(id),
+		retry(recsPolicy, d.Recs.For(id)),
+	)
+	banner := check race(d.CDN.Primary(user.Banner), d.CDN.Mirror(user.Banner)) "banner"
+	return Page{User: user, Orders: orders, Recs: recs, Banner: banner}, nil
+}
