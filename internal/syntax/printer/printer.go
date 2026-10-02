@@ -6,6 +6,7 @@
 package printer
 
 import (
+	"github.com/effect-go/effect-go/internal/syntax/scanner"
 	"fmt"
 	"github.com/effect-go/effect-go/internal/syntax/ast"
 	"go/build/constraint"
@@ -963,7 +964,7 @@ func (p *printer) print(args ...any) {
 			p.lastTok = x.Kind
 
 		case token.Token:
-			s := x.String()
+			s := scanner.TokenString(x)
 			if mayCombine(p.lastTok, s[0]) {
 				// the previous and the current token must be
 				// separated by a blank otherwise they combine

@@ -1,0 +1,7 @@
+package billing
+
+effect (b *Billing) Sync(acct AccountID) (Entry, error) {
+    inv := check timeout(2*time.Second, b.provider.Latest(acct))
+    entry := check retry(b.backoff, b.ledger.Record(inv)) "record invoice {inv.ID}"
+    return entry, nil
+}

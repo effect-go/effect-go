@@ -349,7 +349,9 @@ func Walk(v Visitor, node Node) {
 		}
 
 	default:
-		panic(fmt.Sprintf("ast.Walk: unexpected node type %T", n))
+		if !walkEgo(v, n) {
+			panic(fmt.Sprintf("ast.Walk: unexpected node type %T", n))
+		}
 	}
 
 	v.Visit(nil)

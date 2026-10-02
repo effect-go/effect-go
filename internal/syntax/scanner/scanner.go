@@ -842,6 +842,19 @@ scanAgain:
 	switch ch := s.ch; {
 	case isLetter(ch):
 		lit = s.scanIdentifier()
+		if lit == "f" && (s.ch == '"' || s.ch == '`') {
+			// effect-go: an f-string is a STRING whose literal starts with f.
+			insertSemi = true
+			tok = token.STRING
+			quote := s.ch
+			s.next()
+			if quote == '"' {
+				lit = "f" + s.scanString()
+			} else {
+				lit = "f" + s.scanRawString()
+			}
+			break
+		}
 		if len(lit) > 1 {
 			// keywords are longer than one letter - avoid lookup otherwise
 			tok = token.Lookup(lit)
@@ -961,7 +974,26 @@ scanAgain:
 		case '>':
 			tok = s.switch4(token.GTR, token.GEQ, '>', token.SHR, token.SHR_ASSIGN)
 		case '=':
-			tok = s.switch2(token.ASSIGN, token.EQL)
+			if s.ch == '>' {
+				s.next()
+				tok = FATARROW
+			} else {
+				tok = s.switch2(token.ASSIGN, token.EQL)
+			}
+		case '?':
+			switch s.ch {
+			case '.':
+				s.next()
+				tok = QDOT
+			case '?':
+				s.next()
+				tok = QQ
+			default:
+				s.errorf(s.file.Offset(pos), "unexpected ?: use ?. or ??")
+				insertSemi = s.insertSemi
+				tok = token.ILLEGAL
+				lit = "?"
+			}
 		case '!':
 			tok = s.switch2(token.NOT, token.NEQ)
 		case '&':
@@ -996,4 +1028,44 @@ scanAgain:
 	}
 
 	return
+}
+
+// Tokens added by effect-go. They are outside go/token's range, so use
+// [TokenString] to print them.
+const (
+	FATARROW token.Token = 1000 + iota // =>
+	QDOT                               // ?.
+	QQ                                 // ??
+)
+
+// TokenString is tok.String() extended with the effect-go tokens.
+func TokenString(tok token.Token) string {
+	switch tok {
+	case FATARROW:
+		return "=>"
+	case QDOT:
+		return "?."
+	case QQ:
+		return "??"
+	}
+	return tok.String()
+}
+
+// Lookahead returns a copy of s that reports no errors, for the parser to
+// scan ahead without consuming tokens. Scanning the copy only re-adds line
+// offsets the file already has or will add, which token.File ignores.
+func (s *Scanner) Lookahead() *Scanner {
+	c := *s
+	c.err = nil
+	return &c
+}
+
+// ScanToken returns the next token that isn't a comment.
+func (s *Scanner) ScanToken() (token.Pos, token.Token, string) {
+	for {
+		pos, tok, lit := s.Scan()
+		if tok != token.COMMENT {
+			return pos, tok, lit
+		}
+	}
 }

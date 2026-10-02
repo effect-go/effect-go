@@ -1,0 +1,9 @@
+package shop
+
+effect (s *Shop) Checkout(id CartID) (Receipt, error) {
+    cart := check s.carts.Load(id)
+    user, hold := check all(s.users.Get(cart.UserID), s.stock.Reserve(cart.Items))
+    charge := check retry(s.backoff, s.payments.Charge(user, cart.Total)) "charge card {id}"
+    check s.mail.SendReceipt(user, charge)
+    return Receipt{Cart: cart, Hold: hold, Charge: charge}, nil
+}

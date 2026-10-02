@@ -462,6 +462,7 @@ type (
 	// A FuncType node represents a function type.
 	FuncType struct {
 		Func       token.Pos  // position of "func" keyword (token.NoPos if there is no "func")
+		Effect     token.Pos  // effect-go: position of "effect", which replaces "func"; or token.NoPos
 		TypeParams *FieldList // type parameters; or nil
 		Params     *FieldList // (incoming) parameters; non-nil
 		Results    *FieldList // (outgoing) results; or nil
@@ -517,6 +518,9 @@ func (x *KeyValueExpr) Pos() token.Pos   { return x.Key.Pos() }
 func (x *ArrayType) Pos() token.Pos      { return x.Lbrack }
 func (x *StructType) Pos() token.Pos     { return x.Struct }
 func (x *FuncType) Pos() token.Pos {
+	if x.Effect.IsValid() {
+		return x.Effect
+	}
 	if x.Func.IsValid() || x.Params == nil { // see issue 3870
 		return x.Func
 	}

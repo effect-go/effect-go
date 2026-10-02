@@ -526,6 +526,10 @@ func (p *printer) fieldList(fields *ast.FieldList, isStruct, isIncomplete bool) 
 			} else { // interface
 				if len(f.Names) > 0 {
 					name := f.Names[0] // method name
+					if ft := f.Type.(*ast.FuncType); ft.Effect.IsValid() {
+						p.keyword(ft.Effect, "effect")
+						p.print(blank)
+					}
 					p.expr(name)
 					p.signature(f.Type.(*ast.FuncType)) // don't print "func"
 				} else {
@@ -619,6 +623,10 @@ func (p *printer) fieldList(fields *ast.FieldList, isStruct, isIncomplete bool) 
 			p.recordLine(&line)
 			if name != nil {
 				// method
+				if ft := f.Type.(*ast.FuncType); ft.Effect.IsValid() {
+					p.keyword(ft.Effect, "effect")
+					p.print(blank)
+				}
 				p.expr(name)
 				p.signature(f.Type.(*ast.FuncType)) // don't print "func"
 				prev = nil
@@ -1079,7 +1087,9 @@ func (p *printer) expr1(expr ast.Expr, prec1, depth int) {
 		p.expr(x.Value)
 
 	default:
-		panic("unreachable")
+		if !p.egoExpr(x, prec1, depth) {
+			panic("unreachable")
+		}
 	}
 }
 
@@ -1558,7 +1568,9 @@ func (p *printer) stmt(stmt ast.Stmt, nextIsRBrace bool) {
 		p.block(s.Body, 1)
 
 	default:
-		panic("unreachable")
+		if !p.egoStmt(s) {
+			panic("unreachable")
+		}
 	}
 }
 
@@ -1937,11 +1949,18 @@ func (p *printer) distanceFrom(startPos token.Pos, startOutCol int) int {
 func (p *printer) funcDecl(d *ast.FuncDecl) {
 	p.setComment(d.Doc)
 	p.setPos(d.Pos())
-	p.print(token.FUNC, blank)
+	kw := "func"
+	if d.Type.Effect.IsValid() {
+		kw = "effect"
+		p.keyword(d.Type.Effect, kw)
+		p.print(blank)
+	} else {
+		p.print(token.FUNC, blank)
+	}
 	// We have to save startCol only after emitting FUNC; otherwise it can be on a
 	// different line (all whitespace preceding the FUNC is emitted only when the
 	// FUNC is emitted).
-	startCol := p.out.Column - len("func ")
+	startCol := p.out.Column - len(kw+" ")
 	if d.Recv != nil {
 		p.parameters(d.Recv, funcParam) // method: print receiver
 		p.print(blank)
@@ -1960,6 +1979,8 @@ func (p *printer) decl(decl ast.Decl) {
 		p.genDecl(d)
 	case *ast.FuncDecl:
 		p.funcDecl(d)
+	case *ast.SumDecl:
+		p.sumDecl(d)
 	default:
 		panic("unreachable")
 	}
@@ -1975,6 +1996,8 @@ func declToken(decl ast.Decl) (tok token.Token) {
 		tok = d.Tok
 	case *ast.FuncDecl:
 		tok = token.FUNC
+	case *ast.SumDecl:
+		tok = token.TYPE
 	}
 	return
 }

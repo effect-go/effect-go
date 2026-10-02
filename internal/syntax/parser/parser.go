@@ -64,8 +64,9 @@ type parser struct {
 	syncCnt int       // number of parser.advance calls without progress
 
 	// Non-syntactic parser control
-	exprLev int  // < 0: in control clause, >= 0: in expression
-	inRhs   bool // if set, the parser is parsing a rhs expression
+	exprLev   int  // < 0: in control clause, >= 0: in expression
+	inRhs     bool // if set, the parser is parsing a rhs expression
+	inPattern bool // effect-go: parsing match patterns, where "x =>" isn't a lambda
 
 	imports []*ast.ImportSpec // list of imports
 
@@ -1132,6 +1133,11 @@ func (p *parser) parseMethodSpec() *ast.Field {
 	doc := p.leadComment
 	var idents []*ast.Ident
 	var typ ast.Expr
+	var effect token.Pos
+	if p.tok == token.IDENT && p.lit == "effect" && p.peek() == token.IDENT {
+		effect = p.pos
+		p.next()
+	}
 	x := p.parseTypeName(nil)
 	if ident, _ := x.(*ast.Ident); ident != nil {
 		switch {
@@ -1185,7 +1191,7 @@ func (p *parser) parseMethodSpec() *ast.Field {
 			params := p.parseParameters(false)
 			results := p.parseParameters(true)
 			idents = []*ast.Ident{ident}
-			typ = &ast.FuncType{Func: token.NoPos, Params: params, Results: results}
+			typ = &ast.FuncType{Func: token.NoPos, Effect: effect, Params: params, Results: results}
 		default:
 			// embedded type
 			typ = x
@@ -1475,8 +1481,14 @@ func (p *parser) parseOperand() ast.Expr {
 
 	switch p.tok {
 	case token.IDENT:
+		if x := p.parseEgoOperand(); x != nil {
+			return x
+		}
 		x := p.parseIdent()
 		return x
+
+	case token.IF:
+		return p.parseIfExpr()
 
 	case token.INT, token.FLOAT, token.IMAG, token.CHAR, token.STRING:
 		x := &ast.BasicLit{ValuePos: p.pos, ValueEnd: p.end(), Kind: p.tok, Value: p.lit}
@@ -1484,6 +1496,9 @@ func (p *parser) parseOperand() ast.Expr {
 		return x
 
 	case token.LPAREN:
+		if !p.inPattern && p.isLambdaParams() {
+			return p.parseLambda()
+		}
 		lparen := p.pos
 		p.next()
 		p.exprLev++
@@ -1748,6 +1763,10 @@ func (p *parser) parsePrimaryExpr(x ast.Expr) ast.Expr {
 				sel := &ast.Ident{NamePos: pos, Name: "_"}
 				x = &ast.SelectorExpr{X: x, Sel: sel}
 			}
+		case scanner.QDOT:
+			qdot := p.pos
+			p.next()
+			x = &ast.OptSelectorExpr{X: x, QDot: qdot, Sel: p.parseIdent()}
 		case token.LBRACK:
 			x = p.parseIndexOrSliceOrInstance(x)
 		case token.LPAREN:
@@ -1898,7 +1917,13 @@ func (p *parser) parseExpr() ast.Expr {
 		defer un(trace(p, "Expression"))
 	}
 
-	return p.parseBinaryExpr(nil, token.LowestPrec+1)
+	x := p.parseBinaryExpr(nil, token.LowestPrec+1)
+	if p.tok == scanner.QQ {
+		pos := p.pos
+		p.next()
+		return &ast.CoalesceExpr{X: x, OpPos: pos, Y: p.parseExpr()}
+	}
+	return x
 }
 
 func (p *parser) parseRhs() ast.Expr {
@@ -1948,6 +1973,13 @@ func (p *parser) parseSimpleStmt(mode int) (ast.Stmt, bool) {
 			isRange = true
 		} else {
 			y = p.parseList(true)
+			if p.tok == token.ELSE && len(y) == 1 && (tok == token.DEFINE || tok == token.ASSIGN) {
+				// effect-go: x := f() else fallback
+				e := &ast.ElseExpr{X: y[0], Else: p.pos}
+				p.next()
+				e.Fallback = p.parseRhs()
+				y[0] = e
+			}
 		}
 		return &ast.AssignStmt{Lhs: x, TokPos: pos, Tok: tok, Rhs: y}, isRange
 	}
@@ -2442,6 +2474,11 @@ func (p *parser) parseStmt() (s ast.Stmt) {
 		defer un(trace(p, "Statement"))
 	}
 
+	if p.tok == token.IDENT {
+		if s := p.parseEgoStmt(); s != nil {
+			return s
+		}
+	}
 	switch p.tok {
 	case token.CONST, token.TYPE, token.VAR:
 		s = &ast.DeclStmt{Decl: p.parseDecl(stmtStart)}
@@ -2782,7 +2819,13 @@ func (p *parser) parseFuncDecl() *ast.FuncDecl {
 	}
 
 	doc := p.leadComment
-	pos := p.expect(token.FUNC)
+	var pos, effect token.Pos
+	if p.tok == token.IDENT && p.lit == "effect" {
+		effect = p.pos
+		p.next()
+	} else {
+		pos = p.expect(token.FUNC)
+	}
 
 	var recv *ast.FieldList
 	if p.tok == token.LPAREN {
@@ -2821,6 +2864,7 @@ func (p *parser) parseFuncDecl() *ast.FuncDecl {
 		Name: ident,
 		Type: &ast.FuncType{
 			Func:       pos,
+			Effect:     effect,
 			TypeParams: tparams,
 			Params:     params,
 			Results:    results,
@@ -2850,6 +2894,11 @@ func (p *parser) parseDecl(sync map[token.Token]bool) ast.Decl {
 		return p.parseFuncDecl()
 
 	default:
+		if p.tok == token.IDENT {
+			if d := p.parseEgoDecl(); d != nil {
+				return d
+			}
+		}
 		pos := p.pos
 		p.errorExpected(pos, "declaration")
 		p.advance(sync)
