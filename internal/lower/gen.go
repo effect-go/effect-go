@@ -236,6 +236,7 @@ func (g *fileGen) render(r *round) *writer {
 		g.names[p] = name
 		g.taken[name] = true
 	}
+	g.autoImports()
 	g.computeEdits()
 	g.computeNeeds()
 
@@ -950,4 +951,32 @@ func declDoc(d ast.Decl) *ast.CommentGroup {
 		return d.Doc
 	}
 	return nil
+}
+
+// runtimePkgs are the effect-go packages a .ego file may use without
+// importing them.
+var runtimePkgs = map[string]string{
+	"scope":    scopePath,
+	"schedule": schedulePath,
+	"trace":    tracePath,
+	"layer":    modPath + "/layer",
+}
+
+// autoImports imports the runtime packages the file refers to without
+// importing them.
+func (g *fileGen) autoImports() {
+	ast.Inspect(g.file, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		id, ok := sel.X.(*ast.Ident)
+		if !ok || id.Obj != nil || g.pkg.topNames[id.Name] || g.taken[id.Name] {
+			return true
+		}
+		if p, ok := runtimePkgs[id.Name]; ok {
+			g.use(p, id.Name)
+		}
+		return true
+	})
 }

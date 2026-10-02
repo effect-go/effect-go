@@ -1,0 +1,6 @@
+package syntax
+
+func f() {
+	x := f"unterminated {x" // ERROR "string literal not terminated"
+	y := 1 +
+} // ERROR "expected operand"

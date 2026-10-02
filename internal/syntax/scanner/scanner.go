@@ -849,7 +849,7 @@ scanAgain:
 			quote := s.ch
 			s.next()
 			if quote == '"' {
-				lit = "f" + s.scanString()
+				lit = "f" + s.scanFString()
 			} else {
 				lit = "f" + s.scanRawString()
 			}
@@ -1088,3 +1088,52 @@ func (s *Scanner) InitRange(file *token.File, src []byte, start, end int, err Er
 
 // Source returns the source being scanned.
 func (s *Scanner) Source() []byte { return s.src }
+
+// scanFString scans an f"…" string. Unlike a plain string, its {…}
+// interpolations may contain string and rune literals:
+// f"until {t.Format("2006-01-02")}".
+func (s *Scanner) scanFString() string {
+	// '"' opening already consumed
+	offs := s.offset - 1
+	depth := 0
+	for {
+		ch := s.ch
+		if ch == '\n' || ch < 0 {
+			s.error(offs, "string literal not terminated")
+			break
+		}
+		s.next()
+		switch {
+		case ch == '"' && depth == 0:
+			return string(s.src[offs:s.offset])
+		case ch == '\\' && depth == 0:
+			s.scanEscape('"')
+		case ch == '{':
+			if depth == 0 && s.ch == '{' {
+				s.next() // {{ is a literal brace
+				continue
+			}
+			depth++
+		case ch == '}':
+			if depth > 0 {
+				depth--
+			} else if s.ch == '}' {
+				s.next()
+			}
+		case depth > 0 && (ch == '"' || ch == '\'' || ch == '`'):
+			// A literal inside an interpolation.
+			for s.ch != ch {
+				if s.ch < 0 || s.ch == '\n' && ch != '`' {
+					s.error(offs, "string literal not terminated")
+					return string(s.src[offs:s.offset])
+				}
+				if s.ch == '\\' && ch != '`' {
+					s.next()
+				}
+				s.next()
+			}
+			s.next()
+		}
+	}
+	return string(s.src[offs:s.offset])
+}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 )
 
 type Address struct{ City string }
@@ -82,6 +83,10 @@ func Apply(xs []int, f func(int) int) []int {
 
 func Double(xs []int) []int {
 	return Apply(xs, x => x * 2)
+}
+
+func Until(t time.Time) string {
+	return f"until {t.Format("2006-01-02")}, {"quoted"}"
 }
 
 func Typed() func(int) string {

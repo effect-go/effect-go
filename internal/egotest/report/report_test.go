@@ -3,6 +3,7 @@ package report
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestSummary(t *testing.T) {
@@ -38,6 +39,9 @@ func TestShorthand(t *testing.T) {
 	}
 	if Describe(3) != "3 is odd" || Describe(4) != "4 is even" {
 		t.Fatal("Describe")
+	}
+	if got := Until(time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)); got != "until 2026-10-03, quoted" {
+		t.Fatal(got)
 	}
 	if !slices.Equal(Double([]int{1, 2}), []int{2, 4}) || Typed()(7) != "#7" {
 		t.Fatal("lambdas")

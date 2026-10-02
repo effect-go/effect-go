@@ -95,6 +95,7 @@ func (g *fileGen) plan(tag ast.Expr, arms []*ast.MatchArm, isExpr bool) *matchPl
 				p.hasNil = true
 			case patCase:
 				hasCase = true
+			case patValue:
 			}
 		}
 	}
@@ -307,6 +308,7 @@ func (g *fileGen) chain(p *matchPlan, isExpr bool, body func(*ast.MatchArm)) {
 			case patValue:
 				g.w.str(p.tag + " == ")
 				g.node(pt.expr)
+			case patBlank: // handled above
 			}
 			g.w.str(" {\n")
 			body(a)

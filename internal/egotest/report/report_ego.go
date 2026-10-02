@@ -10,9 +10,10 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 )
 
-//line report.ego:12
+//line report.ego:13
 type Address struct{ City string }
 
 type User struct {
@@ -33,14 +34,14 @@ func Summary(u *User, orders []Order) string {
 	if u != nil && u.Address != nil {
 		city = u.Address.City
 	}
-//line report.ego:29
+//line report.ego:30
 	var tone string
 	if late {
 		tone = "Sorry for the delay"
 	} else {
 		tone = "Good news"
 	}
-//line report.ego:30
+//line report.ego:31
 	return fmt.Sprintf("%s! %d orders are on their way to %s.", tone, len(orders), city)
 }
 
@@ -50,7 +51,7 @@ func Port() string {
 	if !ok {
 		port = "8080"
 	}
-//line report.ego:36
+//line report.ego:37
 	return port
 }
 
@@ -62,7 +63,7 @@ func Lookup(m map[string]int, k string) int {
 	return v
 }
 
-//line report.ego:43
+//line report.ego:44
 func ManagerName(u *User) string {
 	v := "nobody"
 	if u != nil && u.Manager != nil {
@@ -71,7 +72,7 @@ func ManagerName(u *User) string {
 	return v
 }
 
-//line report.ego:47
+//line report.ego:48
 func Grade(score int) string {
 	var v string
 	if score >= 90 {
@@ -84,7 +85,7 @@ func Grade(score int) string {
 	return v
 }
 
-//line report.ego:51
+//line report.ego:52
 func Total(orders []Order) string {
 	sum := 0.0
 	for _, o := range orders {
@@ -102,7 +103,7 @@ func Names(us []*User) []string {
 		}
 		out = append(out, strings.ToUpper(v))
 	}
-//line report.ego:64
+//line report.ego:65
 	return out
 }
 
@@ -114,7 +115,7 @@ func Describe(n int) string {
 	default:
 		kind = "odd"
 	}
-//line report.ego:72
+//line report.ego:73
 	return fmt.Sprintf("%d is %s", n, kind)
 }
 
@@ -128,6 +129,10 @@ func Apply(xs []int, f func(int) int) []int {
 
 func Double(xs []int) []int {
 	return Apply(xs, func(x int) int { return x * 2 })
+}
+
+func Until(t time.Time) string {
+	return fmt.Sprintf("until %s, %s", t.Format("2006-01-02"), "quoted")
 }
 
 func Typed() func(int) string {

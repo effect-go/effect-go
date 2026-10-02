@@ -334,7 +334,14 @@ func (p *parser) interpolate(lit *ast.BasicLit) *ast.FString {
 func matchBrace(v string, i, end int) (int, int) {
 	depth, colon := 0, -1
 	for ; i < end; i++ {
-		switch v[i] {
+		switch c := v[i]; c {
+		case '"', '\'', '`':
+			// Skip a literal inside the interpolation.
+			for i++; i < end && v[i] != c; i++ {
+				if v[i] == '\\' && c != '`' {
+					i++
+				}
+			}
 		case '(', '[', '{':
 			depth++
 		case ')', ']':

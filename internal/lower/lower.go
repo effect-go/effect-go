@@ -16,7 +16,6 @@ import (
 	"go/build"
 	"go/format"
 	goparser "go/parser"
-	"go/scanner"
 	"go/token"
 	"go/types"
 	"os"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/effect-go/effect-go/internal/syntax/ast"
 	"github.com/effect-go/effect-go/internal/syntax/parser"
+	"github.com/effect-go/effect-go/internal/syntax/scanner"
 )
 
 // Runtime import paths used by generated code.

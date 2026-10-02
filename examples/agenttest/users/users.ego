@@ -1,0 +1,56 @@
+package users
+
+import (
+	"fmt"
+	"net/http"
+	"time"
+)
+
+type UserID string
+
+type User struct {
+	ID             UserID
+	Name           string
+	SuspendedUntil time.Time
+}
+
+type Repo interface {
+	effect Find(id UserID) (user User, found bool, err error)
+}
+
+error UserError {
+	NotFound{ ID UserID } "no user {ID}"
+	Suspended{ Until time.Time } "suspended until {Until}"
+	Storage{ Cause error }
+}
+
+type Service struct {
+	Repo Repo
+	Now  func() time.Time
+}
+
+effect (s *Service) Get(id UserID) (User, UserError) {
+	u, found := check s.Repo.Find(id) as Storage
+	if !found {
+		fail NotFound{ID: id}
+	}
+	if u.SuspendedUntil.After(s.Now()) {
+		fail Suspended{Until: u.SuspendedUntil}
+	}
+	return u, nil
+}
+
+type Handler struct{ Users *Service }
+
+func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
+	u, err := h.Users.Get(r.Context(), UserID(r.PathValue("id")))
+	match err {
+		nil          => fmt.Fprintln(w, u.Name)
+		NotFound(e)  => http.Error(w, f"no user {e.ID}", http.StatusNotFound)
+		Suspended(e) => {
+			until := e.Until.Format("2006-01-02")
+			http.Error(w, f"suspended until {until}", http.StatusForbidden)
+		}
+		Storage(_)   => http.Error(w, "try again later", http.StatusServiceUnavailable)
+	}
+}
