@@ -3,6 +3,9 @@ name: ci
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays: try the newest Go release
+  workflow_dispatch:
 
 jobs:
   test:
@@ -38,3 +41,18 @@ jobs:
         env:
           TODO_TEST_DATABASE_URL: postgres://postgres@localhost:5432/todo?sslmode=disable
         run: go vet ./... && go test -race ./...
+
+  # A new Go release may add syntax the forked parser doesn't know. This job
+  # formats and compiles the newest standard library; when it fails, run
+  # go run ./internal/syntax/sync go1.N.M (see internal/syntax/README.md).
+  newest-go:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+      - run: go version && cat internal/syntax/UPSTREAM
+      - run: go test ./internal/syntax/... ./internal/lower/...
