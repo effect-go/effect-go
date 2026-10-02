@@ -28,7 +28,7 @@ go get github.com/effect-go/effect-go
 |---|---|
 | [`scope`](scope) | `All2`–`All4` and `All` (parallel; the first failure cancels the rest; every real failure is kept), `Each` (the same over a slice, with a concurrency limit), `Race` (losers cancelled and awaited), `Timeout`, and `Run`/`Fork`/`Acquire`/`Defer` for fibers and resources released in reverse order. Panics come back as `*scope.Panic` with the original stack. |
 | [`schedule`](schedule) | Retry policies as values: `Exponential`, `Spaced`, `Recurs`, `Min`, `Max`, `.Jittered()`, `.While(retryable)`, `.UpTo(d)`, `.Tap(fn)`, and `Retry`, which records each retry on the current span. Testable on fake time with `testing/synctest`. |
-| [`trace`](trace) | One OpenTelemetry span per call: `ctx, span := trace.Start(ctx, name)` and `defer trace.End(span, &err)`, which also records panics. |
+| [`trace`](trace) | One OpenTelemetry span per call: `ctx, span := trace.Start(ctx, name)` and `defer trace.End(span, &err)`, which also records panics. `LogHandler` adds trace and span IDs to `slog` records. |
 | [`layer`](layer) | Dependency graphs wired at build time, like wire, with lifecycles: each provider runs once, a missing provider is a build error, finalizers run in reverse order. |
 
 The library needs Go 1.26 and depends only on OpenTelemetry.
@@ -39,9 +39,11 @@ The library needs Go 1.26 and depends only on OpenTelemetry.
 
 ```bash
 go install github.com/effect-go/effect-go/cmd/ego@latest
+ego new example.com/hello   # a small HTTP service to start from, with AGENTS.md
 ego generate ./...   # x.ego -> x_ego.go, committed; layers_ego.go for injectors
 ego test ./...       # ego generate, then go test with the same arguments
 ego fmt -w .         # formats .ego files
+ego eject -w ./...   # leave: turns the .ego files into plain .go files, for good
 ```
 
 The generated code is plain, gofmt'd Go with `//line` directives, so compiler errors, `go vet`, panics and the debugger point at the `.ego` source. Go code calls it like any other package.

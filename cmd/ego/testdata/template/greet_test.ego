@@ -1,0 +1,19 @@
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestHello(t *testing.T) {
+	mux := http.NewServeMux()
+	NewHandler(NewGreeter()).Routes(mux)
+	for path, want := range map[string]int{"/hello/ada": 200, "/hello/bob": 404, "/hello/%20": 400} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Code != want {
+			t.Error(f"GET {path}: {rec.Code}, want {want}")
+		}
+	}
+}

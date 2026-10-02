@@ -19,6 +19,9 @@ func fixtures(t *testing.T) []string {
 	dirs, _ := filepath.Glob("../egotest/*")
 	var out []string
 	for _, d := range dirs {
+		if base := filepath.Base(d); strings.HasPrefix(base, "_") || strings.HasPrefix(base, ".") {
+			continue // ignored, as go ignores them
+		}
 		if egos, _ := filepath.Glob(filepath.Join(d, "*.ego")); len(egos) > 0 {
 			out = append(out, d)
 		}

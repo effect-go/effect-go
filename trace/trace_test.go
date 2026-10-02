@@ -1,8 +1,11 @@
 package trace
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel"
@@ -64,5 +67,20 @@ func TestSpans(t *testing.T) {
 	}
 	if len(spans[1].Events()) != 1 || spans[1].Status().Description != "db down" {
 		t.Errorf("error not recorded: %+v", spans[1].Status())
+	}
+}
+
+func TestLogHandler(t *testing.T) {
+	record(t)
+	var buf bytes.Buffer
+	log := slog.New(LogHandler(slog.NewJSONHandler(&buf, nil))).With("app", "shop")
+	ctx, span := Start(t.Context(), "Shop.Checkout")
+	log.InfoContext(ctx, "charged")
+	span.End()
+	log.InfoContext(t.Context(), "no span")
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	want := `"trace_id":"` + span.SpanContext().TraceID().String() + `","span_id":"` + span.SpanContext().SpanID().String() + `"`
+	if len(lines) != 2 || !strings.Contains(lines[0], want) || !strings.Contains(lines[0], `"app":"shop"`) || strings.Contains(lines[1], "trace_id") {
+		t.Fatalf("logged:\n%s\nwant %s on the first line only", buf.String(), want)
 	}
 }

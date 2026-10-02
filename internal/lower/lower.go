@@ -349,12 +349,18 @@ func (p *pkgGen) parse(res *Result) error {
 			p.name = f.Name.Name
 		}
 	}
+	// The files are read as the layers generator reads them: with the
+	// injector files, which declare the Build functions, and without the
+	// layers_ego.go they become. A new project has no layers_ego.go yet, and
+	// an old one may be stale.
+	bctx := build.Default
+	bctx.BuildTags = append(slices.Clip(bctx.BuildTags), "egolayers")
 	var testGos []string
 	for _, name := range gos {
 		if generated[name] {
 			continue
 		}
-		if ok, err := build.Default.MatchFile(p.cfg.Dir, name); err != nil || !ok {
+		if ok, err := bctx.MatchFile(p.cfg.Dir, name); err != nil || !ok {
 			continue
 		}
 		path := filepath.Join(p.cfg.Dir, name)

@@ -15,7 +15,7 @@ func TestEject(t *testing.T) {
 	}
 	// A copy inside the module, so it builds; go ignores directories
 	// starting with _ in patterns such as ./...
-	dir, err := os.MkdirTemp("../../internal/egotest", "_eject")
+	dir, err := os.MkdirTemp(".", "_eject")
 	if err != nil {
 		t.Fatal(err)
 	}

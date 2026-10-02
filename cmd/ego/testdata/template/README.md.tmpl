@@ -1,0 +1,15 @@
+# {{.Name}}
+
+A service written in [effect-go](https://github.com/effect-go/effect-go).
+
+```bash
+ego test ./...        # regenerate, then go test
+go run .              # serves on :8080 (ADDR to change it)
+curl localhost:8080/hello/ada
+```
+
+- `.ego` files are the source. `ego generate` writes the `_ego.go` files
+  next to them: plain Go, committed, never edited by hand.
+- [AGENTS.md](AGENTS.md) is the whole language on one page, for people and
+  coding agents.
+- `ego eject -w ./...` turns the project into plain Go for good.

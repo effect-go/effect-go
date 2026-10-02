@@ -5,6 +5,7 @@
 //	ego test [args]           ego generate, then go test with the same arguments
 //	ego vet [packages]        go vet, then the effect-go analyzers
 //	ego eject [-w] [packages] turn the packages into plain Go, for good
+//	ego new module/path [dir] create a project
 //	ego lsp                   run the language server proxy in front of gopls
 //	ego version
 package main
@@ -25,6 +26,7 @@ Usage:
 	ego test [go test flags] [packages]  ego generate, then go test with the same arguments
 	ego vet [packages]                   go vet, then the effect-go analyzers
 	ego eject [-w] [packages]            turn .ego files into plain .go files for good (prints the plan without -w)
+	ego new module/path [dir]            create a project: a small HTTP service, with AGENTS.md
 	ego lsp                              language server: gopls with .ego support
 	ego version
 `)
@@ -50,6 +52,8 @@ func main() {
 		err = testCmd(args)
 	case "vet":
 		err = vetCmd(args)
+	case "new":
+		err = newCmd(args)
 	case "eject":
 		err = ejectCmd(args)
 	case "lsp":

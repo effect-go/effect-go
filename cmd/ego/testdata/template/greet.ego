@@ -1,0 +1,51 @@
+package main
+
+import (
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strings"
+)
+
+// GreetError is everything Greet can fail with.
+error GreetError {
+	Invalid{ Reason string } "{Reason}"
+	Unknown{ Name string } "no one called {Name}"
+}
+
+// Greeter knows whom to greet. Replace it with your own service.
+type Greeter struct{ known map[string]bool }
+
+func NewGreeter() *Greeter { return &Greeter{known: map[string]bool{"ada": true, "grace": true}} }
+
+effect (g *Greeter) Greet(name string) (string, GreetError) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		fail Invalid{Reason: "a name is needed"}
+	}
+	if !g.known[name] {
+		fail Unknown{Name: name}
+	}
+	slog.InfoContext("greeted", "name", name)
+	return f"hello, {name}", nil
+}
+
+// Handler serves the HTTP API.
+type Handler struct{ greeter *Greeter }
+
+func NewHandler(g *Greeter) *Handler { return &Handler{g} }
+
+func (h *Handler) Routes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /hello/{name}", h.Hello)
+}
+
+// Hello is an effect method and an http.HandlerFunc: its ctx is
+// r.Context(), and each request gets a span.
+effect (h *Handler) Hello(w http.ResponseWriter, r *http.Request) {
+	msg, err := h.greeter.Greet(r.PathValue("name"))
+	match err {
+		nil        => fmt.Fprintln(w, msg)
+		Invalid(e) => http.Error(w, e.Reason, http.StatusBadRequest)
+		Unknown(_) => http.Error(w, err.Error(), http.StatusNotFound)
+	}
+}
