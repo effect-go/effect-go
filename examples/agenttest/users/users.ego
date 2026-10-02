@@ -51,6 +51,6 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 			until := e.Until.Format("2006-01-02")
 			http.Error(w, f"suspended until {until}", http.StatusForbidden)
 		}
-		Storage(_)   => http.Error(w, "try again later", http.StatusServiceUnavailable)
+		Storage(_) => http.Error(w, "try again later", http.StatusServiceUnavailable)
 	}
 }

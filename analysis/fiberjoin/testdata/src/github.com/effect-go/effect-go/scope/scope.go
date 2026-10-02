@@ -14,4 +14,4 @@ type Scope struct{}
 type Fiber[T any] struct{}
 
 func Fork[T any](s *Scope, task Task[T]) *Fiber[T] { return nil }
-func (f *Fiber[T]) Join() (T, error)            { var x T; return x, nil }
+func (f *Fiber[T]) Join() (T, error)               { var x T; return x, nil }

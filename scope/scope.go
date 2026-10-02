@@ -10,7 +10,9 @@ package scope
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
+	"time"
 )
 
 // Scope owns the fibers and resources started inside Run. When Run returns,
@@ -25,6 +27,27 @@ type Scope struct {
 	closed   bool
 	fibers   []joinable
 	releases []func(context.Context) error
+	stopIn   time.Duration // 0: wait for fibers indefinitely
+}
+
+// An Option configures Run.
+type Option func(*Scope)
+
+// StopTimeout bounds how long Run waits for fibers to stop once they are
+// interrupted. Cancellation is cooperative, so a fiber that ignores its
+// context can't be stopped: after d, Run releases the resources, returns a
+// *StuckError joined to body's error, and leaves the stuck goroutines
+// running. Without this option Run waits for them indefinitely.
+func StopTimeout(d time.Duration) Option { return func(s *Scope) { s.stopIn = d } }
+
+// A StuckError reports fibers that didn't stop within the StopTimeout.
+type StuckError struct {
+	Fibers int
+	After  time.Duration
+}
+
+func (e *StuckError) Error() string {
+	return fmt.Sprintf("scope: %d fiber(s) still running %v after being interrupted", e.Fibers, e.After)
 }
 
 // Context is the scope's context. It is cancelled when Run returns.
@@ -32,8 +55,11 @@ func (s *Scope) Context() context.Context { return s.ctx }
 
 // Run calls body with a new scope, and closes the scope when body returns
 // or panics. Errors from releasing resources are joined to body's error.
-func Run[T any](ctx context.Context, body func(s *Scope) (T, error)) (res T, err error) {
+func Run[T any](ctx context.Context, body func(s *Scope) (T, error), opts ...Option) (res T, err error) {
 	s := &Scope{parent: ctx}
+	for _, o := range opts {
+		o(s)
+	}
 	s.ctx, s.cancel = context.WithCancelCause(ctx)
 	defer func() {
 		r := recover()
@@ -53,7 +79,26 @@ func (s *Scope) close() error {
 	s.closed = true
 	s.mu.Unlock()
 	s.cancel(errClosed)
-	s.wg.Wait()
+	var stuck error
+	if s.stopIn > 0 {
+		done := make(chan struct{})
+		go func() { s.wg.Wait(); close(done) }()
+		t := time.NewTimer(s.stopIn)
+		select {
+		case <-done:
+			t.Stop()
+		case <-t.C:
+			n := 0
+			for _, f := range s.fibers {
+				if !f.stopped() {
+					n++
+				}
+			}
+			stuck = &StuckError{Fibers: n, After: s.stopIn}
+		}
+	} else {
+		s.wg.Wait()
+	}
 
 	// Resources may need I/O to close, so they get a context that keeps the
 	// parent's values but isn't cancelled.
@@ -70,7 +115,7 @@ func (s *Scope) close() error {
 			panic(p)
 		}
 	}
-	return errors.Join(errs...)
+	return errors.Join(append([]error{stuck}, errs...)...)
 }
 
 func (s *Scope) add() {
@@ -82,7 +127,10 @@ func (s *Scope) add() {
 	s.wg.Add(1)
 }
 
-type joinable interface{ unjoinedPanic() *Panic }
+type joinable interface {
+	unjoinedPanic() *Panic
+	stopped() bool
+}
 
 // Fiber is a task running in the background of a scope.
 type Fiber[T any] struct {
@@ -138,7 +186,19 @@ func (f *Fiber[T]) Interrupt(cause error) {
 // Done is closed when the fiber has stopped.
 func (f *Fiber[T]) Done() <-chan struct{} { return f.done }
 
+func (f *Fiber[T]) stopped() bool {
+	select {
+	case <-f.done:
+		return true
+	default:
+		return false
+	}
+}
+
 func (f *Fiber[T]) unjoinedPanic() *Panic {
+	if !f.stopped() {
+		return nil // stuck: its result isn't written yet
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if p, ok := f.err.(*Panic); ok && !f.joined {

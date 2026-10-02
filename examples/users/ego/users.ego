@@ -11,45 +11,45 @@ import (
 type UserID string
 
 type User struct {
-    ID             UserID
-    Name           string
-    SuspendedUntil time.Time
+	ID             UserID
+	Name           string
+	SuspendedUntil time.Time
 }
 
 type Repo interface {
-    effect Find(id UserID) (u User, found bool, err error)
+	effect Find(id UserID) (u User, found bool, err error)
 }
 
 error UserError {
-    NotFound{ ID UserID }
-    Suspended{ Until time.Time }
-    Storage{ Cause error }
+	NotFound{ ID UserID }
+	Suspended{ Until time.Time }
+	Storage{ Cause error }
 }
 
 type Service struct {
-    Repo Repo
-    Now  func() time.Time
+	Repo Repo
+	Now  func() time.Time
 }
 
 effect (s *Service) Get(id UserID) (User, UserError) {
-    u, ok := check s.Repo.Find(id) as Storage
-    if !ok {
-        fail NotFound{ID: id}
-    }
-    if u.SuspendedUntil.After(s.Now()) {
-        fail Suspended{Until: u.SuspendedUntil}
-    }
-    return u, nil
+	u, ok := check s.Repo.Find(id) as Storage
+	if !ok {
+		fail NotFound{ID: id}
+	}
+	if u.SuspendedUntil.After(s.Now()) {
+		fail Suspended{Until: u.SuspendedUntil}
+	}
+	return u, nil
 }
 
 type Handler struct{ Users *Service }
 
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
-    u, err := h.Users.Get(r.Context(), UserID(r.PathValue("id")))
-    match err {
-        nil          => fmt.Fprintf(w, "%s\n", u.Name)
-        NotFound(e)  => http.Error(w, f"no user {e.ID}", http.StatusNotFound)
-        Suspended(e) => http.Error(w, f"suspended until {e.Until.Format(time.DateOnly)}", http.StatusForbidden)
-        Storage(_)   => http.Error(w, "try again later", http.StatusServiceUnavailable)
-    }
+	u, err := h.Users.Get(r.Context(), UserID(r.PathValue("id")))
+	match err {
+		nil          => fmt.Fprintf(w, "%s\n", u.Name)
+		NotFound(e)  => http.Error(w, f"no user {e.ID}", http.StatusNotFound)
+		Suspended(e) => http.Error(w, f"suspended until {e.Until.Format(time.DateOnly)}", http.StatusForbidden)
+		Storage(_)   => http.Error(w, "try again later", http.StatusServiceUnavailable)
+	}
 }

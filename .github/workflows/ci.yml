@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ["1.26", "1.27"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - run: go install golang.org/x/tools/gopls@latest
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go build -o "$RUNNER_TEMP/ego" ./cmd/ego
+      - name: generated code is up to date
+        run: |
+          "$RUNNER_TEMP/ego" generate -check ./...
+          (cd examples && "$RUNNER_TEMP/ego" generate -check ./...)
+      - name: .ego files are formatted
+        run: test -z "$("$RUNNER_TEMP/ego" fmt -l .)"
+      - run: test -z "$(gofmt -l $(git ls-files '*.go' | grep -v '^internal/syntax/'))"
+      - working-directory: examples
+        run: go vet ./... && go test -race ./...

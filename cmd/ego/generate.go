@@ -16,7 +16,9 @@ import (
 func generate(args []string) error {
 	fl := flag.NewFlagSet("generate", flag.ExitOnError)
 	lines := fl.Bool("lines", true, "add //line directives pointing at the .ego files")
+	check := fl.Bool("check", false, "write nothing; fail if a generated file is missing or stale (for CI)")
 	fl.Parse(args)
+	checkOnly = *check
 	dirs, err := egoDirs(fl.Args())
 	if err != nil {
 		return err
@@ -64,15 +66,25 @@ func generate(args []string) error {
 			}
 		}
 	}
-	if failed {
+	if failed || stale {
 		return errSilent
 	}
 	return nil
 }
 
-// write writes a generated file if it changed, and prints its name.
+var stale bool
+
+var checkOnly bool
+
+// write writes a generated file if it changed, and prints its name. With
+// -check it only reports the file as stale.
 func write(path string, code []byte) error {
 	if old, _ := os.ReadFile(path); bytes.Equal(old, code) {
+		return nil
+	}
+	if checkOnly {
+		fmt.Fprintln(os.Stderr, rel(path)+": stale; run ego generate")
+		stale = true
 		return nil
 	}
 	if err := os.WriteFile(path, code, 0o666); err != nil {

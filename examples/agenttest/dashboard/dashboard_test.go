@@ -8,7 +8,6 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
-
 )
 
 // step is what a fake service does on one call.
@@ -198,4 +197,3 @@ func TestNothingOutlivesTheCall(t *testing.T) {
 		time.Sleep(time.Second)
 	})
 }
-

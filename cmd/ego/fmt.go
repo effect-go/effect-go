@@ -41,7 +41,7 @@ func fmtCmd(args []string) error {
 				return err
 			}
 			if d.IsDir() {
-				if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "vendor") {
+				if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "vendor" || d.Name() == "testdata") {
 					return filepath.SkipDir
 				}
 				return nil

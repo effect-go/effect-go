@@ -24,10 +24,10 @@ type pkgGen struct {
 	files   []*fileGen
 	goFiles []string
 
-	topNames map[string]bool          // package-level names, from all files
-	sums     map[string]*ast.SumDecl  // error sets and enums declared in .ego files
-	setFuncs map[string]*ast.SumDecl  // "Recv.Name" or "Name" of functions returning an error set
-	facts    map[ast.Node]*fact       // what drafts learned, kept across rounds
+	topNames map[string]bool         // package-level names, from all files
+	sums     map[string]*ast.SumDecl // error sets and enums declared in .ego files
+	setFuncs map[string]*ast.SumDecl // "Recv.Name" or "Name" of functions returning an error set
+	facts    map[ast.Node]*fact      // what drafts learned, kept across rounds
 }
 
 // A fact is type information about a node that survives the draft rounds.

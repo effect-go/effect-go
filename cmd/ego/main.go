@@ -18,7 +18,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `ego compiles effect-go (.ego) files to Go.
 
 Usage:
-	ego generate [-lines=false] [dirs]   generate x_ego.go for each x.ego (default ./...)
+	ego generate [-check] [dirs]         generate x_ego.go for each x.ego, and layers_ego.go (default ./...)
 	ego fmt [-l] [-w] [paths]            format .ego files (default ./...)
 	ego lsp                              language server: gopls with .ego support
 	ego version

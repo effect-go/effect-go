@@ -246,3 +246,25 @@ func TestForkAfterCloseDoesNotLeak(t *testing.T) {
 		Fork(s, sleep(time.Hour, 0, nil))
 	})
 }
+
+func TestStopTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		_, err := Run(t.Context(), func(s *Scope) (int, error) {
+			Fork(s, func(ctx context.Context) (int, error) {
+				time.Sleep(10 * time.Second) // ignores ctx
+				return 0, nil
+			})
+			Fork(s, func(ctx context.Context) (int, error) {
+				<-ctx.Done()
+				return 0, ctx.Err()
+			})
+			return 1, nil
+		}, StopTimeout(time.Second))
+		var stuck *StuckError
+		if !errors.As(err, &stuck) || stuck.Fibers != 1 || time.Since(start) != time.Second {
+			t.Fatalf("err %v after %v", err, time.Since(start))
+		}
+		time.Sleep(10 * time.Second) // let the stuck fiber finish
+	})
+}
