@@ -1,8 +1,10 @@
 // Package dashboard builds a user's home page from four services. It's
-// written twice, with the same behaviour:
+// written three times, with the same behaviour:
 //
 //   - baseline.go uses errgroup and cenkalti/backoff, as most Go services do today.
-//   - effectgo.go uses the effect-go runtime (scope and schedule).
+//   - effectgo.go uses the effect-go runtime (scope and schedule) from plain Go.
+//   - dashboard.ego uses the effect-go dialect; ego generate compiles it to
+//     dashboard_ego.go.
 //
 // The page loads the user, their orders and their recommendations in
 // parallel, retries flaky recommendation calls, races two CDNs for the

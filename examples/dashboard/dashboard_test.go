@@ -89,7 +89,7 @@ type loader func(context.Context, Deps, string) (Page, error)
 var impls = []struct {
 	name string
 	load loader
-}{{"errgroup+backoff", LoadBaseline}, {"effect-go", Load}}
+}{{"errgroup+backoff", LoadBaseline}, {"effect-go", Load}, {"effect-go dialect", LoadEgo}}
 
 // each runs fn for both implementations, in a synctest bubble: time is fake,
 // and a goroutine still blocked at the end fails the test.
@@ -178,7 +178,7 @@ func TestReportsEveryFailure(t *testing.T) {
 		w.orders = script(step[[]Order]{after: 10 * time.Millisecond, err: errOrders})
 		_, err := load(t.Context(), w.deps(), "u1")
 		both := errors.Is(err, errUsers) && errors.Is(err, errOrders)
-		if want := name == "effect-go"; both != want {
+		if want := name != "errgroup+backoff"; both != want {
 			t.Fatalf("%s: both failures reported = %v (err: %v)", name, both, err)
 		}
 	})

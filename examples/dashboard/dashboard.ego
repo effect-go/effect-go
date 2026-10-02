@@ -1,0 +1,23 @@
+package dashboard
+
+import (
+	"errors"
+	"time"
+
+	"github.com/effect-go/effect-go/schedule"
+)
+
+var recsRetry = schedule.Max(schedule.Exponential(100*time.Millisecond), schedule.Recurs(3)).
+	Jittered().
+	While(err => !errors.Is(err, ErrRejected))
+
+// LoadEgo builds the page, written in the effect-go dialect.
+effect LoadEgo(d Deps, id string) (Page, error) {
+	return timeout(2*time.Second, loadEgo(d, id))
+}
+
+effect loadEgo(d Deps, id string) (Page, error) {
+	user, orders, recs := check all(d.Users.Get(id), d.Orders.ForUser(id), retry(recsRetry, d.Recs.For(id)))
+	banner := check race(d.CDN.Primary(user.Banner), d.CDN.Mirror(user.Banner)) "banner"
+	return Page{User: user, Orders: orders, Recs: recs, Banner: banner}, nil
+}

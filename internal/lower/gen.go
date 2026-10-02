@@ -2,6 +2,7 @@ package lower
 
 import (
 	"fmt"
+	goast "go/ast"
 	goparser "go/parser"
 	"go/token"
 	"go/types"
@@ -94,11 +95,24 @@ func (p *pkgGen) collect() {
 		if err != nil {
 			continue
 		}
-		for _, obj := range gf.Scope.Objects {
-			p.topNames[obj.Name] = true
-		}
 		for _, d := range gf.Decls {
-			_ = d
+			switch d := d.(type) {
+			case *goast.FuncDecl:
+				if d.Recv == nil {
+					p.topNames[d.Name.Name] = true
+				}
+			case *goast.GenDecl:
+				for _, s := range d.Specs {
+					switch s := s.(type) {
+					case *goast.TypeSpec:
+						p.topNames[s.Name.Name] = true
+					case *goast.ValueSpec:
+						for _, n := range s.Names {
+							p.topNames[n.Name] = true
+						}
+					}
+				}
+			}
 		}
 	}
 }

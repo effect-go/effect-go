@@ -1,6 +1,12 @@
-// users.ego: the same service in EffectGo. Not compiled yet: ego generate
-// (plan weeks 2–4) turns this file into Go equivalent to users.go.
+// Package users is the user service of ../users.go, written in the
+// effect-go dialect. ego generate compiles it to users_ego.go.
 package users
+
+import (
+	"fmt"
+	"net/http"
+	"time"
+)
 
 type UserID string
 
