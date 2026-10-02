@@ -824,9 +824,9 @@ func (g *fileGen) combinator(x *ast.CallExpr) []types.Type {
 				g.w.str(",\n")
 			}
 			g.w.str(")")
-		case "retry", "timeout":
+		case "retry", "repeat", "timeout":
 			if len(x.Args) != 2 {
-				g.errorf(x.Pos(), "%s takes two arguments: %s(%s, call)", kind, kind, map[string]string{"retry": "policy", "timeout": "duration"}[kind])
+				g.errorf(x.Pos(), "%s takes two arguments: %s(%s, call)", kind, kind, map[string]string{"retry": "policy", "repeat": "policy", "timeout": "duration"}[kind])
 				g.w.str("nil")
 				return
 			}
@@ -843,9 +843,12 @@ func (g *fileGen) combinator(x *ast.CallExpr) []types.Type {
 				vals = []types.Type{g.branchType(x.Args[1])}
 				return
 			}
-			if kind == "retry" {
+			switch kind {
+			case "retry":
 				g.w.str(g.pkgRef(schedulePath) + ".Retry(ctx, ")
-			} else {
+			case "repeat":
+				g.w.str(g.pkgRef(schedulePath) + ".Repeat(ctx, ")
+			default:
 				g.w.str(g.pkgRef(scopePath) + ".Timeout(ctx, ")
 			}
 			g.node(x.Args[0])
@@ -1066,7 +1069,7 @@ func (g *fileGen) autoLabel(x ast.Expr) string {
 	switch g.builtin(c) {
 	case "all", "race":
 		return ""
-	case "retry", "timeout":
+	case "retry", "repeat", "timeout":
 		if len(c.Args) == 2 {
 			return g.autoLabel(c.Args[1])
 		}

@@ -361,7 +361,7 @@ func (g *fileGen) passesSet(x ast.Expr, set *ast.SumDecl) bool {
 			}
 		}
 		return true
-	case "retry", "timeout":
+	case "retry", "repeat", "timeout":
 		return len(c.Args) == 2 && g.passesSet(c.Args[1], set)
 	case "each":
 		l := eachLambda(c)

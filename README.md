@@ -26,8 +26,8 @@ go get github.com/effect-go/effect-go
 
 | Package | What it gives you |
 |---|---|
-| [`scope`](scope) | `All2`–`All4` and `All` (parallel; the first failure cancels the rest; every real failure is kept), `Each` (the same over a slice, with a concurrency limit), `Race` (losers cancelled and awaited), `Timeout`, and `Run`/`Fork`/`Acquire`/`Defer` for fibers and resources released in reverse order. Panics come back as `*scope.Panic` with the original stack. |
-| [`schedule`](schedule) | Retry policies as values: `Exponential`, `Spaced`, `Recurs`, `Min`, `Max`, `.Jittered()`, `.While(retryable)`, `.UpTo(d)`, `.Tap(fn)`, and `Retry`, which records each retry on the current span. Testable on fake time with `testing/synctest`. |
+| [`scope`](scope) | `All2`–`All4` and `All` (parallel; the first failure cancels the rest; every real failure is kept), `Each` (the same over a slice, with a concurrency limit), `Race` (losers cancelled and awaited), `Timeout`, and `Run`/`Fork`/`Acquire`/`Defer` for fibers and resources released in reverse order, and `Main` for a program's main function. Panics come back as `*scope.Panic` with the original stack. |
+| [`schedule`](schedule) | Retry policies as values: `Exponential`, `Spaced`, `Recurs`, `Min`, `Max`, `.Jittered()`, `.While(retryable)`, `.UpTo(d)`, `.Tap(fn)`, `.Delayed()`, and `Retry`, which records each retry on the current span, and `Repeat`, for loops that run until their context ends. Testable on fake time with `testing/synctest`. |
 | [`trace`](trace) | One OpenTelemetry span per call: `ctx, span := trace.Start(ctx, name)` and `defer trace.End(span, &err)`, which also records panics. `LogHandler` adds trace and span IDs to `slog` records. |
 | [`layer`](layer) | Dependency graphs wired at build time, like wire, with lifecycles: each provider runs once, a missing provider is a build error, finalizers run in reverse order. |
 
@@ -35,7 +35,7 @@ The library needs Go 1.26 and depends only on OpenTelemetry.
 
 ## The dialect
 
-`.ego` files are Go plus: `check`/`must`/`else`/`fail` for errors (`else { Case(_) => value }` recovers chosen cases), error sets and `enum` with exhaustive `match`, `effect` functions (implicit `ctx` and a span), `all`/`race`/`retry`/`timeout`/`each`, short lambdas `x => …`, `if` and `match` as expressions, `f"…"` strings, and `?.`/`??`. [AGENTS.md](AGENTS.md) is the whole language on one page.
+`.ego` files are Go plus: `check`/`must`/`else`/`fail` for errors (`else { Case(_) => value }` recovers chosen cases), error sets and `enum` with exhaustive `match`, `effect` functions (implicit `ctx` and a span), `all`/`race`/`retry`/`repeat`/`timeout`/`each`, short lambdas `x => …`, `if` and `match` as expressions, `f"…"` strings, and `?.`/`??`. [AGENTS.md](AGENTS.md) is the whole language on one page.
 
 ```bash
 go install github.com/effect-go/effect-go/cmd/ego@latest

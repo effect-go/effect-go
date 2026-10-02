@@ -103,3 +103,17 @@ effect Scoped(n int) (string, error) {
 effect label(n int) (string, error) {
 	return f"#{n}", nil
 }
+
+type Countdown struct{ N int }
+
+effect (c *Countdown) Tick() (int, error) {
+	c.N--
+	return c.N, nil
+}
+
+// Drain ticks once a minute, like a ticker loop, until ctx ends, and
+// returns the last count.
+effect Drain(c *Countdown) (int, error) {
+	n := check repeat(schedule.Spaced(time.Minute).Delayed(), c.Tick()) "drain"
+	return n, nil
+}

@@ -1,8 +1,10 @@
 package report
 
 import (
+	"context"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -49,4 +51,15 @@ func TestShorthand(t *testing.T) {
 	if got, err := Scoped(t.Context(), 7); got != "#7" || err != nil {
 		t.Fatal(got, err)
 	}
+}
+
+func TestRepeat(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 150*time.Second)
+		defer cancel()
+		n, err := Drain(ctx, &Countdown{N: 10})
+		if n != 8 || err != nil {
+			t.Fatal(n, err)
+		}
+	})
 }

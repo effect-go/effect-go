@@ -2,7 +2,7 @@
   "name": "effect-go",
   "displayName": "effect-go",
   "description": "Language support for effect-go (.ego) files: highlighting, and gopls features through ego lsp.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "effect-go",
   "license": "MIT",
   "repository": {

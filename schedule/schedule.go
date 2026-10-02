@@ -16,11 +16,14 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
-// Schedule is a retry policy. The zero Schedule never retries.
+// Schedule is a retry or repeat policy. The zero Schedule never retries.
 type Schedule struct {
-	// step is called after the n-th failure (n starts at 1). It returns how
-	// long to wait before the next attempt, and false to stop retrying.
+	// step is called after the n-th attempt (n starts at 1), with its error
+	// when retrying and nil when repeating. It returns how long to wait
+	// before the next attempt, and false to stop.
 	step func(n int, err error) (time.Duration, bool)
+	// delayed: Repeat waits before the first call too.
+	delayed bool
 }
 
 // Next reports the delay before the attempt that follows the n-th failure,
@@ -35,7 +38,7 @@ func (s Schedule) Next(n int, err error) (time.Duration, bool) {
 // Exponential retries forever, waiting base, then 2×base, 4×base, and so on.
 // Combine it with Recurs or UpTo to bound it.
 func Exponential(base time.Duration) Schedule {
-	return Schedule{func(n int, _ error) (time.Duration, bool) {
+	return Schedule{step: func(n int, _ error) (time.Duration, bool) {
 		d := float64(base) * math.Pow(2, float64(n-1))
 		if d > math.MaxInt64 {
 			return math.MaxInt64, true
@@ -46,18 +49,18 @@ func Exponential(base time.Duration) Schedule {
 
 // Spaced retries forever, waiting d between attempts.
 func Spaced(d time.Duration) Schedule {
-	return Schedule{func(_ int, _ error) (time.Duration, bool) { return d, true }}
+	return Schedule{step: func(_ int, _ error) (time.Duration, bool) { return d, true }}
 }
 
 // Recurs retries at most n times, without waiting.
 func Recurs(n int) Schedule {
-	return Schedule{func(i int, _ error) (time.Duration, bool) { return 0, i <= n }}
+	return Schedule{step: func(i int, _ error) (time.Duration, bool) { return 0, i <= n }}
 }
 
 // Min continues while any of the schedules continues, and waits for the
 // shortest of their delays.
 func Min(ss ...Schedule) Schedule {
-	return Schedule{func(n int, err error) (time.Duration, bool) {
+	return Schedule{step: func(n int, err error) (time.Duration, bool) {
 		var best time.Duration
 		ok := false
 		for _, s := range ss {
@@ -73,7 +76,7 @@ func Min(ss ...Schedule) Schedule {
 // of their delays. Max(Exponential(100*time.Millisecond), Recurs(5)) backs
 // off exponentially, five times.
 func Max(ss ...Schedule) Schedule {
-	return Schedule{func(n int, err error) (time.Duration, bool) {
+	return Schedule{step: func(n int, err error) (time.Duration, bool) {
 		var worst time.Duration
 		for _, s := range ss {
 			d, more := s.Next(n, err)
@@ -89,7 +92,7 @@ func Max(ss ...Schedule) Schedule {
 // Jittered spreads each delay randomly between 80% and 120%, so clients that
 // failed together don't retry together.
 func (s Schedule) Jittered() Schedule {
-	return Schedule{func(n int, err error) (time.Duration, bool) {
+	return Schedule{step: func(n int, err error) (time.Duration, bool) {
 		d, ok := s.Next(n, err)
 		return time.Duration(float64(d) * (0.8 + 0.4*rand.Float64())), ok
 	}}
@@ -98,7 +101,7 @@ func (s Schedule) Jittered() Schedule {
 // While retries only errors for which retryable returns true. Use it to stop
 // on errors that won't go away, such as a rejected request.
 func (s Schedule) While(retryable func(error) bool) Schedule {
-	return Schedule{func(n int, err error) (time.Duration, bool) {
+	return Schedule{step: func(n int, err error) (time.Duration, bool) {
 		if !retryable(err) {
 			return 0, false
 		}
@@ -108,7 +111,7 @@ func (s Schedule) While(retryable func(error) bool) Schedule {
 
 // UpTo caps each delay at d.
 func (s Schedule) UpTo(d time.Duration) Schedule {
-	return Schedule{func(n int, err error) (time.Duration, bool) {
+	return Schedule{step: func(n int, err error) (time.Duration, bool) {
 		next, ok := s.Next(n, err)
 		return min(next, d), ok
 	}}
@@ -118,13 +121,56 @@ func (s Schedule) UpTo(d time.Duration) Schedule {
 // last error and the delay before the next attempt: for logs and metrics.
 // Put it last, after Jittered or UpTo, so it sees the delay Retry waits.
 func (s Schedule) Tap(fn func(n int, err error, wait time.Duration)) Schedule {
-	return Schedule{func(n int, err error) (time.Duration, bool) {
+	return Schedule{step: func(n int, err error) (time.Duration, bool) {
 		d, ok := s.Next(n, err)
 		if ok {
 			fn(n, err, d)
 		}
 		return d, ok
 	}}
+}
+
+// Delayed makes Repeat wait for the schedule's first delay before the first
+// call too, as a time.Ticker does. Put it last: other methods drop it.
+func (s Schedule) Delayed() Schedule {
+	s.delayed = true
+	return s
+}
+
+// Repeat calls task, then calls it again after each delay the schedule gives
+// (asked with a nil error), until the schedule stops, task fails or ctx is
+// cancelled. It returns task's last result, or its error. Cancellation ends
+// a repetition without an error: a loop that runs until shutdown has done
+// its job. Repeat(ctx, Spaced(time.Minute).Delayed(), task) is a ticker
+// loop that stops with ctx.
+func Repeat[T any](ctx context.Context, s Schedule, task func(context.Context) (T, error)) (T, error) {
+	var last T
+	delays := 0 // delays asked for so far: Recurs(3) allows three
+	for first := true; ; first = false {
+		if !first || s.delayed {
+			delays++
+			d, ok := s.Next(delays, nil)
+			if !ok {
+				return last, nil
+			}
+			t := time.NewTimer(d)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return last, nil
+			case <-t.C:
+			}
+		}
+		if ctx.Err() != nil {
+			return last, nil
+		}
+		v, err := task(ctx)
+		if err != nil {
+			var zero T
+			return zero, err
+		}
+		last = v
+	}
 }
 
 // Retry calls task until it succeeds or the schedule stops, and returns the

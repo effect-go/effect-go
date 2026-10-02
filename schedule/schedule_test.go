@@ -140,3 +140,30 @@ func TestRetryStopsWhenCancelledWhileWaiting(t *testing.T) {
 		}
 	})
 }
+
+func TestRepeat(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var at []time.Duration
+		start := time.Now()
+		task := func(context.Context) (int, error) { at = append(at, time.Since(start)); return len(at), nil }
+		n, err := Repeat(t.Context(), Max(Spaced(time.Minute), Recurs(2)), task)
+		if err != nil || n != 3 || !slices.Equal(at, []time.Duration{0, time.Minute, 2 * time.Minute}) {
+			t.Fatalf("got %d %v, calls at %v: want at once, then twice a minute apart", n, err, at)
+		}
+
+		// Delayed waits first, like a ticker, and cancellation ends it without an error.
+		at, start = nil, time.Now()
+		ctx, cancel := context.WithTimeout(t.Context(), 150*time.Second)
+		defer cancel()
+		n, err = Repeat(ctx, Spaced(time.Minute).Delayed(), task)
+		if err != nil || n != 2 || !slices.Equal(at, []time.Duration{time.Minute, 2 * time.Minute}) {
+			t.Fatalf("delayed: got %d %v, calls at %v", n, err, at)
+		}
+
+		// A failure stops it with the error.
+		_, err = Repeat(t.Context(), Spaced(time.Second), func(context.Context) (int, error) { return 0, errFlaky })
+		if err != errFlaky {
+			t.Fatalf("failure: %v", err)
+		}
+	})
+}

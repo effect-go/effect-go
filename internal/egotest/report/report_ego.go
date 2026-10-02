@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/effect-go/effect-go/schedule"
 	"github.com/effect-go/effect-go/scope"
 	"github.com/effect-go/effect-go/trace"
 )
@@ -158,4 +159,29 @@ func label(ctx context.Context, n int) (_ string, err error) {
 	defer trace.End(span, &err)
 //line report.ego:104
 	return fmt.Sprintf("#%d", n), nil
+}
+
+type Countdown struct{ N int }
+
+func (c *Countdown) Tick(ctx context.Context) (_ int, err error) {
+	ctx, span := trace.Start(ctx, "report.Countdown.Tick")
+	defer trace.End(span, &err)
+	c.N--
+	return c.N, nil
+}
+
+// Drain ticks once a minute, like a ticker loop, until ctx ends, and
+// returns the last count.
+//
+//line report.ego:114
+func Drain(ctx context.Context, c *Countdown) (_ int, err error) {
+	ctx, span := trace.Start(ctx, "report.Drain")
+	defer trace.End(span, &err)
+//line report.ego:117
+	n, err := schedule.Repeat(ctx, schedule.Spaced(time.Minute).Delayed(), func(ctx context.Context) (int, error) { return c.Tick(ctx) })
+	if err != nil {
+		return 0, fmt.Errorf("drain: %w", err)
+	}
+//line report.ego:118
+	return n, nil
 }

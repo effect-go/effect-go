@@ -113,7 +113,7 @@
           "name": "keyword.control.ego"
         },
         {
-          "match": "\\b(all|race|retry|timeout|each)\\b(?=\\()",
+          "match": "\\b(all|race|retry|repeat|timeout|each)\\b(?=\\()",
           "name": "support.function.builtin.ego"
         },
         {

@@ -546,7 +546,7 @@ func hasDirect(s ast.Stmt, g *fileGen) bool {
 	return found
 }
 
-// builtin returns "all", "race", "retry", "timeout" or "each" if call uses one of the
+// builtin returns "all", "race", "retry", "repeat", "timeout" or "each" if call uses one of the
 // predeclared combinators, which the package's own declarations shadow.
 func (g *fileGen) builtin(call *ast.CallExpr) string {
 	id, ok := call.Fun.(*ast.Ident)
@@ -554,7 +554,7 @@ func (g *fileGen) builtin(call *ast.CallExpr) string {
 		return ""
 	}
 	switch id.Name {
-	case "all", "race", "retry", "timeout", "each":
+	case "all", "race", "retry", "repeat", "timeout", "each":
 		if id.Obj == nil && !g.pkg.topNames[id.Name] {
 			return id.Name
 		}
@@ -623,7 +623,7 @@ func (g *fileGen) computeEdits() {
 			if b := g.builtin(n); b != "" {
 				// The branches get their own ctx.
 				args := n.Args
-				if b == "retry" || b == "timeout" {
+				if b == "retry" || b == "repeat" || b == "timeout" {
 					args = args[min(1, len(args)):]
 				}
 				for _, a := range args {

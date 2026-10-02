@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 )
 
 // Config is what the service reads from its environment.
@@ -17,26 +15,20 @@ type Config struct {
 
 func main() {
 	slog.SetDefault(slog.New(trace.LogHandler(slog.NewTextHandler(os.Stderr, nil))))
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	cfg := Config{Addr: os.LookupEnv("ADDR") ?? ":8080"}
-	_, err := scope.Run(ctx, s => serve(s, cfg))
-	if err != nil {
-		slog.Error("stopped", "err", err)
-		os.Exit(1)
-	}
+	scope.Main(s => serve(s, cfg))
 }
 
-// serve serves HTTP until ctx is cancelled (Ctrl-C or SIGTERM), then lets
-// the requests in flight finish. Its ctx comes from the scope.
-effect serve(s *scope.Scope, cfg Config) (struct{}, error) {
+// serve serves HTTP until Ctrl-C or SIGTERM cancels ctx, then lets the
+// requests in flight finish. Its ctx comes from the scope.
+effect serve(s *scope.Scope, cfg Config) error {
 	srv := check BuildServer(s, cfg)
 	context.AfterFunc(ctx, () => srv.Shutdown(context.WithoutCancel(ctx)))
 	slog.InfoContext("listening", "addr", cfg.Addr)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-		return struct{}{}, err
+		return err
 	}
-	return struct{}{}, nil
+	return nil
 }
 
 func NewServer(cfg Config, h *Handler) *http.Server {
