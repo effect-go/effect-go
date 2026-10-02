@@ -14,6 +14,7 @@ import (
 	"fmt"
 	goast "go/ast"
 	"go/build"
+	"go/build/constraint"
 	"go/format"
 	goparser "go/parser"
 	"go/token"
@@ -257,6 +258,9 @@ func (p *pkgGen) parse(res *Result) error {
 		if err != nil {
 			return err
 		}
+		if !matchBuild(src) {
+			continue
+		}
 		f, err := parser.ParseFile(p.fset, path, src, parser.ParseComments)
 		if err != nil {
 			var list scanner.ErrorList
@@ -406,4 +410,33 @@ func (p *pkgGen) mapErrors(ti *typeInfo, outs []*Output) []Diagnostic {
 		ds = append(ds, Diagnostic{Pos: pos, Msg: te.Msg})
 	}
 	return ds
+}
+
+// matchBuild reports whether a .ego file's //go:build line, if any, is
+// satisfied by the default build context.
+func matchBuild(src []byte) bool {
+	for line := range strings.SplitSeq(string(src), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "//") && !constraint.IsGoBuild(line) {
+			continue
+		}
+		if !constraint.IsGoBuild(line) {
+			return true // past the header
+		}
+		x, err := constraint.Parse(line)
+		if err != nil {
+			return true
+		}
+		ctx := build.Default
+		return x.Eval(func(tag string) bool {
+			if tag == ctx.GOOS || tag == ctx.GOARCH || tag == ctx.Compiler || tag == "cgo" && ctx.CgoEnabled {
+				return true
+			}
+			if tag == "unix" {
+				return ctx.GOOS != "windows" && ctx.GOOS != "plan9" && ctx.GOOS != "js" && ctx.GOOS != "wasip1"
+			}
+			return slices.Contains(ctx.ReleaseTags, tag) || slices.Contains(ctx.BuildTags, tag) || slices.Contains(ctx.ToolTags, tag)
+		})
+	}
+	return true
 }
