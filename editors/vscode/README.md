@@ -10,7 +10,7 @@ Install the tools, then the extension:
 go install github.com/effect-go/effect-go/cmd/ego@latest
 go install golang.org/x/tools/gopls@latest
 cd editors/vscode && npm install && npx @vscode/vsce package
-code --install-extension effect-go-0.2.0.vsix
+code --install-extension effect-go-0.3.0.vsix
 ```
 
 Generated files: Go needs `x_ego.go` in the same directory as `x.ego` (a
