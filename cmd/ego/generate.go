@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/effect-go/effect-go/internal/layers"
 	"github.com/effect-go/effect-go/internal/lower"
 )
 
@@ -40,19 +41,44 @@ func generate(args []string) error {
 			continue
 		}
 		for _, out := range res.Outputs {
-			old, _ := os.ReadFile(out.Go)
-			if bytes.Equal(old, out.Code) {
-				continue
-			}
-			if err := os.WriteFile(out.Go, out.Code, 0o666); err != nil {
+			if err := write(out.Go, out.Code); err != nil {
 				return err
 			}
-			fmt.Println(rel(out.Go))
+		}
+		// Layers are wired after the .ego files compile: injectors may use
+		// their declarations.
+		lr, err := layers.Generate(dir)
+		if err != nil {
+			return err
+		}
+		if lr != nil {
+			for _, d := range lr.Diags {
+				fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
+			}
+			if len(lr.Diags) > 0 {
+				failed = true
+				continue
+			}
+			if err := write(lr.Path, lr.Code); err != nil {
+				return err
+			}
 		}
 	}
 	if failed {
 		return errSilent
 	}
+	return nil
+}
+
+// write writes a generated file if it changed, and prints its name.
+func write(path string, code []byte) error {
+	if old, _ := os.ReadFile(path); bytes.Equal(old, code) {
+		return nil
+	}
+	if err := os.WriteFile(path, code, 0o666); err != nil {
+		return err
+	}
+	fmt.Println(rel(path))
 	return nil
 }
 
@@ -87,7 +113,7 @@ func egoDirs(args []string) ([]string, error) {
 				if d.IsDir() && path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" || d.Name() == "vendor") {
 					return filepath.SkipDir
 				}
-				if !d.IsDir() && strings.HasSuffix(path, ".ego") {
+				if !d.IsDir() && (strings.HasSuffix(path, ".ego") || strings.HasSuffix(path, ".go") && layers.HasInjectors(filepath.Dir(path))) {
 					add(filepath.Dir(path))
 				}
 				return nil

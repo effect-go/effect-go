@@ -161,3 +161,11 @@ func Acquire[T any](s *Scope, open Task[T], release func(context.Context, T) err
 	s.mu.Unlock()
 	return v, nil
 }
+
+// Defer registers release to run when the scope closes, with the resources:
+// last-in first-out, after every fiber has stopped.
+func (s *Scope) Defer(release func(context.Context) error) {
+	s.mu.Lock()
+	s.releases = append(s.releases, release)
+	s.mu.Unlock()
+}
