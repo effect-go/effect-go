@@ -1,4 +1,4 @@
-module effectgo
+module github.com/effect-go/effect-go
 
 go 1.26
 

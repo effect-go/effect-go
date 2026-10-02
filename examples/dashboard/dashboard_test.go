@@ -12,7 +12,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"effectgo/scope"
+	"github.com/effect-go/effect-go/scope"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -89,7 +89,7 @@ type loader func(context.Context, Deps, string) (Page, error)
 var impls = []struct {
 	name string
 	load loader
-}{{"errgroup+backoff", LoadBaseline}, {"effectgo", Load}}
+}{{"errgroup+backoff", LoadBaseline}, {"effect-go", Load}}
 
 // each runs fn for both implementations, in a synctest bubble: time is fake,
 // and a goroutine still blocked at the end fails the test.
@@ -169,7 +169,7 @@ func TestTimesOut(t *testing.T) {
 
 // The differences.
 
-// errgroup keeps only the first error. effectgo keeps every real failure.
+// errgroup keeps only the first error. effect-go keeps every real failure.
 func TestReportsEveryFailure(t *testing.T) {
 	each(t, func(t *testing.T, load loader, name string) {
 		w := healthy()
@@ -178,14 +178,14 @@ func TestReportsEveryFailure(t *testing.T) {
 		w.orders = script(step[[]Order]{after: 10 * time.Millisecond, err: errOrders})
 		_, err := load(t.Context(), w.deps(), "u1")
 		both := errors.Is(err, errUsers) && errors.Is(err, errOrders)
-		if want := name == "effectgo"; both != want {
+		if want := name == "effect-go"; both != want {
 			t.Fatalf("%s: both failures reported = %v (err: %v)", name, both, err)
 		}
 	})
 }
 
 // The baseline returns while the losing CDN request is still running. With
-// effectgo, nothing started by Load outlives it.
+// effect-go, nothing started by Load outlives it.
 func TestNothingOutlivesTheCall(t *testing.T) {
 	each(t, func(t *testing.T, load loader, name string) {
 		w := healthy()
@@ -241,7 +241,7 @@ func TestBaselinePanicCrashesTheProcess(t *testing.T) {
 }
 
 // The classic errgroup bug: a call uses ctx instead of gctx, so it isn't
-// cancelled when a sibling fails, and the page waits for it. With effectgo
+// cancelled when a sibling fails, and the page waits for it. With effect-go
 // each task's ctx parameter shadows the outer one, so the bug can't be
 // written by name.
 func TestWrongContextBug(t *testing.T) {

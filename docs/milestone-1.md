@@ -4,7 +4,7 @@
 
 ## Verdict
 
-**The week-1 gate passes.** On the dashboard demo, the effectgo runtime does everything errgroup + cenkalti/backoff does in half the code. It also fixes five problems the baseline has, each shown by a test.
+**The week-1 gate passes.** On the dashboard demo, the effect-go runtime does everything errgroup + cenkalti/backoff does in half the code. It also fixes five problems the baseline has, each shown by a test.
 
 ## What was built
 
@@ -13,7 +13,7 @@
 | [`scope`](../scope) | `Run`, `Fork`/`Join`/`Interrupt`, `All`, `All2`–`All4`, `Race`, `Timeout`, `Acquire`; `Panic`, `TimeoutError`, `KindOf` (Fail, Die, Interrupt) | 14 |
 | [`schedule`](../schedule) | `Exponential`, `Spaced`, `Recurs`, `Min`, `Max`, `Jittered`, `While`, `UpTo`, `Retry` | 7 |
 | [`trace`](../trace) | `Start` and `End` over OpenTelemetry; `defer trace.End(span, &err)` also records panics | 1 |
-| [`examples/dashboard`](../examples/dashboard) | The same page loader written with errgroup + backoff and with effectgo | 10 |
+| [`examples/dashboard`](../examples/dashboard) | The same page loader written with errgroup + backoff and with effect-go | 10 |
 | [`examples/users`](../examples/users) | A user service with a hand-written error set, plus `users.ego`, the same code in the dialect | 2 |
 
 All of it:
@@ -23,7 +23,7 @@ All of it:
 
 The library depends only on OpenTelemetry. errgroup and backoff are used only by the examples, which are a separate module.
 
-## Dashboard: errgroup + backoff vs effectgo
+## Dashboard: errgroup + backoff vs effect-go
 
 The same behaviour:
 - load the user, orders and recommendations in parallel;
@@ -31,7 +31,7 @@ The same behaviour:
 - race two CDNs for the banner;
 - give up after 2 seconds.
 
-| | errgroup + backoff | effectgo |
+| | errgroup + backoff | effect-go |
 |---|---|---|
 | Code (non-blank, non-comment lines) | 72 | 34 |
 | Runs in parallel, cancels the rest on failure, retries, times out | yes | yes |
@@ -42,7 +42,7 @@ The same behaviour:
 | Not retrying some errors | wrap them in `backoff.Permanent` at the call site | `While(…)` on the policy, a reusable value |
 | Racing two calls | a hand-written helper, 25 lines, with a buffered channel to avoid a leak | `scope.Race` |
 
-**The trade-off:** because effectgo waits for cancelled work to stop, a call that is slow to notice cancellation delays the return. In the test, a CDN request that takes 100 ms to stop delays the return by 100 ms. The baseline returns immediately and leaves the request running.
+**The trade-off:** because effect-go waits for cancelled work to stop, a call that is slow to notice cancellation delays the return. In the test, a CDN request that takes 100 ms to stop delays the return by 100 ms. The baseline returns immediately and leaves the request running.
 
 ## Users: plain Go vs the dialect
 
@@ -55,7 +55,7 @@ The handler shows the gap the dialect closes: Go doesn't check that every `UserE
 - **The Cause model is a classification, not one struct.** It's `KindOf(err)` plus `*Panic` and `*TimeoutError`, and parallel failures are combined with `errors.Join`. Plain Go code uses it with `errors.Is` and `errors.As`, with nothing new to learn.
 - **`trace.End` takes `&err`,** so `defer trace.End(span, &err)` is one line and also records panics. The doc and the playground now generate this form.
 - **Not built yet:** a deadline for fibers that ignore cancellation, with a report of the ones that don't stop (§3 item 5). Today a scope waits for them indefinitely, which is cooperative cancellation as in all Go code.
-- **Not released yet:** the module path is the placeholder `effectgo` until the project's name is chosen (§9 step 0).
+- **Module path:** `github.com/effect-go/effect-go`, from the name chosen in §9 step 0.
 
 ## Next
 

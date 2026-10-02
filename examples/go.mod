@@ -1,10 +1,10 @@
-module effectgo/examples
+module github.com/effect-go/effect-go/examples
 
 go 1.26.0
 
 require (
-	effectgo v0.0.0
 	github.com/cenkalti/backoff/v5 v5.0.3
+	github.com/effect-go/effect-go v0.0.0
 	golang.org/x/sync v0.23.0
 )
 
@@ -18,4 +18,4 @@ require (
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 )
 
-replace effectgo => ../
+replace github.com/effect-go/effect-go => ../

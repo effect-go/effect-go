@@ -29,7 +29,7 @@ func protect(ctx context.Context, fn func(context.Context) error) (err error) {
 // label marks the current goroutine so goroutine dumps and the leak profile
 // show it was started by this package.
 func label(ctx context.Context) {
-	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("effectgo", "fiber")))
+	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("effect-go", "fiber")))
 }
 
 // group runs tasks that succeed or fail together: the first failure cancels

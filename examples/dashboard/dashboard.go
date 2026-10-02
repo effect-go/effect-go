@@ -2,7 +2,7 @@
 // written twice, with the same behaviour:
 //
 //   - baseline.go uses errgroup and cenkalti/backoff, as most Go services do today.
-//   - effectgo.go uses the effectgo runtime (scope and schedule).
+//   - effectgo.go uses the effect-go runtime (scope and schedule).
 //
 // The page loads the user, their orders and their recommendations in
 // parallel, retries flaky recommendation calls, races two CDNs for the

@@ -1,5 +1,5 @@
 // Package users is a user service and its HTTP handler, written in plain Go
-// with the effectgo runtime. It is the baseline for the dialect: users.ego is
+// with the effect-go runtime. It is the baseline for the dialect: users.ego is
 // the same code in EffectGo, which ego generate will compile to Go like this.
 package users
 
@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"effectgo/trace"
+	"github.com/effect-go/effect-go/trace"
 )
 
 type UserID string

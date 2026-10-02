@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"time"
 
-	"effectgo/schedule"
-	"effectgo/scope"
+	"github.com/effect-go/effect-go/schedule"
+	"github.com/effect-go/effect-go/scope"
 )
 
 var recsPolicy = schedule.Max(schedule.Exponential(100*time.Millisecond), schedule.Recurs(3)).
 	Jittered().
 	While(func(err error) bool { return !errors.Is(err, ErrRejected) })
 
-// Load builds the page with the effectgo runtime.
+// Load builds the page with the effect-go runtime.
 func Load(ctx context.Context, d Deps, id string) (Page, error) {
 	return scope.Timeout(ctx, 2*time.Second, func(ctx context.Context) (Page, error) {
 		user, orders, recs, err := scope.All3(ctx,

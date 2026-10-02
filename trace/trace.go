@@ -18,7 +18,7 @@ import (
 )
 
 // Instrumentation is the instrumentation scope name the spans are reported under.
-const Instrumentation = "effectgo"
+const Instrumentation = "github.com/effect-go/effect-go"
 
 // Start starts a span named name, as a child of the span in ctx.
 func Start(ctx context.Context, name string) (context.Context, oteltrace.Span) {

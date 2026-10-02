@@ -509,7 +509,7 @@ How the plan is ordered:
 - **Target Go 1.26,** the oldest supported release, for the runtime and the generated code. Companies often lag one version. Tests may use 1.27 tools such as the goroutine-leak profile.
 
 0. **Before any code (1–2 days):**
-   - Choose the name and the first audience. The module path, CLI, file extension and import paths all follow from it, and change expensively later.
+   - Choose the name and the first audience. **Name decided: effect-go**, module `github.com/effect-go/effect-go`. The first audience is still open.
    - Read Dingo's parser and gopls proxy, and decide what to borrow.
 1. **Week 1: runtime library** (`scope`, `Cause`, `schedule`, `Acquire`, `trace`), tested with `synctest` and the goroutine-leak profile. Write both demos (the repository service and the dashboard) in plain Go.
    - *Gate:* clearly better than errgroup + backoff on the dashboard demo.
@@ -541,7 +541,7 @@ How the plan is ordered:
 - Should an `if` expression allow statements before its final value, or stay one expression per branch?
 - Should f-strings support format specs (`{amount:.2f}`) from the start, or only plain values?
 - Where should code be allowed to turn panics into values?
-- The project name and first audience (decided in step 0 of §9, before any code).
+- The first audience (the name is decided: effect-go).
 
 ## Sources
 
