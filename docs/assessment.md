@@ -192,6 +192,8 @@ A test graph swaps one provider (for example, an in-memory repository), the way 
 
 ### 4.4 Dialect (deliberately small)
 
+*This section is the design as proposed on 2026-10-01. The built language is described in [AGENTS.md](../AGENTS.md), and the differences in [milestones-2-7.md](milestones-2-7.md).*
+
 Every addition answers something Go has refused, lowers to the Go you'd write by hand, and keeps the grammar parseable without type information. Additions marked **v1** need types from go/types to lower, so they ship after the tooling gate (§9).
 
 **Errors.** `?` is not used for errors. It means "might be missing", as in TypeScript (see below).

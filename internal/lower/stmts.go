@@ -193,7 +193,7 @@ func (g *fileGen) check(lhs []ast.Expr, tok token.Token, c *ast.CheckExpr) {
 	case c.Must:
 		handle = "panic(err)"
 	default:
-		handle = g.ret(g.wrap(c))
+		handle = g.ret(g.wrap(c, "err"))
 	}
 
 	switch {
@@ -248,8 +248,9 @@ func (g *fileGen) draftCheck(lhs []ast.Expr, tok token.Token, c *ast.CheckExpr) 
 	g.value(x)
 }
 
-// wrap returns the error a check returns: labelled, or as an error set case.
-func (g *fileGen) wrap(c *ast.CheckExpr) string {
+// wrap returns the error a check returns, given the variable holding the
+// error: labelled, or as an error set case.
+func (g *fileGen) wrap(c *ast.CheckExpr, err string) string {
 	set := (*ast.SumDecl)(nil)
 	if g.fn != nil {
 		set = g.fn.set
@@ -283,28 +284,27 @@ func (g *fileGen) wrap(c *ast.CheckExpr) string {
 				g.errorf(c.Case.Pos(), "%s is not a case of %s", g.text(c.Case), set.Name.Name)
 			}
 		}
-		return g.renderStr(c.Case) + "{" + field + ": err}"
+		return g.renderStr(c.Case) + "{" + field + ": " + err + "}"
 	}
 	if set != nil {
-		if g.passesSet(c.X, set) {
-			return "err"
+		if !g.passesSet(c.X, set) {
+			g.errorf(c.Pos(), "this function returns %s: write check … as <case>", set.Name.Name)
 		}
-		g.errorf(c.Pos(), "this function returns %s: write check … as <case>", set.Name.Name)
-		return "err"
+		return err
 	}
 	if c.Label != nil {
 		saved := g.w
 		g.w = &writer{}
-		g.fstring(c.Label, "err", nil)
+		g.fstring(c.Label, err, nil)
 		s := string(g.w.buf)
 		g.w = saved
 		return s
 	}
 	label := g.autoLabel(c.X)
 	if label == "" {
-		return "err"
+		return err
 	}
-	return g.pkgRef("fmt") + `.Errorf("` + label + `: %w", err)`
+	return g.pkgRef("fmt") + `.Errorf("` + label + `: %w", ` + err + `)`
 }
 
 // inSet reports whether a case type belongs to an error set.
@@ -454,13 +454,8 @@ func (g *fileGen) checkValue(c *ast.CheckExpr) {
 	switch {
 	case c.Must:
 		handle = "panic(" + v + ")"
-	case c.Case != nil || c.Label != nil:
-		handle = g.ret(strings.ReplaceAll(g.wrap(c), "err}", v+"}"))
-		if c.Label != nil {
-			handle = strings.Replace(handle, ", err)", ", "+v+")", 1)
-		}
 	default:
-		handle = g.ret(v)
+		handle = g.ret(g.wrap(c, v))
 	}
 	g.w.str(handle + "\n}")
 }

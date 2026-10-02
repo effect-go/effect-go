@@ -48,7 +48,7 @@ The generated code is plain, gofmt'd Go with `//line` directives, so compiler er
 
 Editors: `ego lsp` is a language server that runs gopls on the generated Go and maps positions back, for hover, go to definition, diagnostics, rename and format-on-save. [editors/vscode](editors/vscode) is a VS Code extension for it.
 
-Analyzers for plain Go: `go vet -vettool=$(which egovet) ./...` checks exhaustive switches over sum types and enums, child tasks that use their parent's context (the errgroup `ctx`/`gctx` bug), and fibers that are never joined. Install with `go install github.com/effect-go/effect-go/cmd/egovet@latest`.
+Analyzers, for plain Go too: `ego vet ./...` runs `go vet`, then checks exhaustive switches over sum types and enums, child tasks that use their parent's context (the errgroup `ctx`/`gctx` bug), and fibers that are never joined.
 
 ## Status
 
@@ -68,7 +68,7 @@ The plan, its gates and their results are in [docs/assessment.md](docs/assessmen
 | Path | |
 |---|---|
 | `scope`, `schedule`, `trace`, `layer` | the library |
-| `cmd/ego`, `cmd/egovet` | the commands |
+| `cmd/ego` | the command |
 | `internal/syntax` | Go's scanner, parser, AST and printer, extended with the dialect |
 | `internal/lower` | the compiler from `.ego` to Go |
 | `internal/layers` | the wiring generator |

@@ -298,35 +298,9 @@ func (g *fileGen) render(r *round) *writer {
 	case len(paths) == 0:
 		g.copy(0, importsEnd)
 	case lp == nil && single != nil:
-		// import "x" becomes a block with the added imports, standard
-		// library first.
+		// import "x" becomes a block with the added imports.
 		g.copy(0, g.off(single.Pos()))
-		out.str("import (\n")
-		own := single.Specs[0].(*ast.ImportSpec)
-		ownPath, _ := strconv.Unquote(own.Path.Value)
-		copyOwn := func() {
-			out.str("\t")
-			g.copy(g.off(own.Pos()), g.off(own.End()))
-			out.str("\n")
-		}
-		if isStd(ownPath) {
-			copyOwn()
-		}
-		for _, p := range paths {
-			if isStd(p) {
-				out.str("\t" + spec(p) + "\n")
-			}
-		}
-		if others := nonStd(paths); len(others) > 0 || !isStd(ownPath) {
-			out.str("\n")
-			if !isStd(ownPath) {
-				copyOwn()
-			}
-			for _, p := range others {
-				out.str("\t" + spec(p) + "\n")
-			}
-		}
-		out.str(")")
+		g.importBlock(paths, spec, single.Specs[0].(*ast.ImportSpec))
 		g.copy(g.off(single.End()), importsEnd)
 	case lp != nil:
 		g.copy(0, g.off(lp.Lparen)+1)
@@ -345,19 +319,8 @@ func (g *fileGen) render(r *round) *writer {
 		g.copy(g.off(lp.Rparen), importsEnd)
 	default:
 		g.copy(0, importsEnd)
-		out.str("\n\nimport (\n")
-		for _, p := range paths {
-			if isStd(p) {
-				out.str("\t" + spec(p) + "\n")
-			}
-		}
-		for i, p := range nonStd(paths) {
-			if i == 0 {
-				out.str("\n")
-			}
-			out.str("\t" + spec(p) + "\n")
-		}
-		out.str(")")
+		out.str("\n\n")
+		g.importBlock(paths, spec, nil)
 	}
 	out.add(body)
 	return out
@@ -734,10 +697,7 @@ func (g *fileGen) funcHeaderEdits(ft *ast.FuncType, body *ast.BlockStmt, decl *a
 	if body == nil || decl == nil {
 		return
 	}
-	spanName := funcKey(decl)
-	if decl.Recv == nil {
-		spanName = g.pkg.name + "." + spanName
-	}
+	spanName := g.pkg.name + "." + funcKey(decl)
 	tr := g.pkgRef(tracePath)
 	span := "span"
 	if usesName(body, "span") {
@@ -782,8 +742,12 @@ func (g *fileGen) ctxEdits(n ast.Node) {
 			return true
 		}
 		if len(call.Args) > 0 {
-			if t := g.typeOf(call.Args[0]); t != nil && (isContext(t) || types.Implements(t, contextIface(sig))) {
+			t := g.typeOf(call.Args[0])
+			if t != nil && (isContext(t) || types.Implements(t, contextIface(sig))) {
 				return true // explicit
+			}
+			if t == nil && sig.Variadic() {
+				return true // can't tell whether ctx was passed
 			}
 		}
 		want := sig.Params().Len() - 1
@@ -997,4 +961,39 @@ func (g *fileGen) autoImports() {
 		}
 		return true
 	})
+}
+
+// importBlock writes an import block with the added paths and the file's
+// own import, if any: the standard library first, then the rest.
+func (g *fileGen) importBlock(paths []string, spec func(string) string, own *ast.ImportSpec) {
+	ownStd := false
+	if own != nil {
+		p, _ := strconv.Unquote(own.Path.Value)
+		ownStd = isStd(p)
+	}
+	writeOwn := func() {
+		g.w.str("\t")
+		g.copy(g.off(own.Pos()), g.off(own.End()))
+		g.w.str("\n")
+	}
+	g.w.str("import (\n")
+	if own != nil && ownStd {
+		writeOwn()
+	}
+	for _, p := range paths {
+		if isStd(p) {
+			g.w.str("\t" + spec(p) + "\n")
+		}
+	}
+	others := nonStd(paths)
+	if len(others) > 0 || own != nil && !ownStd {
+		g.w.str("\n")
+		if own != nil && !ownStd {
+			writeOwn()
+		}
+		for _, p := range others {
+			g.w.str("\t" + spec(p) + "\n")
+		}
+	}
+	g.w.str(")")
 }

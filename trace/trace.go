@@ -4,7 +4,7 @@
 //
 // Generated code calls it like this:
 //
-//	ctx, span := trace.Start(ctx, "Shop.Checkout")
+//	ctx, span := trace.Start(ctx, "shop.Shop.Checkout")
 //	defer trace.End(span, &err)
 package trace
 

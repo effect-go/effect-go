@@ -2,7 +2,6 @@ package lower
 
 import (
 	"go/types"
-	"sort"
 	"strings"
 
 	"github.com/effect-go/effect-go/internal/syntax/ast"
@@ -422,5 +421,3 @@ func (g *fileGen) draftMatch(tag ast.Expr, arms []*ast.MatchArm, body func(*ast.
 	}
 	g.trimNewline()
 }
-
-var _ = sort.Strings

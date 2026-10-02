@@ -2,6 +2,7 @@ package format_test
 
 import (
 	"bytes"
+	"flag"
 	stdformat "go/format"
 	"io/fs"
 	"os"
@@ -13,33 +14,64 @@ import (
 	"github.com/effect-go/effect-go/internal/syntax/format"
 )
 
-// The dialect samples format without error, and formatting is idempotent.
-func TestEgoIdempotent(t *testing.T) {
-	files, _ := filepath.Glob("../testdata/*.ego")
-	if len(files) == 0 {
-		t.Fatal("no samples")
+var update = flag.Bool("update", false, "rewrite the golden files")
+
+// Each testdata/format/x.input.ego formats to x.golden.ego.
+func TestFormatGolden(t *testing.T) {
+	inputs, _ := filepath.Glob("../testdata/format/*.input.ego")
+	if len(inputs) == 0 {
+		t.Fatal("no inputs")
 	}
-	for _, f := range files {
-		src, err := os.ReadFile(f)
+	for _, in := range inputs {
+		src, err := os.ReadFile(in)
 		if err != nil {
 			t.Fatal(err)
 		}
+		got, err := format.Source(src)
+		if err != nil {
+			t.Errorf("%s: %v", in, err)
+			continue
+		}
+		golden := strings.Replace(in, ".input.", ".golden.", 1)
+		if *update {
+			os.WriteFile(golden, got, 0o666)
+			continue
+		}
+		want, err := os.ReadFile(golden)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Errorf("%s:\n%s", golden, got)
+		}
+	}
+}
+
+// Formatting every .ego file in the repository twice changes nothing the
+// second time.
+func TestIdempotent(t *testing.T) {
+	n := 0
+	filepath.WalkDir("../../..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == "errors" || strings.HasPrefix(d.Name(), ".")) && path != "../../.." {
+			return filepath.SkipDir
+		}
+		if !strings.HasSuffix(path, ".ego") {
+			return nil
+		}
+		src, _ := os.ReadFile(path)
 		once, err := format.Source(src)
 		if err != nil {
-			t.Errorf("%s: %v", f, err)
-			continue
+			t.Errorf("%s: %v", path, err)
+			return nil
 		}
-		twice, err := format.Source(once)
-		if err != nil {
-			t.Errorf("%s (formatted): %v\n%s", f, err, once)
-			continue
+		if twice, _ := format.Source(once); !bytes.Equal(once, twice) {
+			t.Errorf("%s: not idempotent\n--- once\n%s\n--- twice\n%s", path, once, twice)
 		}
-		if !bytes.Equal(once, twice) {
-			t.Errorf("%s: not idempotent\n--- once\n%s\n--- twice\n%s", f, once, twice)
-		}
-		if testing.Verbose() {
-			t.Logf("%s:\n%s", f, once)
-		}
+		n++
+		return nil
+	})
+	if n < 10 {
+		t.Fatalf("only %d .ego files", n)
 	}
 }
 

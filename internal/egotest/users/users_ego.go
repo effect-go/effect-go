@@ -58,7 +58,7 @@ type Service struct {
 }
 
 func (s *Service) Get(ctx context.Context, id UserID) (_ User, err error) {
-	ctx, span := trace.Start(ctx, "Service.Get")
+	ctx, span := trace.Start(ctx, "users.Service.Get")
 	defer trace.End(span, &err)
 //line users.ego:33
 	u, ok, err := s.Repo.Find(ctx, id)

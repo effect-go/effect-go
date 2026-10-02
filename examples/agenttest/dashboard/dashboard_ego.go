@@ -13,34 +13,38 @@ import (
 	"github.com/effect-go/effect-go/trace"
 )
 
+// recsPolicy backs off from 100ms with jitter, at most 3 retries, and never
+// retries a rejected request.
+//
 //line dashboard.ego:8
+var recsPolicy = schedule.Max(
+	schedule.Exponential(100*time.Millisecond).Jittered(),
+	schedule.Recurs(3),
+).While(func(err error) bool { return !errors.Is(err, ErrRejected) })
+
+// Load builds the dashboard page for user id, giving up after 2 seconds.
 func Load(ctx context.Context, d Deps, id string) (_ Page, err error) {
 	ctx, span := trace.Start(ctx, "dashboard.Load")
 	defer trace.End(span, &err)
-//line dashboard.ego:9
-	return scope.Timeout(ctx, 2*time.Second, func(ctx context.Context) (Page, error) { return loadPage(ctx, d, id) })
+//line dashboard.ego:17
+	return scope.Timeout(ctx, 2*time.Second, func(ctx context.Context) (Page, error) { return load(ctx, d, id) })
 }
 
-func loadPage(ctx context.Context, d Deps, id string) (_ Page, err error) {
-	ctx, span := trace.Start(ctx, "dashboard.loadPage")
+func load(ctx context.Context, d Deps, id string) (_ Page, err error) {
+	ctx, span := trace.Start(ctx, "dashboard.load")
 	defer trace.End(span, &err)
-//line dashboard.ego:13
-	policy := schedule.Max(
-		schedule.Exponential(100*time.Millisecond).Jittered(),
-		schedule.Recurs(3),
-	).While(func(err error) bool { return !errors.Is(err, ErrRejected) })
-
+//line dashboard.ego:21
 	user, orders, recs, err := scope.All3(ctx,
 		func(ctx context.Context) (User, error) { return d.Users.Get(ctx, id) },
 		func(ctx context.Context) ([]Order, error) { return d.Orders.ForUser(ctx, id) },
 		func(ctx context.Context) ([]Product, error) {
-			return schedule.Retry(ctx, policy, func(ctx context.Context) ([]Product, error) { return d.Recs.For(ctx, id) })
+			return schedule.Retry(ctx, recsPolicy, func(ctx context.Context) ([]Product, error) { return d.Recs.For(ctx, id) })
 		},
 	)
 	if err != nil {
 		return Page{}, err
 	}
-//line dashboard.ego:23
+//line dashboard.ego:26
 	banner, err := scope.Race(ctx,
 		func(ctx context.Context) (Image, error) { return d.CDN.Primary(ctx, user.Banner) },
 		func(ctx context.Context) (Image, error) { return d.CDN.Mirror(ctx, user.Banner) },
@@ -48,6 +52,6 @@ func loadPage(ctx context.Context, d Deps, id string) (_ Page, err error) {
 	if err != nil {
 		return Page{}, fmt.Errorf("banner: %w", err)
 	}
-//line dashboard.ego:24
+//line dashboard.ego:27
 	return Page{User: user, Orders: orders, Recs: recs, Banner: banner}, nil
 }

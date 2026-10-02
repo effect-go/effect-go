@@ -28,7 +28,7 @@
 | Language server | [internal/lsp](../internal/lsp) | `ego lsp`, with templ's architecture: it serves `.ego` files only and runs its own gopls, while the Go extension keeps `.go` files. |
 | VS Code extension | [editors/vscode](../editors/vscode) | A TextMate grammar on top of Go's, and a client for `ego lsp`. It packages with vsce. |
 | Layers | [layer](../layer), [internal/layers](../internal/layers) | Wire-style: `panic(layer.Build(...))` in an `egolayers` file. |
-| Analyzers | [analysis](../analysis), `cmd/egovet` | §4.2's three analyzers, for plain Go. |
+| Analyzers | [analysis](../analysis), `ego vet` | §4.2's three analyzers, for plain Go. `ego vet` runs `go vet`, then them. |
 | Runtime additions | [scope](../scope) | `Scope.Defer`, and `StopTimeout` with `*StuckError` (the fiber deadline missing from week 1). |
 | CI | [.github/workflows/ci.yml](../.github/workflows/ci.yml) | On Go 1.26 and 1.27: vet, `-race` tests, `ego generate -check` and both formatters. |
 

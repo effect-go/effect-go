@@ -3,12 +3,12 @@
 //	ego generate [packages]   write the Go for each .ego file (default ./...)
 //	ego fmt [-l] [-w] [paths] format .ego files (default: the current directory, recursively)
 //	ego test [args]           ego generate, then go test with the same arguments
+//	ego vet [packages]        go vet, then the effect-go analyzers
 //	ego lsp                   run the language server proxy in front of gopls
 //	ego version
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 )
@@ -22,6 +22,7 @@ Usage:
 	ego generate [-check] [dirs]         generate x_ego.go for each x.ego, and layers_ego.go (default ./...)
 	ego fmt [-l] [-w] [paths]            format .ego files (default ./...)
 	ego test [go test flags] [packages]  ego generate, then go test with the same arguments
+	ego vet [packages]                   go vet, then the effect-go analyzers
 	ego lsp                              language server: gopls with .ego support
 	ego version
 `)
@@ -29,6 +30,10 @@ Usage:
 }
 
 func main() {
+	if isVetTool(os.Args) {
+		vetTool()
+		return
+	}
 	if len(os.Args) < 2 {
 		usage()
 	}
@@ -41,6 +46,8 @@ func main() {
 		err = fmtCmd(args)
 	case "test":
 		err = testCmd(args)
+	case "vet":
+		err = vetCmd(args)
 	case "lsp":
 		err = lspCmd(args)
 	case "version":
@@ -60,5 +67,3 @@ func main() {
 }
 
 var errSilent = fmt.Errorf("failed")
-
-var _ = flag.Parse

@@ -6,6 +6,7 @@ package layers
 import (
 	"bytes"
 	"fmt"
+	"github.com/effect-go/effect-go/internal/typeutil"
 	"go/ast"
 	"go/format"
 	"go/token"
@@ -319,25 +320,16 @@ func (g *gen) varInit(v *types.Var) ast.Expr {
 	return nil
 }
 
-func isProviderSet(t types.Type) bool {
-	n, ok := types.Unalias(t).(*types.Named)
-	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == layerPath && n.Obj().Name() == "ProviderSet"
-}
+func isProviderSet(t types.Type) bool { return typeutil.IsNamed(t, layerPath, "ProviderSet") }
 
-func isError(t types.Type) bool { return types.Identical(t, types.Universe.Lookup("error").Type()) }
-
-func isContext(t types.Type) bool {
-	n, ok := types.Unalias(t).(*types.Named)
-	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "context" && n.Obj().Name() == "Context"
-}
+var (
+	isError   = typeutil.IsError
+	isContext = typeutil.IsContext
+)
 
 func isScope(t types.Type) bool {
 	p, ok := t.(*types.Pointer)
-	if !ok {
-		return false
-	}
-	n, ok := types.Unalias(p.Elem()).(*types.Named)
-	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == scopePath && n.Obj().Name() == "Scope"
+	return ok && typeutil.IsNamed(p.Elem(), scopePath, "Scope")
 }
 
 func cleanupKind(t types.Type) string {
@@ -688,19 +680,4 @@ func (g *gen) typeString(t types.Type) string {
 	})
 }
 
-func (g *gen) zero(t types.Type) string {
-	switch u := t.Underlying().(type) {
-	case *types.Basic:
-		switch {
-		case u.Info()&types.IsBoolean != 0:
-			return "false"
-		case u.Info()&types.IsString != 0:
-			return `""`
-		case u.Info()&types.IsNumeric != 0:
-			return "0"
-		}
-	case *types.Struct, *types.Array:
-		return g.typeString(t) + "{}"
-	}
-	return "nil"
-}
+func (g *gen) zero(t types.Type) string { return typeutil.Zero(t, g.typeString) }

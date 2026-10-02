@@ -1,7 +1,0 @@
-package feed
-
-effect (s *Feed) Home(uid UserID) (Page, error) {
-    user, posts, ads := check all(s.users.Get(uid), s.posts.Recent(uid), s.ads.For(uid))
-    banner := race(s.cdn.Primary(user.Banner), s.cdn.Mirror(user.Banner)) else DefaultBanner
-    return Page{User: user, Posts: posts, Ads: ads, Banner: banner}, nil
-}

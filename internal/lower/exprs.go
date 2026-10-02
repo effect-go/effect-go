@@ -57,31 +57,13 @@ func (g *fileGen) expr(x ast.Expr) bool {
 
 // matchTag returns the source of the tag of the match a pattern belongs to.
 func (g *fileGen) matchTag(pat *ast.CallExpr) string {
-	var tag string
-	ast.Inspect(g.file, func(n ast.Node) bool {
-		if tag != "" {
-			return false
-		}
-		var arms []*ast.MatchArm
-		var t ast.Expr
-		switch m := n.(type) {
-		case *ast.MatchExpr:
-			arms, t = m.Arms, m.Tag
-		case *ast.MatchStmt:
-			arms, t = m.Arms, m.Tag
-		default:
-			return true
-		}
-		for _, a := range arms {
-			for _, p := range a.Patterns {
-				if p == pat {
-					tag = g.renderStr(t)
-				}
-			}
-		}
-		return true
-	})
-	return tag
+	switch m := g.parent(g.parent(pat)).(type) {
+	case *ast.MatchExpr:
+		return g.renderStr(m.Tag)
+	case *ast.MatchStmt:
+		return g.renderStr(m.Tag)
+	}
+	return ""
 }
 
 // call renders a call. If an argument must be hoisted, the arguments before

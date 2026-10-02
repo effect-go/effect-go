@@ -2,13 +2,19 @@ package lower
 
 import (
 	"fmt"
+	"github.com/effect-go/effect-go/internal/typeutil"
 	goast "go/ast"
+	"go/build"
 	"go/token"
 	"go/types"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/tools/go/packages"
 
@@ -18,10 +24,11 @@ import (
 // An Importer loads the packages a package imports, from export data, and
 // caches them. It's safe for concurrent use.
 type Importer struct {
-	mu    sync.Mutex
-	paths []string // everything loaded, sorted
-	pkgs  map[string]*types.Package
-	errs  map[string]string
+	mu     sync.Mutex
+	paths  []string // everything loaded, sorted
+	pkgs   map[string]*types.Package
+	errs   map[string]string
+	stamps map[string]time.Time // modification times of the loaded workspace files
 }
 
 func NewImporter() *Importer { return &Importer{pkgs: map[string]*types.Package{}} }
@@ -31,7 +38,7 @@ func NewImporter() *Importer { return &Importer{pkgs: map[string]*types.Package{
 func (im *Importer) load(dir string, paths []string) error {
 	im.mu.Lock()
 	defer im.mu.Unlock()
-	missing := false
+	missing := im.stale()
 	for _, p := range paths {
 		if _, ok := im.pkgs[p]; !ok {
 			if _, failed := im.errs[p]; !failed {
@@ -49,7 +56,7 @@ func (im *Importer) load(dir string, paths []string) error {
 		}
 	}
 	sort.Strings(all)
-	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedTypes | packages.NeedImports | packages.NeedDeps, Dir: dir}
+	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedFiles | packages.NeedTypes | packages.NeedImports | packages.NeedDeps, Dir: dir}
 	loaded, err := packages.Load(cfg, all...)
 	if err != nil {
 		return fmt.Errorf("loading imports: %v", err)
@@ -57,7 +64,21 @@ func (im *Importer) load(dir string, paths []string) error {
 	im.paths = all
 	im.pkgs = map[string]*types.Package{}
 	im.errs = map[string]string{}
+	im.stamps = map[string]time.Time{}
+	goroot, modcache := filepath.Join(runtime.GOROOT(), "src"), os.Getenv("GOMODCACHE")
+	if modcache == "" {
+		modcache = filepath.Join(build.Default.GOPATH, "pkg", "mod")
+	}
 	packages.Visit(loaded, nil, func(p *packages.Package) {
+		// Workspace packages can change while the editor runs.
+		for _, f := range p.GoFiles {
+			if strings.HasPrefix(f, goroot) || strings.HasPrefix(f, modcache) {
+				break
+			}
+			if fi, err := os.Stat(f); err == nil {
+				im.stamps[f] = fi.ModTime()
+			}
+		}
 		if p.Types != nil && !p.IllTyped {
 			im.pkgs[p.PkgPath] = p.Types
 		}
@@ -66,6 +87,16 @@ func (im *Importer) load(dir string, paths []string) error {
 		}
 	})
 	return nil
+}
+
+// stale reports whether a loaded workspace file changed since it was loaded.
+func (im *Importer) stale() bool {
+	for f, t := range im.stamps {
+		if fi, err := os.Stat(f); err != nil || !fi.ModTime().Equal(t) {
+			return true
+		}
+	}
+	return false
 }
 
 func (im *Importer) Import(path string) (*types.Package, error) {
@@ -190,47 +221,13 @@ func (g *fileGen) typeString(t types.Type) string {
 }
 
 // zero returns the zero value of t as Go source.
-func (g *fileGen) zero(t types.Type) string {
-	if t == nil {
-		return "nil"
-	}
-	switch u := t.Underlying().(type) {
-	case *types.Basic:
-		switch {
-		case u.Info()&types.IsBoolean != 0:
-			return "false"
-		case u.Info()&types.IsString != 0:
-			return `""`
-		case u.Info()&types.IsNumeric != 0:
-			return "0"
-		case u.Kind() == types.UnsafePointer, u.Kind() == types.UntypedNil:
-			return "nil"
-		}
-	case *types.Struct, *types.Array:
-		return g.typeString(t) + "{}"
-	case *types.Interface:
-		if _, ok := t.(*types.TypeParam); ok {
-			return "*new(" + g.typeString(t) + ")"
-		}
-	}
-	return "nil"
-}
+func (g *fileGen) zero(t types.Type) string { return typeutil.Zero(t, g.typeString) }
 
-func isError(t types.Type) bool {
-	return t != nil && types.Identical(t, types.Universe.Lookup("error").Type())
-}
-
-func implementsError(t types.Type) bool {
-	return t != nil && types.Implements(t, types.Universe.Lookup("error").Type().Underlying().(*types.Interface))
-}
-
-func isContext(t types.Type) bool {
-	if t == nil {
-		return false
-	}
-	n, ok := types.Unalias(t).(*types.Named)
-	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "context" && n.Obj().Name() == "Context"
-}
+var (
+	isError         = typeutil.IsError
+	implementsError = typeutil.ImplementsError
+	isContext       = typeutil.IsContext
+)
 
 // results returns the result types of a call, or nil if unknown.
 func results(t types.Type) []types.Type {

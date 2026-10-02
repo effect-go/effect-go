@@ -21,11 +21,12 @@ type User struct {
 	SuspendedUntil time.Time
 }
 
+// Repo looks users up in storage.
 type Repo interface {
 	Find(ctx context.Context, id UserID) (user User, found bool, err error)
 }
 
-// UserError is the error set NotFound | Suspended | Storage.
+// UserError is every way Service.Get can fail.
 type UserError interface {
 	error
 	isUserError()
@@ -41,7 +42,7 @@ type Suspended struct{ Until time.Time }
 
 func (Suspended) isUserError() {}
 
-func (e Suspended) Error() string { return fmt.Sprintf("suspended until %v", e.Until) }
+func (e Suspended) Error() string { return fmt.Sprintf("suspended (Until %v)", e.Until) }
 
 type Storage struct{ Cause error }
 
@@ -51,21 +52,22 @@ func (e Storage) Error() string { return fmt.Sprintf("storage: %v", e.Cause) }
 
 func (e Storage) Unwrap() error { return e.Cause }
 
-//line users.ego:27
+//line users.ego:29
 type Service struct {
 	Repo Repo
 	Now  func() time.Time
 }
 
+// Get returns the user id, unless it is missing or suspended.
 func (s *Service) Get(ctx context.Context, id UserID) (_ User, err error) {
-	ctx, span := trace.Start(ctx, "Service.Get")
+	ctx, span := trace.Start(ctx, "users.Service.Get")
 	defer trace.End(span, &err)
-//line users.ego:33
+//line users.ego:36
 	u, found, err := s.Repo.Find(ctx, id)
 	if err != nil {
 		return User{}, Storage{Cause: err}
 	}
-//line users.ego:34
+//line users.ego:37
 	if !found {
 		return User{}, NotFound{ID: id}
 	}
@@ -77,21 +79,20 @@ func (s *Service) Get(ctx context.Context, id UserID) (_ User, err error) {
 
 type Handler struct{ Users *Service }
 
+// GetUser serves GET /users/{id}.
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
-	u, err := h.Users.Get(r.Context(), UserID(r.PathValue("id")))
+	id := UserID(r.PathValue("id"))
+	u, err := h.Users.Get(r.Context(), id)
 	if err == nil {
 		fmt.Fprintln(w, u.Name)
 	} else if e, ok := errors.AsType[NotFound](err); ok {
-//line users.ego:49
+//line users.ego:54
 		http.Error(w, fmt.Sprintf("no user %s", e.ID), http.StatusNotFound)
 	} else if e, ok := errors.AsType[Suspended](err); ok {
-
-//line users.ego:51
-		until := e.Until.Format("2006-01-02")
-		http.Error(w, fmt.Sprintf("suspended until %s", until), http.StatusForbidden)
-
+//line users.ego:55
+		http.Error(w, fmt.Sprintf("suspended until %s", e.Until.Format("2006-01-02")), http.StatusForbidden)
 	} else if _, ok := errors.AsType[Storage](err); ok {
-//line users.ego:54
+//line users.ego:56
 		http.Error(w, "try again later", http.StatusServiceUnavailable)
 	} else {
 		panic(err)

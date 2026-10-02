@@ -1,0 +1,17 @@
+package pay
+
+error PayError {
+	Declined{ Reason string }
+	Expired{}
+	Gateway{ Cause error }
+}
+
+func Respond(w http.ResponseWriter, err PayError) {
+	code := match err {
+		nil         => http.StatusOK
+		Declined(_) => http.StatusPaymentRequired
+		Expired(_)  => http.StatusGone
+		Gateway(_)  => http.StatusBadGateway
+	}
+	w.WriteHeader(code)
+}

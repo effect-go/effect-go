@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/effect-go/effect-go/internal/lower"
@@ -54,16 +55,22 @@ type Proxy struct {
 	gopls  *conn
 	cmd    *exec.Cmd
 
-	mu       sync.Mutex
-	egos     map[string]*egoDoc // by .ego URI
-	gens     map[string]*genDoc // by generated URI
-	byEgo    map[string]*genDoc // .ego URI -> generated
-	pending  map[string]pending // requests forwarded to gopls, by id
-	egoDiags map[string][]any   // .ego URI -> compiler diagnostics
-	goDiags  map[string][]any   // .ego URI -> gopls diagnostics, mapped
-	results  map[string]*lower.Result
+	regenMu sync.Mutex // one compilation at a time, so gopls sees versions in order
+
+	mu       sync.Mutex             // guards the fields below, and genDoc.out and version
+	egos     map[string]*egoDoc     // by .ego URI
+	gens     map[string]*genDoc     // by generated URI
+	byEgo    map[string]*genDoc     // .ego URI -> generated
+	pending  map[string]pending     // requests forwarded to gopls, by id
+	egoDiags map[string][]any       // .ego URI -> compiler diagnostics
+	goDiags  map[string][]any       // .ego URI -> gopls diagnostics, mapped
+	dirty    map[string]*time.Timer // directories with edits not compiled yet
 	im       *lower.Importer
 }
+
+// debounce is how long the proxy waits after an edit before compiling. A
+// request about the file compiles at once.
+const debounce = 150 * time.Millisecond
 
 // Run serves one editor connection until it closes or sends exit.
 func Run(cfg Config, in io.Reader, out io.Writer) error {
@@ -91,7 +98,7 @@ func Run(cfg Config, in io.Reader, out io.Writer) error {
 		cfg: cfg, editor: newConn(in, out), gopls: newConn(gout, gin), cmd: cmd,
 		egos: map[string]*egoDoc{}, gens: map[string]*genDoc{}, byEgo: map[string]*genDoc{},
 		pending: map[string]pending{}, egoDiags: map[string][]any{}, goDiags: map[string][]any{},
-		results: map[string]*lower.Result{}, im: lower.NewImporter(),
+		dirty: map[string]*time.Timer{}, im: lower.NewImporter(),
 	}
 	if os.Getenv("EGO_LSP_TRACE") != "" && cfg.Log != nil {
 		p.editor.name, p.editor.log = "editor", cfg.Log
@@ -194,28 +201,38 @@ func (p *Proxy) handleEditor(m *message) error {
 			d.text = append(append(append([]byte(nil), d.text[:a]...), c.Text...), d.text[b:]...)
 		}
 		p.mu.Unlock()
-		return p.regen(filepath.Dir(uriToPath(uri)))
-	case "textDocument/didSave":
-		return p.save(filepath.Dir(uriToPath(uri)))
-	case "textDocument/didClose":
-		p.mu.Lock()
-		delete(p.egos, uri)
-		p.mu.Unlock()
+		p.schedule(filepath.Dir(uriToPath(uri)))
 		return nil
+	case "textDocument/didSave":
+		dir := filepath.Dir(uriToPath(uri))
+		if err := p.flush(dir); err != nil {
+			return err
+		}
+		return p.save(dir)
+	case "textDocument/didClose":
+		return p.close(uri)
 	case "textDocument/formatting":
 		return p.format(m, uri)
 	}
 	if !m.isRequest() {
 		return nil // other notifications about .ego files
 	}
+	if err := p.flush(filepath.Dir(uriToPath(uri))); err != nil {
+		p.logf("compile: %v", err)
+	}
 	p.mu.Lock()
 	gen := p.byEgo[uri]
 	d := p.egos[uri]
+	var out *lower.Output
+	var text []byte
+	if gen != nil && d != nil {
+		out, text = gen.out, d.text
+	}
 	p.mu.Unlock()
-	if gen == nil || d == nil {
+	if out == nil {
 		return p.editor.reply(m.ID, nil)
 	}
-	params, err := p.toGen(m.Params, d, gen)
+	params, err := p.toGen(m.Params, text, gen.uri, out)
 	if err != nil {
 		return p.editor.reply(m.ID, nil)
 	}
@@ -229,9 +246,60 @@ func (p *Proxy) track(id json.RawMessage, pd pending) {
 	p.mu.Unlock()
 }
 
+// schedule compiles dir after a pause in editing.
+func (p *Proxy) schedule(dir string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if t := p.dirty[dir]; t != nil {
+		t.Reset(debounce)
+		return
+	}
+	p.dirty[dir] = time.AfterFunc(debounce, func() {
+		if err := p.flush(dir); err != nil {
+			p.logf("compile: %v", err)
+		}
+	})
+}
+
+// flush compiles dir now if it has edits not compiled yet.
+func (p *Proxy) flush(dir string) error {
+	p.mu.Lock()
+	t := p.dirty[dir]
+	delete(p.dirty, dir)
+	p.mu.Unlock()
+	if t == nil {
+		return nil
+	}
+	t.Stop()
+	return p.regen(dir)
+}
+
+// close forgets a .ego document: its generated buffer in gopls and its
+// diagnostics.
+func (p *Proxy) close(uri string) error {
+	p.mu.Lock()
+	delete(p.egos, uri)
+	gen := p.byEgo[uri]
+	delete(p.byEgo, uri)
+	if gen != nil {
+		delete(p.gens, gen.uri)
+	}
+	delete(p.egoDiags, uri)
+	delete(p.goDiags, uri)
+	p.mu.Unlock()
+	if gen != nil {
+		if err := p.gopls.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": gen.uri}}); err != nil {
+			return err
+		}
+	}
+	return p.editor.notify("textDocument/publishDiagnostics", map[string]any{"uri": uri, "diagnostics": []any{}})
+}
+
 // regen compiles the package in dir with the open .ego files, and updates
 // gopls's buffers and the diagnostics.
 func (p *Proxy) regen(dir string) error {
+	p.regenMu.Lock()
+	defer p.regenMu.Unlock()
 	p.mu.Lock()
 	overlay := map[string][]byte{}
 	for _, d := range p.egos {
@@ -253,7 +321,6 @@ func (p *Proxy) regen(dir string) error {
 		byFile[uri] = append(byFile[uri], p.egoDiag(uri, d))
 	}
 	p.mu.Lock()
-	p.results[dir] = res
 	for uri, ds := range byFile {
 		p.egoDiags[uri] = ds
 	}
@@ -461,22 +528,22 @@ func adjustCapabilities(raw json.RawMessage) json.RawMessage {
 
 // toGen translates request params from a .ego document to its generated
 // Go.
-func (p *Proxy) toGen(raw json.RawMessage, d *egoDoc, gen *genDoc) (json.RawMessage, error) {
+func (p *Proxy) toGen(raw json.RawMessage, egoText []byte, genURI string, gen *lower.Output) (json.RawMessage, error) {
 	var v map[string]any
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return nil, err
 	}
-	src := newText(d.text)
-	out := newText(gen.out.Raw)
+	src := newText(egoText)
+	out := newText(gen.Raw)
 	conv := func(pos any) any {
 		var ps Position
 		b, _ := json.Marshal(pos)
 		json.Unmarshal(b, &ps)
-		off, _ := gen.out.Map.ToOutput(src.offset(ps))
+		off, _ := gen.Map.ToOutput(src.offset(ps))
 		return out.position(off)
 	}
 	if td, ok := v["textDocument"].(map[string]any); ok {
-		td["uri"] = gen.uri
+		td["uri"] = genURI
 	}
 	if pos, ok := v["position"]; ok {
 		v["position"] = conv(pos)
@@ -571,18 +638,18 @@ func (p *Proxy) fromGen(v any, gen *genDoc, strict bool) any {
 func (p *Proxy) mapRange(v any, gen *genDoc) (any, bool) {
 	var r Range
 	b, _ := json.Marshal(v)
-	if json.Unmarshal(b, &r) != nil || gen == nil || gen.out == nil {
+	if json.Unmarshal(b, &r) != nil || gen == nil {
 		return nil, false
 	}
-	out := newText(gen.out.Raw)
-	src := newText(gen.out.Src)
 	p.mu.Lock()
-	if d := p.egos[gen.egoURI]; d != nil {
-		src = newText(d.text)
-	}
+	g := gen.out // the version gopls answered about may be older; the map matches it
 	p.mu.Unlock()
-	a, ok1 := gen.out.Map.ToSource(out.offset(r.Start))
-	z, ok2 := gen.out.Map.ToSource(out.offset(r.End))
+	if g == nil {
+		return nil, false
+	}
+	out, src := newText(g.Raw), newText(g.Src)
+	a, ok1 := g.Map.ToSource(out.offset(r.Start))
+	z, ok2 := g.Map.ToSource(out.offset(r.End))
 	if !ok2 {
 		z = a
 	}

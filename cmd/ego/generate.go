@@ -130,7 +130,13 @@ func egoDirs(args []string) ([]string, error) {
 				if d.IsDir() && path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" || d.Name() == "vendor") {
 					return filepath.SkipDir
 				}
-				if !d.IsDir() && (strings.HasSuffix(path, ".ego") || strings.HasSuffix(path, ".go") && layers.HasInjectors(filepath.Dir(path))) {
+				if d.IsDir() {
+					if layers.HasInjectors(path) {
+						add(path)
+					}
+					return nil
+				}
+				if strings.HasSuffix(path, ".ego") {
 					add(filepath.Dir(path))
 				}
 				return nil

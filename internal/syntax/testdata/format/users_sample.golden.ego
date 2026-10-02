@@ -1,0 +1,27 @@
+package users
+
+error UserError {
+	NotFound{ ID UserID }
+	Suspended{ Until time.Time }
+	Storage{ Cause error }
+}
+
+effect (s *Users) Get(id UserID) (User, UserError) {
+	u, ok := check s.db.Find(id) as Storage
+	if !ok {
+		fail NotFound{ID: id}
+	}
+	if u.SuspendedUntil.After(time.Now()) {
+		fail Suspended{Until: u.SuspendedUntil}
+	}
+	return u, nil
+}
+
+func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
+	u, err := h.users.Get(r.Context(), userID(r))
+	match err {
+		nil         => writeJSON(w, u)
+		NotFound(e) => http.Error(w, f"no user {e.ID}", http.StatusNotFound)
+		Storage(_)  => http.Error(w, "try again later", http.StatusServiceUnavailable)
+	}
+}

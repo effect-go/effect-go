@@ -1,0 +1,9 @@
+package report
+
+func Summary(u *User, orders []Order) string {
+	slices.SortFunc(orders, (a, b) => cmp.Compare(b.Total, a.Total))
+	late := slices.ContainsFunc(orders, o => o.Late)
+	city := u?.Address?.City ?? "your address"
+	tone := if late { "Sorry for the delay" } else { "Good news" }
+	return f"{tone}! {len(orders)} orders are on their way to {city}."
+}

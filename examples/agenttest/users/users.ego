@@ -14,13 +14,15 @@ type User struct {
 	SuspendedUntil time.Time
 }
 
+// Repo looks users up in storage.
 type Repo interface {
 	effect Find(id UserID) (user User, found bool, err error)
 }
 
+// UserError is every way Service.Get can fail.
 error UserError {
 	NotFound{ ID UserID } "no user {ID}"
-	Suspended{ Until time.Time } "suspended until {Until}"
+	Suspended{ Until time.Time }
 	Storage{ Cause error }
 }
 
@@ -29,6 +31,7 @@ type Service struct {
 	Now  func() time.Time
 }
 
+// Get returns the user id, unless it is missing or suspended.
 effect (s *Service) Get(id UserID) (User, UserError) {
 	u, found := check s.Repo.Find(id) as Storage
 	if !found {
@@ -42,15 +45,14 @@ effect (s *Service) Get(id UserID) (User, UserError) {
 
 type Handler struct{ Users *Service }
 
+// GetUser serves GET /users/{id}.
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
-	u, err := h.Users.Get(r.Context(), UserID(r.PathValue("id")))
+	id := UserID(r.PathValue("id"))
+	u, err := h.Users.Get(r.Context(), id)
 	match err {
 		nil          => fmt.Fprintln(w, u.Name)
 		NotFound(e)  => http.Error(w, f"no user {e.ID}", http.StatusNotFound)
-		Suspended(e) => {
-			until := e.Until.Format("2006-01-02")
-			http.Error(w, f"suspended until {until}", http.StatusForbidden)
-		}
-		Storage(_) => http.Error(w, "try again later", http.StatusServiceUnavailable)
+		Suspended(e) => http.Error(w, f"suspended until {e.Until.Format("2006-01-02")}", http.StatusForbidden)
+		Storage(_)   => http.Error(w, "try again later", http.StatusServiceUnavailable)
 	}
 }

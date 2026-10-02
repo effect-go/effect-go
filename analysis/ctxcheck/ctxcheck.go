@@ -8,6 +8,7 @@
 package ctxcheck
 
 import (
+	"github.com/effect-go/effect-go/internal/typeutil"
 	"go/ast"
 	"go/types"
 
@@ -126,10 +127,7 @@ func ownContext(pass *analysis.Pass, lit *ast.FuncLit) *types.Var {
 
 func within(v *types.Var, lit *ast.FuncLit) bool { return v.Pos() >= lit.Pos() && v.Pos() < lit.End() }
 
-func isContext(t types.Type) bool {
-	n, ok := types.Unalias(t).(*types.Named)
-	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "context" && n.Obj().Name() == "Context"
-}
+var isContext = typeutil.IsContext
 
 func reportUses(pass *analysis.Pass, body ast.Node, match func(types.Object) bool, format string) {
 	ast.Inspect(body, func(n ast.Node) bool {

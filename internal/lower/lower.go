@@ -6,6 +6,10 @@
 // closures behind all and race, zero values, lambdas) get them from go/types:
 // the package is rendered as a draft, type-checked, and rendered again until
 // the draft stops changing.
+//
+// Debugging: EGO_DEBUG=1 makes ego generate print the generated code of a
+// package that fails to compile; EGO_DEBUG=2 also prints every draft and its
+// type errors. EGO_LSP_TRACE=1 with ego lsp -log=file logs every LSP message.
 package lower
 
 import (
@@ -393,7 +397,7 @@ func (p *pkgGen) parse(res *Result) error {
 			p.testGo = append(p.testGo, path)
 		}
 	}
-	path, err := importPath(p.cfg.Dir)
+	path, err := ImportPath(p.cfg.Dir)
 	if err != nil {
 		return err
 	}
@@ -402,10 +406,7 @@ func (p *pkgGen) parse(res *Result) error {
 }
 
 // ImportPath returns the import path of the package in dir, from go.mod.
-func ImportPath(dir string) (string, error) { return importPath(dir) }
-
-// importPath returns the import path of the package in dir, from go.mod.
-func importPath(dir string) (string, error) {
+func ImportPath(dir string) (string, error) {
 	for d := dir; ; d = filepath.Dir(d) {
 		data, err := os.ReadFile(filepath.Join(d, "go.mod"))
 		if err == nil {

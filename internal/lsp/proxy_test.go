@@ -227,6 +227,23 @@ func TestEditor(t *testing.T) {
 		cl.c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": uri, "version": 6}, "contentChanges": []any{map[string]any{"text": src}}})
 	})
 
+	t.Run("completion", func(t *testing.T) {
+		res := cl.call("textDocument/completion", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": at(src, "s.Repo.Find", len("s.Repo."))})
+		if !strings.Contains(string(res), `"label":"Find"`) {
+			t.Fatalf("completion: %.300s", res)
+		}
+	})
+
+	t.Run("save", func(t *testing.T) {
+		gen := filepath.Join(filepath.Dir(path), "users_ego.go")
+		before, _ := os.ReadFile(gen)
+		cl.c.notify("textDocument/didSave", map[string]any{"textDocument": map[string]any{"uri": uri}})
+		cl.call("textDocument/hover", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": at(src, "Repo.Find", 6)})
+		if after, _ := os.ReadFile(gen); string(after) != string(before) {
+			t.Fatal("saving an unchanged file rewrote its generated code")
+		}
+	})
+
 	t.Run("rename", func(t *testing.T) {
 		res := cl.call("textDocument/rename", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": at(src, "Now  func", 0), "newName": "Clock"})
 		var we struct {
@@ -253,6 +270,15 @@ func TestEditor(t *testing.T) {
 		n += len(we.Changes[uri])
 		if n != 2 { // the field and s.Now()
 			t.Fatalf("rename: %d edits in users.ego: %s", n, res)
+		}
+	})
+
+	t.Run("close", func(t *testing.T) {
+		cl.c.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": uri}})
+		cl.waitDiags(uri, func(ds []map[string]any) bool { return len(ds) == 0 })
+		res := cl.call("textDocument/hover", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": at(src, "Repo.Find", 6)})
+		if string(res) != "null" {
+			t.Fatalf("hover after close: %s", res)
 		}
 	})
 }

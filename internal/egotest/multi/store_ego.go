@@ -20,7 +20,7 @@ type Store[K comparable, V any] struct {
 func NewStore[K comparable, V any]() *Store[K, V] { return &Store[K, V]{m: map[K]V{}} }
 
 func (s *Store[K, V]) Get(ctx context.Context, k K) (_ V, _ bool, err error) {
-	ctx, span := trace.Start(ctx, "Store.Get")
+	ctx, span := trace.Start(ctx, "multi.Store.Get")
 	defer trace.End(span, &err)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -30,7 +30,7 @@ func (s *Store[K, V]) Get(ctx context.Context, k K) (_ V, _ bool, err error) {
 
 //line store.ego:21
 func (s *Store[K, V]) Put(ctx context.Context, k K, v V) (err error) {
-	ctx, span := trace.Start(ctx, "Store.Put")
+	ctx, span := trace.Start(ctx, "multi.Store.Put")
 	defer trace.End(span, &err)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -42,7 +42,7 @@ func (s *Store[K, V]) Put(ctx context.Context, k K, v V) (err error) {
 //
 //line store.ego:28
 func (s *Store[K, V]) Size(ctx context.Context) (_ int) {
-	ctx, span := trace.Start(ctx, "Store.Size")
+	ctx, span := trace.Start(ctx, "multi.Store.Size")
 	defer trace.End(span, nil)
 	s.mu.Lock()
 	defer s.mu.Unlock()

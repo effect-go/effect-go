@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"flag"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -58,24 +57,6 @@ func TestGolden(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// The generated fixtures pass go vet and their own tests, with the race
-// detector.
-func TestFixturesRun(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs go vet and go test")
-	}
-	var pkgs []string
-	for _, d := range fixtures(t) {
-		pkgs = append(pkgs, d)
-	}
-	for _, args := range [][]string{{"vet"}, {"test", "-race", "-count=1"}} {
-		cmd := exec.Command("go", append(args, pkgs...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("go %s: %v\n%s", args[0], err, out)
-		}
 	}
 }
 

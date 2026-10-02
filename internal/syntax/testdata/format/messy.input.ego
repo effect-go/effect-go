@@ -1,0 +1,20 @@
+package messy
+
+error  E{A{X int}
+    B{}  "b happened"
+}
+effect   (s *S)Get( id int )(int,E){
+  v,ok:=check   s.find(id)   as   A
+      if !ok{fail B{}}
+  w := s.load(id)   else   0
+  n := must strconv.Atoi( "1" )
+  r := match v{
+  1=>"one"
+     _ =>   f"n={v:03d}"
+  }
+  f:=(a,b)=>a<b
+  g := x=>{ return x*2 }
+  c := u?.Addr?.City??"none"
+  t := if v>1{ "big" }else{ "small" }
+  return v+w+n,nil
+}
