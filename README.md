@@ -48,7 +48,9 @@ ego eject -w ./...   # leave: turns the .ego files into plain .go files, for goo
 
 The generated code is plain, gofmt'd Go with `//line` directives, so compiler errors, `go vet`, panics and the debugger point at the `.ego` source. Go code calls it like any other package.
 
-Editors: `ego lsp` is a language server that runs gopls on the generated Go and maps positions back, for hover, go to definition, diagnostics, rename and format-on-save. [editors/vscode](editors/vscode) is a VS Code extension for it.
+Editors: `ego lsp` is a language server that runs gopls on the generated Go and maps positions back, for hover, go to definition, diagnostics, rename and format-on-save. [editors/vscode](editors/vscode) is a VS Code extension for it; [docs/editors.md](docs/editors.md) sets up GoLand, Neovim and Helix.
+
+To start: [docs/adopting.md](docs/adopting.md) goes from the library alone to the dialect one file at a time, and back out with `ego eject`.
 
 Analyzers, for plain Go too: `ego vet ./...` runs `go vet`, then checks exhaustive switches over sum types and enums, child tasks that use their parent's context (the errgroup `ctx`/`gctx` bug), and fibers that are never joined.
 
