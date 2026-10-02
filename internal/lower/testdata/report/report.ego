@@ -1,0 +1,90 @@
+// Package report exercises the v1 shorthand: lambdas, ?. and ??, if and
+// match expressions, and f-strings.
+package report
+
+import (
+	"cmp"
+	"os"
+	"slices"
+	"strings"
+)
+
+type Address struct{ City string }
+
+type User struct {
+	Name    string
+	Address *Address
+	Manager *User
+}
+
+type Order struct {
+	Total float64
+	Late  bool
+}
+
+func Summary(u *User, orders []Order) string {
+	slices.SortFunc(orders, (a, b) => cmp.Compare(b.Total, a.Total))
+	late := slices.ContainsFunc(orders, o => o.Late)
+	city := u?.Address?.City ?? "your address"
+	tone := if late { "Sorry for the delay" } else { "Good news" }
+	return f"{tone}! {len(orders)} orders are on their way to {city}."
+}
+
+// Port reads PORT, with a default.
+func Port() string {
+	port := os.LookupEnv("PORT") ?? "8080"
+	return port
+}
+
+func Lookup(m map[string]int, k string) int {
+	return m[k] ?? -1
+}
+
+func ManagerName(u *User) string {
+	return u?.Manager?.Name ?? "nobody"
+}
+
+func Grade(score int) string {
+	return if score >= 90 { "A" } else if score >= 80 { "B" } else { "C" }
+}
+
+func Total(orders []Order) string {
+	sum := 0.0
+	for _, o := range orders {
+		sum += o.Total
+	}
+	return f"{sum:.2f} EUR, {{braces}} and 100%"
+}
+
+func Names(us []*User) []string {
+	var out []string
+	for _, u := range us {
+		out = append(out, strings.ToUpper(u?.Name ?? "?"))
+	}
+	return out
+}
+
+func Describe(n int) string {
+	kind := match n % 2 {
+		0 => "even"
+		_ => "odd"
+	}
+	return f"{n} is {kind}"
+}
+
+func Apply(xs []int, f func(int) int) []int {
+	out := make([]int, len(xs))
+	for i, x := range xs {
+		out[i] = f(x)
+	}
+	return out
+}
+
+func Double(xs []int) []int {
+	return Apply(xs, x => x * 2)
+}
+
+func Typed() func(int) string {
+	f := (n int) => f"#{n}"
+	return f
+}

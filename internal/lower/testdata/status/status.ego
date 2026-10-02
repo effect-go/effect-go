@@ -1,0 +1,46 @@
+package status
+
+import (
+	"errors"
+	"net/http"
+)
+
+error PayError {
+	Declined{ Reason string } "declined: {Reason}"
+	Expired{}
+	Gateway{ Cause error }
+}
+
+func Code(err error) int {
+	code := match err {
+		nil         => http.StatusOK
+		Declined(_) => http.StatusPaymentRequired
+		Expired(_)  => http.StatusGone
+		Gateway(_)  => http.StatusBadGateway
+	}
+	return code
+}
+
+func Describe(err error) string {
+	return match err {
+		nil         => "ok"
+		Declined(d) => d.Reason
+		_           => "failed: " + err.Error()
+	}
+}
+
+func Charge(amount int) (string, PayError) {
+	if amount <= 0 {
+		fail Declined{Reason: "nothing to charge"}
+	}
+	if amount > 100 {
+		fail Gateway{Cause: errors.New("timeout")}
+	}
+	return "ok", nil
+}
+
+// Pay passes Charge's errors on unchanged: they are the same set.
+func Pay(amount int) (string, PayError) {
+	r := check Charge(amount)
+	return r, nil
+}

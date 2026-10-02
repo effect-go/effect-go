@@ -1,0 +1,46 @@
+// Package shapes has enums: with data (a sum type) and without (constants).
+package shapes
+
+import "math"
+
+enum Shape {
+	Circle{ R float64 }
+	Rect{ W, H float64 }
+	Dot
+}
+
+func Area(s Shape) float64 {
+	return match s {
+		Circle(c) => math.Pi * c.R * c.R
+		Rect(r)   => r.W * r.H
+		Dot(_)    => 0
+	}
+}
+
+enum Color {
+	Red
+	Green
+	Blue
+}
+
+func Warm(c Color) bool {
+	return match c {
+		Red          => true
+		Green, Blue  => false
+	}
+}
+
+type Level int
+
+const (
+	Low Level = iota
+	High
+)
+
+func Name(l Level) string {
+	match l {
+		Low  => return "low"
+		High => return "high"
+	}
+	return "?"
+}

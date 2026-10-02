@@ -182,7 +182,7 @@ func (g *fileGen) objectOf(n ast.Expr) types.Object {
 // typeString renders t as Go source in this file, adding imports as needed.
 func (g *fileGen) typeString(t types.Type) string {
 	return types.TypeString(t, func(p *types.Package) string {
-		if g.r.ti != nil && p == g.r.ti.pkg {
+		if p.Path() == g.pkg.path {
 			return ""
 		}
 		return g.use(p.Path(), p.Name())

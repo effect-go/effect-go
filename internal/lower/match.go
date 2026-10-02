@@ -179,7 +179,7 @@ func (g *fileGen) plan(tag ast.Expr, arms []*ast.MatchArm, isExpr bool) *matchPl
 	}
 
 	// The tag is evaluated once.
-	if isSimple(tag) {
+	if isSimple(tag) || p.mode == modeValues {
 		p.tag = g.renderStr(tag)
 	} else if g.r.final {
 		p.tag = g.temp("v")
@@ -377,7 +377,9 @@ func containsBreak(n ast.Node) bool {
 // its binding declared.
 func (g *fileGen) draftMatch(tag ast.Expr, arms []*ast.MatchArm, body func(*ast.MatchArm)) {
 	t := g.renderStr(tag)
-	g.w.str("_egoUse(" + t + ")\n")
+	g.w.str("_egoUse(")
+	g.node(tag)
+	g.w.str(")\n")
 	for _, a := range arms {
 		for _, pt := range g.patterns(a) {
 			switch pt.kind {
@@ -395,7 +397,9 @@ func (g *fileGen) draftMatch(tag ast.Expr, arms []*ast.MatchArm, body func(*ast.
 					g.w.str("; true {\n_egoUse(" + pt.bind + ")\n")
 				}
 			case patValue:
-				g.w.str("if " + t + " == " + g.renderStr(pt.expr) + " {\n")
+				g.w.str("if " + t + " == ")
+				g.node(pt.expr)
+				g.w.str(" {\n")
 			default:
 				g.w.str("{\n")
 			}

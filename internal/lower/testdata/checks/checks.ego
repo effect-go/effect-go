@@ -1,0 +1,59 @@
+// Package checks exercises check, must, else and fail.
+package checks
+
+import (
+	"errors"
+	"os"
+	"strconv"
+)
+
+var ErrEmpty = errors.New("empty")
+
+func parse(s string) (int, error) {
+	if s == "" {
+		return 0, ErrEmpty
+	}
+	return strconv.Atoi(s)
+}
+
+func Sum(a, b string) (int, error) {
+	x := check parse(a)
+	y := check parse(b) "parse second number {b}"
+	return x + y, nil
+}
+
+func Assign(s string) (n int, err error) {
+	n = check parse(s)
+	return n, nil
+}
+
+func Touch(path string) error {
+	check os.WriteFile(path, nil, 0o600)
+	return nil
+}
+
+func OrZero(s string) int {
+	n := parse(s) else 0
+	return n
+}
+
+func OrDefault(s string, def int) int {
+	n := 1
+	n = parse(s) else def
+	return n
+}
+
+func MustParse(s string) int {
+	n := must strconv.Atoi(s)
+	return n
+}
+
+func Positive(n int) (int, error) {
+	if n < 0 {
+		fail "negative: {n}"
+	}
+	if n == 0 {
+		fail "zero"
+	}
+	return n, nil
+}

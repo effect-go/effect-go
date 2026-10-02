@@ -447,6 +447,14 @@ func (g *fileGen) coalesceInto(target string, declare bool, t types.Type, x *ast
 		}
 	}
 	switch {
+	case isOptChain(left) && declare && isCheap(x.Y) && !nillable(g.typeOf(left)):
+		// city := "unknown"; if u != nil { city = u.City }
+		g.genStmt(func() {
+			g.w.str(target + " := ")
+			g.node(x.Y)
+		})
+		g.w.str("if " + strings.Join(g.guards(left), " && ") + " {\n")
+		g.w.str(target + " = " + g.plain(left) + "\n}\n")
 	case isOptChain(left):
 		if declare {
 			if t == nil {
@@ -585,23 +593,40 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 	}
 	g.w.rec(x, func() {
 		g.w.str("func(")
+		// Parameters, grouped by type as in hand-written code: (a, b T).
+		type param struct {
+			name *ast.Ident
+			typ  ast.Expr // explicit type, or nil
+			t    string   // inferred type
+		}
+		var ps []param
 		i := 0
-		for j, fl := range x.Params.List {
+		for _, fl := range x.Params.List {
 			for k, n := range fl.Names {
-				if i > 0 {
-					g.w.str(", ")
-				}
-				g.node(n)
+				p := param{name: n}
 				switch {
 				case fl.Type != nil && k == len(fl.Names)-1:
-					g.w.str(" ")
-					g.node(fl.Type)
+					p.typ = fl.Type
 				case fl.Type == nil && f.sig != nil:
-					g.w.str(" " + g.typeString(f.sig.Params().At(i).Type()))
+					p.t = g.typeString(f.sig.Params().At(i).Type())
 				}
+				ps = append(ps, p)
 				i++
 			}
-			_ = j
+		}
+		for j, p := range ps {
+			if j > 0 {
+				g.w.str(", ")
+			}
+			g.node(p.name)
+			last := j == len(ps)-1
+			switch {
+			case p.typ != nil:
+				g.w.str(" ")
+				g.node(p.typ)
+			case p.t != "" && (last || ps[j+1].t != p.t || ps[j+1].typ != nil):
+				g.w.str(" " + p.t)
+			}
 		}
 		g.w.str(")")
 		var res []types.Type
@@ -978,4 +1003,25 @@ func (g *fileGen) parent(n ast.Node) ast.Node {
 		})
 	}
 	return g.parents[n]
+}
+
+// isCheap reports whether evaluating x early is harmless: a literal, a
+// name, or a constant expression of them.
+func isCheap(x ast.Expr) bool {
+	switch x := ast.Unparen(x).(type) {
+	case *ast.BasicLit, *ast.Ident:
+		return true
+	case *ast.FString:
+		for _, p := range x.Parts {
+			if p.X != nil {
+				return false
+			}
+		}
+		return true
+	case *ast.SelectorExpr:
+		return isCheap(x.X)
+	case *ast.UnaryExpr:
+		return isCheap(x.X)
+	}
+	return false
 }
