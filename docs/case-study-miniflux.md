@@ -173,11 +173,16 @@ We checked the error paths against the original on a real database: a feed whose
 - **The UI's error type stays at the boundary.** miniflux's `LocalizedErrorWrapper` isn't an `error` (its `Error()` returns an `error`, not a string), and the UI and API depend on it. The port converts to it in one function, `localize`, instead of redesigning it across the codebase.
 - **Most queries still run to the end.** Only the three queries the refresh alone uses take a context. `FeedByID`, `UpdateFeed` and `UserByID` (80 callers) don't. Giving them one changes their signature for every caller: that's a refactoring effect-go makes cheaper inside effect functions (the `ctx` is passed for you) but not free.
 - **The line count isn't the point of the error half.** The refresh is 9 lines longer, the size of the error set. What it buys is the decisions in one place, checked for completeness by the compiler.
+- **Dependency injection with `layer` didn't pay here.** We moved the daemon's wiring (the worker pool, then the web servers, each stopped by the scope) to an injector. The generated code does what the hand-written code did. It took 45 lines to replace 12:
+  - wrappers for constructors that take configuration values (`worker.NewPool(store, n)`) or return two results (`server.StartWebServer`);
+  - a struct to return both services, since an injector returns one value.
+
+  miniflux's real dependencies are globals (`config.Opts` is read 249 times in 79 files), its explicit graph is a chain of five constructors, and no test builds a variant of it. `layer` pays off when a graph is wide and tests swap parts of it, as in the [todo example](../examples/todo/inject.go). Here, we'd keep the 12 lines. Making configuration a dependency instead of a global would come first, and that's a refactoring of miniflux, not a port.
 - **One fire-and-forget goroutine remains.** `go integration.PushEntries(…)` sends new entries to third-party services. Bringing it into the scope would mean deciding whether shutdown should wait for those pushes, which is a product decision, not a mechanical change.
 
 ## Reproducing it
 
-The port is the `effect-go` branch of a local clone of miniflux at 703fe82. Its `go.mod` points at a local effect-go with a `replace` directive until effect-go is published. Steps:
+The port is the `effect-go` branch of a local clone of miniflux at 703fe82 (its last commit is the `layer` experiment above). Its `go.mod` points at a local effect-go with a `replace` directive until effect-go is published. Steps:
 1. `ego generate ./internal/...` regenerates the Go.
 2. `go test ./internal/...` runs miniflux's tests.
 3. [experiments/miniflux-shutdown](../experiments/miniflux-shutdown) has the test feed server, the script that times SIGTERM (`run.sh`) and the one that compares recorded errors (`errors.sh`).
