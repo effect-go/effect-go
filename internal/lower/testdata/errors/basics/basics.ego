@@ -24,7 +24,12 @@ func set() (int, E) {
 }
 
 func noCause() (int, E) {
-	x := check load() as B // ERROR "B has no error field"
+	x := check load() as B // ERROR "B has no error field to hold the cause: give its fields"
+	return x, nil
+}
+
+func positional() (int, E) {
+	x := check load() as A{nil} // ERROR "name the fields of A"
 	return x, nil
 }
 

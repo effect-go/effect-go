@@ -64,6 +64,10 @@ func (p *parser) parseCheck() ast.Expr {
 		x.As = p.pos
 		p.next()
 		x.Case = p.parseTypeName(nil)
+		if p.tok == token.LBRACE {
+			// as Case{Field: value}: the case, with fields of its own.
+			x.Case = p.parseLiteralValue(x.Case)
+		}
 	}
 	return x
 }

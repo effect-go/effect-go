@@ -21,10 +21,16 @@ type session struct {
 	out *bytes.Buffer
 }
 
-// run runs a command and returns its output and exit code.
+// run runs a command line, as main does, and returns its output and exit
+// code.
 func (s *session) run(args ...string) (string, int) {
 	s.out.Reset()
-	code := s.cli.Run(s.t.Context(), args)
+	cmd, err := ParseArgs(args)
+	if err != nil {
+		code := Report(s.out, err)
+		return s.out.String(), code
+	}
+	code := s.cli.Run(s.t.Context(), cmd)
 	return s.out.String(), code
 }
 
@@ -111,7 +117,8 @@ func commands(s *session) {
 	expect("frobnicate", 2, `unknown command "frobnicate"`, "usage:")
 	expect("", 2, "no command", "usage:")
 	expect("list -x", 2, "flag provided but not defined: -x", "usage:")
-	expect("done 1 2", 2, "done and rm take one ID")
+	expect("done 1 2", 2, "done takes one ID")
+	expect("list -all", 0)
 }
 
 // A database that never answers is a readable error, after the retries.
@@ -127,5 +134,14 @@ func TestNoDatabase(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "bad database URL") {
 		t.Fatalf("err %v", err)
+	}
+}
+
+// Mistakes on the command line are reported without a database.
+func TestBadArgsNeedNoDatabase(t *testing.T) {
+	for _, args := range []string{"", "list -x", "frobnicate", "done", "done x", "add -p urgent milk"} {
+		if _, err := ParseArgs(strings.Fields(args)); err == nil {
+			t.Errorf("ParseArgs(%q) succeeded", args)
+		}
 	}
 }

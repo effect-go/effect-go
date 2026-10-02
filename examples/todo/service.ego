@@ -89,9 +89,6 @@ func ParseDue(s string) (*time.Time, TodoError) {
 	if s == "" {
 		return nil, nil
 	}
-	d, err := time.Parse(time.DateOnly, s)
-	if err != nil {
-		fail Invalid{Reason: f"bad due date {s:q}: use YYYY-MM-DD"}
-	}
+	d := check time.Parse(time.DateOnly, s) as Invalid{Reason: f"bad due date {s:q}: use YYYY-MM-DD"}
 	return &d, nil
 }

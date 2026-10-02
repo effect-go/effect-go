@@ -1,0 +1,128 @@
+package main
+
+import (
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const usage = `usage:
+  todo add TITLE [-p low|medium|high] [-due YYYY-MM-DD]
+  todo list [-all]
+  todo done ID
+  todo rm ID
+  todo stats`
+
+// An Action is what a command does. Matches on it must handle every one.
+enum Action {
+	Add
+	List
+	Complete
+	Remove
+	ShowStats
+}
+
+// A Command is a parsed command line. Parsing needs no database, so a
+// mistyped command fails before the app connects.
+type Command struct {
+	Action   Action
+	Title    string
+	Priority Priority
+	Due      *time.Time
+	All      bool
+	ID       int64
+}
+
+// ParseArgs parses the command line.
+func ParseArgs(args []string) (Command, TodoError) {
+	if len(args) == 0 {
+		fail Usage{Cause: errors.New("no command")}
+	}
+	var cmd Command
+	name := args[0]
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	words, flags := splitFlags(args[1:])
+	match name {
+		"add" => {
+			cmd.Action = Add
+			prio := fs.String("p", "medium", "priority")
+			due := fs.String("due", "", "due date")
+			check fs.Parse(flags) as Usage
+			cmd.Title = strings.Join(words, " ")
+			cmd.Priority = check ParsePriority(*prio)
+			cmd.Due = check ParseDue(*due)
+		}
+		"list" => {
+			cmd.Action = List
+			all := fs.Bool("all", false, "include done todos")
+			check fs.Parse(flags) as Usage
+			cmd.All = *all
+		}
+		"done", "rm" => {
+			cmd.Action = if name == "done" { Complete } else { Remove }
+			check fs.Parse(flags) as Usage
+			if len(words) != 1 {
+				fail Usage{Cause: errors.New(f"{name} takes one ID")}
+			}
+			cmd.ID = check strconv.ParseInt(words[0], 10, 64) as Invalid{Reason: f"bad id {words[0]:q}"}
+		}
+		"stats" => {
+			cmd.Action = ShowStats
+			check fs.Parse(flags) as Usage
+		}
+		_ => fail Usage{Cause: errors.New(f"unknown command {name:q}")}
+	}
+	return cmd, nil
+}
+
+// splitFlags separates a command's words from its flags, so both
+// "add buy milk -p high" and "add -p high buy milk" work.
+func splitFlags(args []string) (words, flags []string) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") {
+			words = append(words, a)
+			continue
+		}
+		flags = append(flags, a)
+		if !strings.Contains(a, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") && a != "-all" {
+			i++
+			flags = append(flags, args[i]) // the flag's value
+		}
+	}
+	return words, flags
+}
+
+// Report writes err for the user and returns the exit code: 1 for a
+// missing todo, 2 for bad input, 3 when the database fails.
+func Report(w io.Writer, err error) int {
+	match err {
+		nil         => return 0
+		NotFound(e) => {
+			fmt.Fprintln(w, e)
+			return 1
+		}
+		Invalid(e) => {
+			fmt.Fprintln(w, e)
+			return 2
+		}
+		Usage(e) => {
+			fmt.Fprintln(w, e)
+			fmt.Fprintln(w, usage)
+			return 2
+		}
+		Storage(e) => {
+			fmt.Fprintln(w, e)
+			return 3
+		}
+		_ => {
+			fmt.Fprintln(w, err) // a timeout, or no database
+			return 1
+		}
+	}
+}

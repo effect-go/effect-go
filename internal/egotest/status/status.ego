@@ -3,6 +3,7 @@ package status
 import (
 	"errors"
 	"net/http"
+	"strconv"
 )
 
 error PayError {
@@ -37,6 +38,18 @@ func Charge(amount int) (string, PayError) {
 		fail Gateway{Cause: errors.New("timeout")}
 	}
 	return "ok", nil
+}
+
+// Amount parses an amount. A bad one is Declined, with its own message.
+func Amount(s string) (int, PayError) {
+	n := check strconv.Atoi(s) as Declined{Reason: f"bad amount {s:q}"}
+	return n, nil
+}
+
+// Remote keeps the cause: Gateway's error field gets it.
+func Remote(s string) (int, PayError) {
+	n := check strconv.Atoi(s) as Gateway{}
+	return n, nil
 }
 
 // Pay passes Charge's errors on unchanged: they are the same set.

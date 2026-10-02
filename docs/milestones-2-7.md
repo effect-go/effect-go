@@ -60,6 +60,7 @@ The compiler is tested in three ways:
   - f-strings support format specs.
   - The dependency graph is declared with a wire-style marker in plain Go, not a dialect block.
 - **Additions the work showed were needed:**
+  - **`check … as Case{Field: …}`** gives the case fields of its own, such as a message, while the cause still goes in its error field. This came from writing the todo example.
   - **Error-set cases take an optional message:** `NotFound{ ID UserID } "no user {ID}"`. Without one, `Error()` is generated from the case name and fields.
   - **String literals are allowed inside f-string interpolations:** `f"until {t.Format("2006-01-02")}"`. The agent test hit this.
   - **The runtime packages are imported automatically** (`scope`, `schedule`, `trace`, `layer`). Also from the agent test: without the import, a lambda passed to `schedule.While` couldn't be typed.

@@ -3,6 +3,7 @@ package status
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"testing"
 )
 
@@ -30,6 +31,12 @@ func TestStatus(t *testing.T) {
 	_, err := Pay(500)
 	if _, ok := errors.AsType[Gateway](err); !ok || err.Error() != "gateway: timeout" {
 		t.Fatalf("err %v", err)
+	}
+	if _, err := Amount("x"); err == nil || err.Error() != `declined: bad amount "x"` {
+		t.Fatalf("Amount: %v", err)
+	}
+	if _, err := Remote("x"); !errors.Is(err, strconv.ErrSyntax) {
+		t.Fatalf("Remote: %v", err)
 	}
 	defer func() {
 		if recover() == nil {

@@ -231,7 +231,13 @@ func (g *fileGen) lhs(lhs []ast.Expr) {
 
 // draftCheck renders check, must and the call of else for a draft.
 func (g *fileGen) draftCheck(lhs []ast.Expr, tok token.Token, c *ast.CheckExpr) {
-	if c.Case != nil {
+	switch {
+	case c.Case == nil:
+	case isCompositeLit(c.Case):
+		g.w.str("_egoUse(")
+		g.node(c.Case)
+		g.w.str(")\n")
+	default:
 		g.w.str("_egoUse(*new(")
 		g.w.rec(c.Case, func() { g.node(c.Case) })
 		g.w.str("))\n")
@@ -256,13 +262,18 @@ func (g *fileGen) wrap(c *ast.CheckExpr, err string) string {
 		set = g.fn.set
 	}
 	if c.Case != nil {
+		lit, _ := c.Case.(*ast.CompositeLit)
+		typ := c.Case
+		if lit != nil {
+			typ = lit.Type
+		}
 		t := g.typeOf(c.Case)
 		field := ""
 		if t == nil {
 			// A case of a set declared in this package.
 			for _, sd := range g.pkg.sums {
 				for _, sc := range sd.Cases {
-					if sc.Name.Name == lastName(c.Case) {
+					if sc.Name.Name == lastName(typ) {
 						field = causeField(sc)
 					}
 				}
@@ -277,14 +288,32 @@ func (g *fileGen) wrap(c *ast.CheckExpr, err string) string {
 					}
 				}
 			}
-			if field == "" {
-				g.errorf(c.Case.Pos(), "%s has no error field to hold the cause", g.text(c.Case))
+			if field == "" && lit == nil {
+				g.errorf(c.Case.Pos(), "%s has no error field to hold the cause: give its fields, as in %s{…}", g.text(typ), g.text(typ))
 			}
 			if set != nil && !g.inSet(t, set) {
-				g.errorf(c.Case.Pos(), "%s is not a case of %s", g.text(c.Case), set.Name.Name)
+				g.errorf(c.Case.Pos(), "%s is not a case of %s", g.text(typ), set.Name.Name)
 			}
 		}
-		return g.renderStr(c.Case) + "{" + field + ": " + err + "}"
+		if lit == nil {
+			return g.renderStr(c.Case) + "{" + field + ": " + err + "}"
+		}
+		// as Case{…}: the cause goes in the error field, unless set.
+		v := g.renderStr(lit)
+		if field == "" || hasKey(lit, field) {
+			return v
+		}
+		for _, e := range lit.Elts {
+			if _, keyed := e.(*ast.KeyValueExpr); !keyed {
+				g.errorf(e.Pos(), "name the fields of %s, so the cause can be added", g.text(typ))
+				return v
+			}
+		}
+		sep := ""
+		if len(lit.Elts) > 0 {
+			sep = ", "
+		}
+		return strings.TrimSuffix(v, "}") + sep + field + ": " + err + "}"
 	}
 	if set != nil {
 		if !g.passesSet(c.X, set) {
@@ -458,4 +487,21 @@ func (g *fileGen) checkValue(c *ast.CheckExpr) {
 		handle = g.ret(g.wrap(c, v))
 	}
 	g.w.str(handle + "\n}")
+}
+
+func isCompositeLit(x ast.Expr) bool {
+	_, ok := x.(*ast.CompositeLit)
+	return ok
+}
+
+// hasKey reports whether a composite literal sets the field name.
+func hasKey(lit *ast.CompositeLit, name string) bool {
+	for _, e := range lit.Elts {
+		if kv, ok := e.(*ast.KeyValueExpr); ok {
+			if id, ok := kv.Key.(*ast.Ident); ok && id.Name == name {
+				return true
+			}
+		}
+	}
+	return false
 }

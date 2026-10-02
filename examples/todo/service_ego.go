@@ -162,5 +162,6 @@ func ParseDue(s string) (*time.Time, error) {
 	if err != nil {
 		return nil, Invalid{Reason: fmt.Sprintf("bad due date %q: use YYYY-MM-DD", s)}
 	}
+//line service.ego:93
 	return &d, nil
 }

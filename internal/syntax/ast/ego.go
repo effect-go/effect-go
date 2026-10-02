@@ -15,7 +15,7 @@ type (
 		X     Expr      // the call
 		Label *FString  // custom label; or nil
 		As    token.Pos // position of "as"; or token.NoPos
-		Case  Expr      // error set case after "as"; or nil
+		Case  Expr      // error set case after "as": a type, or a *CompositeLit; or nil
 	}
 
 	// An ElseExpr is "X else Fallback": on failure, use Fallback.

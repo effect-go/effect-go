@@ -26,15 +26,17 @@ Exit codes: 1 for a missing todo, 2 for bad input, 3 when the database fails.
 |---|---|
 | `effect` functions: implicit `ctx`, one span per call | every method of `Store`, `Service` and `CLI` |
 | `effect` interface methods | `Store` in [store.ego](store.ego) |
-| An error set with messages, and `check … as` | `TodoError` in [todo.ego](todo.ego), used by [service.ego](service.ego) |
-| `fail` with an error-set case, and with an error value | `Service.Add`, `ParsePriority`, `CLI.dispatch` |
-| Exhaustive `match`: on errors, on enums, on strings, as an expression | `CLI.Run`, `PgStore.Count`, `ParsePriority`, `MemStore.Count` |
-| Enums without data | `Priority`, `Filter` |
+| An error set with messages, and `check … as` | `TodoError` in [todo.ego](todo.ego), used by [service.ego](service.ego) and [args.ego](args.ego) |
+| `check … as Case{…}`: the error becomes a case with a message of its own | `ParseArgs` (a bad ID), `ParseDue` |
+| `fail` with an error-set case | `Service.Add`, `ParsePriority`, `ParseArgs` |
+| Exhaustive `match`: on errors, on enums, on strings, as an expression | `Report`, `CLI.run` (every `Action`), `ParsePriority`, `PgStore.Count` |
+| Enums without data | `Action`, `Priority`, `Filter` |
 | `all`: three queries in parallel | `Service.Stats` |
 | `retry` with a schedule that skips errors that won't go away | `Connect` and `connectRetry` in [store.ego](store.ego) |
 | `timeout` around a whole command | `CLI.Run` |
+| Command-line mistakes reported before connecting | `ParseArgs` in [args.ego](args.ego), called by [main.go](main.go) |
 | Lambdas, with types inferred | `Service.List`, `MemStore`, `connectRetry` |
-| `if` expressions, including `else if` chains | `compareDue`, `CLI.Run`, `CLI.list` |
+| `if` expressions, including `else if` chains | `compareDue`, `ParseArgs`, `CLI.list` |
 | `?.` and `??` | `CLI.list` (the due date), `databaseURL` |
 | f-strings with format specs | `CLI.list`, `CLI.add`, `ParsePriority` |
 | Layers: a pool closed with the scope; a test graph with an in-memory store and a fixed clock | [inject.go](inject.go), used by [main.go](main.go) and [cli_test.go](cli_test.go) |

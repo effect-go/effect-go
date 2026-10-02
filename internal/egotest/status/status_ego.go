@@ -6,11 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 )
 
 // PayError is the error set Declined | Expired | Gateway.
 //
-//line status.ego:8
+//line status.ego:9
 type PayError interface {
 	error
 	isPayError()
@@ -36,7 +37,7 @@ func (e Gateway) Error() string { return fmt.Sprintf("gateway: %v", e.Cause) }
 
 func (e Gateway) Unwrap() error { return e.Cause }
 
-//line status.ego:14
+//line status.ego:15
 func Code(err error) int {
 	var code int
 	if err == nil {
@@ -50,7 +51,7 @@ func Code(err error) int {
 	} else {
 		panic(err)
 	}
-//line status.ego:21
+//line status.ego:22
 	return code
 }
 
@@ -66,7 +67,7 @@ func Describe(err error) string {
 	return v
 }
 
-//line status.ego:32
+//line status.ego:33
 func Charge(amount int) (string, error) {
 	if amount <= 0 {
 		return "", Declined{Reason: "nothing to charge"}
@@ -77,12 +78,32 @@ func Charge(amount int) (string, error) {
 	return "ok", nil
 }
 
+// Amount parses an amount. A bad one is Declined, with its own message.
+func Amount(s string) (int, error) {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, Declined{Reason: fmt.Sprintf("bad amount %q", s)}
+	}
+//line status.ego:46
+	return n, nil
+}
+
+// Remote keeps the cause: Gateway's error field gets it.
+func Remote(s string) (int, error) {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, Gateway{Cause: err}
+	}
+//line status.ego:52
+	return n, nil
+}
+
 // Pay passes Charge's errors on unchanged: they are the same set.
 func Pay(amount int) (string, error) {
 	r, err := Charge(amount)
 	if err != nil {
 		return "", err
 	}
-//line status.ego:45
+//line status.ego:58
 	return r, nil
 }

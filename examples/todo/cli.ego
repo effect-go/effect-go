@@ -1,12 +1,8 @@
 package main
 
 import (
-	"errors"
-	"flag"
 	"fmt"
 	"io"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -25,79 +21,31 @@ type CLI struct {
 
 func NewCLI(svc *Service, now Clock, cfg Config) *CLI { return &CLI{svc, now, cfg.Out, cfg.Err} }
 
-const usage = `usage:
-  todo add TITLE [-p low|medium|high] [-due YYYY-MM-DD]
-  todo list [-all]
-  todo done ID
-  todo rm ID
-  todo stats`
-
-// Run runs one command, gives it 10 seconds, and returns the exit code.
-effect (c *CLI) Run(args []string) int {
-	_, err := timeout(10*time.Second, c.dispatch(args))
-	match err {
-		nil         => return 0
-		NotFound(e) => fmt.Fprintln(c.err, e)
-		Invalid(e)  => {
-			fmt.Fprintln(c.err, e)
-			return 2
-		}
-		Usage(e) => {
-			fmt.Fprintln(c.err, e)
-			fmt.Fprintln(c.err, usage)
-			return 2
-		}
-		Storage(e) => {
-			fmt.Fprintln(c.err, e)
-			return 3
-		}
-		_ => fmt.Fprintln(c.err, err) // a timeout
-	}
-	return 1
+// Run runs a command, gives it 10 seconds, and returns the exit code.
+effect (c *CLI) Run(cmd Command) int {
+	_, err := timeout(10*time.Second, c.run(cmd))
+	return Report(c.err, err)
 }
 
-effect (c *CLI) dispatch(args []string) error {
-	if len(args) == 0 {
-		fail Usage{Cause: errors.New("no command")}
-	}
-	cmd, args := args[0], args[1:]
-	match cmd {
-		"add"  => check c.add(args)
-		"list" => check c.list(args)
-		"done" => {
-			n := check id(args)
-			check c.svc.Done(n)
+effect (c *CLI) run(cmd Command) error {
+	match cmd.Action {
+		Add => {
+			t := check c.svc.Add(cmd.Title, cmd.Priority, cmd.Due)
+			fmt.Fprintln(c.out, f"added #{t.ID}: {t.Title}")
 		}
-		"rm" => {
-			n := check id(args)
-			check c.svc.Remove(n)
+		List      => check c.list(cmd.All)
+		Complete  => check c.svc.Done(cmd.ID)
+		Remove    => check c.svc.Remove(cmd.ID)
+		ShowStats => {
+			s := check c.svc.Stats()
+			fmt.Fprintln(c.out, f"{s.Open} open, {s.Done} done, {s.Overdue} overdue")
 		}
-		"stats" => check c.stats()
-		_       => fail Usage{Cause: errors.New(f"unknown command {cmd:q}")}
 	}
 	return nil
 }
 
-effect (c *CLI) add(args []string) error {
-	fs := flag.NewFlagSet("add", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	prio := fs.String("p", "medium", "priority")
-	due := fs.String("due", "", "due date")
-	title, rest := firstArg(args)
-	check fs.Parse(rest) as Usage
-	p := check ParsePriority(*prio)
-	d := check ParseDue(*due)
-	t := check c.svc.Add(title, p, d)
-	fmt.Fprintln(c.out, f"added #{t.ID}: {t.Title}")
-	return nil
-}
-
-effect (c *CLI) list(args []string) error {
-	fs := flag.NewFlagSet("list", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	all := fs.Bool("all", false, "include done todos")
-	check fs.Parse(args) as Usage
-	todos := check c.svc.List(*all)
+effect (c *CLI) list(all bool) error {
+	todos := check c.svc.List(all)
 	if len(todos) == 0 {
 		fmt.Fprintln(c.out, "nothing to do")
 	}
@@ -111,41 +59,4 @@ effect (c *CLI) list(args []string) error {
 		fmt.Fprintln(c.out, f"[{mark}] #{t.ID:-3d} {t.Priority:-6s} {t.Title}  {due}")
 	}
 	return nil
-}
-
-effect (c *CLI) stats() error {
-	s := check c.svc.Stats()
-	fmt.Fprintln(c.out, f"{s.Open} open, {s.Done} done, {s.Overdue} overdue")
-	return nil
-}
-
-// firstArg separates a command's words from its flags, so both
-// "add buy milk -p high" and "add -p high buy milk" work.
-func firstArg(args []string) (string, []string) {
-	var words, flags []string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if !strings.HasPrefix(a, "-") {
-			words = append(words, a)
-			continue
-		}
-		flags = append(flags, a)
-		if !strings.Contains(a, "=") && i+1 < len(args) {
-			i++
-			flags = append(flags, args[i]) // the flag's value
-		}
-	}
-	return strings.Join(words, " "), flags
-}
-
-// id reads the ID argument of done and rm.
-func id(args []string) (int64, error) {
-	if len(args) != 1 {
-		fail Usage{Cause: errors.New("done and rm take one ID")}
-	}
-	n, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil {
-		return 0, Invalid{Reason: f"bad id {args[0]:q}"}
-	}
-	return n, nil
 }

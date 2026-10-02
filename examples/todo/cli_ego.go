@@ -4,12 +4,8 @@ package main
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"fmt"
 	"io"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/effect-go/effect-go/scope"
@@ -18,7 +14,7 @@ import (
 
 // Config is what the app needs from its environment.
 //
-//line cli.ego:13
+//line cli.ego:9
 type Config struct {
 	DatabaseURL string
 	Out, Err    io.Writer
@@ -33,153 +29,68 @@ type CLI struct {
 
 func NewCLI(svc *Service, now Clock, cfg Config) *CLI { return &CLI{svc, now, cfg.Out, cfg.Err} }
 
-const usage = `usage:
-  todo add TITLE [-p low|medium|high] [-due YYYY-MM-DD]
-  todo list [-all]
-  todo done ID
-  todo rm ID
-  todo stats`
-
-// Run runs one command, gives it 10 seconds, and returns the exit code.
-func (c *CLI) Run(ctx context.Context, args []string) (_ int) {
+// Run runs a command, gives it 10 seconds, and returns the exit code.
+func (c *CLI) Run(ctx context.Context, cmd Command) (_ int) {
 	ctx, span := trace.Start(ctx, "main.CLI.Run")
 	defer trace.End(span, nil)
-//line cli.ego:37
-	_, err := scope.Timeout(ctx, 10*time.Second, func(ctx context.Context) (struct{}, error) { return struct{}{}, c.dispatch(ctx, args) })
-	if err == nil {
-		return 0
-	} else if e, ok := errors.AsType[NotFound](err); ok {
-//line cli.ego:40
-		fmt.Fprintln(c.err, e)
-	} else if e, ok := errors.AsType[Invalid](err); ok {
-
-//line cli.ego:42
-		fmt.Fprintln(c.err, e)
-		return 2
-
-	} else if e, ok := errors.AsType[Usage](err); ok {
-
-//line cli.ego:46
-		fmt.Fprintln(c.err, e)
-		fmt.Fprintln(c.err, usage)
-		return 2
-
-	} else if e, ok := errors.AsType[Storage](err); ok {
-
-//line cli.ego:51
-		fmt.Fprintln(c.err, e)
-		return 3
-
-	} else {
-//line cli.ego:54
-		fmt.Fprintln(c.err, err)
-	}
-	return 1
+//line cli.ego:26
+	_, err := scope.Timeout(ctx, 10*time.Second, func(ctx context.Context) (struct{}, error) { return struct{}{}, c.run(ctx, cmd) })
+	return Report(c.err, err)
 }
 
-func (c *CLI) dispatch(ctx context.Context, args []string) (err error) {
-	ctx, span := trace.Start(ctx, "main.CLI.dispatch")
+func (c *CLI) run(ctx context.Context, cmd Command) (err error) {
+	ctx, span := trace.Start(ctx, "main.CLI.run")
 	defer trace.End(span, &err)
-//line cli.ego:60
-	if len(args) == 0 {
-		return Usage{Cause: errors.New("no command")}
-	}
-	cmd, args := args[0], args[1:]
-	switch cmd {
-	case "add":
-//line cli.ego:65
-		if err := c.add(ctx, args); err != nil {
-			return fmt.Errorf("c.add: %w", err)
+//line cli.ego:31
+	switch cmd.Action {
+	case Add:
+
+//line cli.ego:33
+		t, err := c.svc.Add(ctx, cmd.Title, cmd.Priority, cmd.Due)
+		if err != nil {
+			return fmt.Errorf("svc.Add: %w", err)
 		}
-	case "list":
-//line cli.ego:66
-		if err := c.list(ctx, args); err != nil {
+//line cli.ego:34
+		fmt.Fprintln(c.out, fmt.Sprintf("added #%d: %s", t.ID, t.Title))
+
+	case List:
+//line cli.ego:36
+		if err := c.list(ctx, cmd.All); err != nil {
 			return fmt.Errorf("c.list: %w", err)
 		}
-	case "done":
-
-//line cli.ego:68
-		n, err := id(args)
-		if err != nil {
-			return fmt.Errorf("id: %w", err)
-		}
-//line cli.ego:69
-		if err := c.svc.Done(ctx, n); err != nil {
+	case Complete:
+//line cli.ego:37
+		if err := c.svc.Done(ctx, cmd.ID); err != nil {
 			return fmt.Errorf("svc.Done: %w", err)
 		}
-
-	case "rm":
-
-//line cli.ego:72
-		n, err := id(args)
-		if err != nil {
-			return fmt.Errorf("id: %w", err)
-		}
-//line cli.ego:73
-		if err := c.svc.Remove(ctx, n); err != nil {
+	case Remove:
+//line cli.ego:38
+		if err := c.svc.Remove(ctx, cmd.ID); err != nil {
 			return fmt.Errorf("svc.Remove: %w", err)
 		}
+	case ShowStats:
 
-	case "stats":
-//line cli.ego:75
-		if err := c.stats(ctx); err != nil {
-			return fmt.Errorf("c.stats: %w", err)
+//line cli.ego:40
+		s, err := c.svc.Stats(ctx)
+		if err != nil {
+			return fmt.Errorf("svc.Stats: %w", err)
 		}
-	default:
-//line cli.ego:76
-		return Usage{Cause: errors.New(fmt.Sprintf("unknown command %q", cmd))}
+//line cli.ego:41
+		fmt.Fprintln(c.out, fmt.Sprintf("%d open, %d done, %d overdue", s.Open, s.Done, s.Overdue))
+
 	}
 	return nil
 }
 
-func (c *CLI) add(ctx context.Context, args []string) (err error) {
-	ctx, span := trace.Start(ctx, "main.CLI.add")
-	defer trace.End(span, &err)
-//line cli.ego:82
-	fs := flag.NewFlagSet("add", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	prio := fs.String("p", "medium", "priority")
-	due := fs.String("due", "", "due date")
-	title, rest := firstArg(args)
-	if err := fs.Parse(rest); err != nil {
-		return Usage{Cause: err}
-	}
-//line cli.ego:88
-	p, err := ParsePriority(*prio)
-	if err != nil {
-		return fmt.Errorf("ParsePriority: %w", err)
-	}
-//line cli.ego:89
-	d, err := ParseDue(*due)
-	if err != nil {
-		return fmt.Errorf("ParseDue: %w", err)
-	}
-//line cli.ego:90
-	t, err := c.svc.Add(ctx, title, p, d)
-	if err != nil {
-		return fmt.Errorf("svc.Add: %w", err)
-	}
-//line cli.ego:91
-	fmt.Fprintln(c.out, fmt.Sprintf("added #%d: %s", t.ID, t.Title))
-	return nil
-}
-
-func (c *CLI) list(ctx context.Context, args []string) (err error) {
+func (c *CLI) list(ctx context.Context, all bool) (err error) {
 	ctx, span := trace.Start(ctx, "main.CLI.list")
 	defer trace.End(span, &err)
-//line cli.ego:96
-	fs := flag.NewFlagSet("list", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	all := fs.Bool("all", false, "include done todos")
-	if err := fs.Parse(args); err != nil {
-		return Usage{Cause: err}
-	}
-//line cli.ego:100
-	todos, err := c.svc.List(ctx, *all)
+//line cli.ego:48
+	todos, err := c.svc.List(ctx, all)
 	if err != nil {
 		return fmt.Errorf("svc.List: %w", err)
 	}
-//line cli.ego:101
+//line cli.ego:49
 	if len(todos) == 0 {
 		fmt.Fprintln(c.out, "nothing to do")
 	}
@@ -191,60 +102,16 @@ func (c *CLI) list(ctx context.Context, args []string) (err error) {
 		} else {
 			mark = " "
 		}
-//line cli.ego:107
+//line cli.ego:55
 		due := ""
 		if t.Due != nil {
 			due = t.Due.Format(time.DateOnly)
 		}
-//line cli.ego:108
+//line cli.ego:56
 		if t.Overdue(now) {
 			due += " (overdue)"
 		}
 		fmt.Fprintln(c.out, fmt.Sprintf("[%s] #%-3d %-6s %s  %s", mark, t.ID, t.Priority, t.Title, due))
 	}
 	return nil
-}
-
-func (c *CLI) stats(ctx context.Context) (err error) {
-	ctx, span := trace.Start(ctx, "main.CLI.stats")
-	defer trace.End(span, &err)
-//line cli.ego:117
-	s, err := c.svc.Stats(ctx)
-	if err != nil {
-		return fmt.Errorf("svc.Stats: %w", err)
-	}
-//line cli.ego:118
-	fmt.Fprintln(c.out, fmt.Sprintf("%d open, %d done, %d overdue", s.Open, s.Done, s.Overdue))
-	return nil
-}
-
-// firstArg separates a command's words from its flags, so both
-// "add buy milk -p high" and "add -p high buy milk" work.
-func firstArg(args []string) (string, []string) {
-	var words, flags []string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if !strings.HasPrefix(a, "-") {
-			words = append(words, a)
-			continue
-		}
-		flags = append(flags, a)
-		if !strings.Contains(a, "=") && i+1 < len(args) {
-			i++
-			flags = append(flags, args[i]) // the flag's value
-		}
-	}
-	return strings.Join(words, " "), flags
-}
-
-// id reads the ID argument of done and rm.
-func id(args []string) (int64, error) {
-	if len(args) != 1 {
-		return 0, Usage{Cause: errors.New("done and rm take one ID")}
-	}
-	n, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil {
-		return 0, Invalid{Reason: fmt.Sprintf("bad id %q", args[0])}
-	}
-	return n, nil
 }
