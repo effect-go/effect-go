@@ -256,3 +256,31 @@ func TestEditor(t *testing.T) {
 		}
 	})
 }
+
+// The shorthand maps too: hover inside a lambda and inside an f-string.
+func TestEditorShorthand(t *testing.T) {
+	cl, root := start(t)
+	path := filepath.Join(root, "internal/egotest/report/report.ego")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	uri := pathToURI(path)
+	cl.c.notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "ego", "version": 1, "text": src}})
+	cl.waitDiags(uri, func(ds []map[string]any) bool { return len(ds) == 0 })
+	for _, c := range []struct {
+		at    string
+		delta int
+		want  string
+	}{
+		{"o => o.Late", 7, "Late bool"},                        // a field, through an inferred lambda parameter
+		{"(a, b) => cmp.Compare(b.Total", 24, "Total float64"}, // a two-parameter lambda
+		{"{len(orders)}", 5, "orders []Order"},                 // inside an f-string
+	} {
+		res := cl.call("textDocument/hover", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": at(src, c.at, c.delta)})
+		if !strings.Contains(string(res), c.want) {
+			t.Errorf("hover at %q: %s", c.at, res)
+		}
+	}
+}

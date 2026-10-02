@@ -502,6 +502,8 @@ What Dingo tells us (checked 2026-10-01):
 
 ## 9. Milestones (about 7 weeks, each with a go/no-go gate)
 
+> **Status (2026-10-02):** every step below is built, and every gate passes. The editor gate was tested with a scripted LSP client against gopls, not yet inside VS Code. Results and the changes made along the way are in [milestone-1.md](milestone-1.md) and [milestones-2-7.md](milestones-2-7.md).
+
 How the plan is ordered:
 - **Riskiest first.** Editor support decides whether a dialect gets used, so it's tested in week 2, before most of the syntax exists.
 - **Library first.** The runtime ships as a plain Go library before the dialect. It's useful without new syntax, and its users become the dialect's first audience.
@@ -531,6 +533,16 @@ How the plan is ordered:
    - *Gate:* the agent test from v0 still passes with the new features.
 
 ## 10. Open questions
+
+*Answered while building weeks 2–7 (see [milestones-2-7.md](milestones-2-7.md)):*
+- *signatures return `error`;*
+- *implicit `ctx` reaches plain Go functions;*
+- *the graph uses a wire-style marker;*
+- *`=>`, with bare single parameters;*
+- *one expression per `if` branch;*
+- *f-strings take format specs.*
+
+*Still open: anonymous `effect`, where panics may become values, unexported error-set inference, and the first audience.*
 
 - Should generated signatures return `error` (interop) or the sealed type (precision)? Current choice: `error`.
 - Should unexported functions declare their error sets or have them inferred?

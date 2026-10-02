@@ -54,9 +54,9 @@ The handler shows the gap the dialect closes: Go doesn't check that every `UserE
 
 - **The Cause model is a classification, not one struct.** It's `KindOf(err)` plus `*Panic` and `*TimeoutError`, and parallel failures are combined with `errors.Join`. Plain Go code uses it with `errors.Is` and `errors.As`, with nothing new to learn.
 - **`trace.End` takes `&err`,** so `defer trace.End(span, &err)` is one line and also records panics. The doc and the playground now generate this form.
-- **Not built yet:** a deadline for fibers that ignore cancellation, with a report of the ones that don't stop (§3 item 5). Today a scope waits for them indefinitely, which is cooperative cancellation as in all Go code.
+- **Not built in week 1:** a deadline for fibers that ignore cancellation, with a report of the ones that don't stop (§3 item 5). Added later as `scope.StopTimeout` and `*scope.StuckError`; without it a scope waits indefinitely, which is cooperative cancellation as in all Go code.
 - **Module path:** `github.com/effect-go/effect-go`, from the name chosen in §9 step 0.
 
 ## Next
 
-Step 0's open item: the name and first audience, which give the module path for the first release. Then week 2: read Dingo's parser and gopls proxy, fork Go's parser, and test the editor proxy on `check` and `effect`.
+Weeks 2–7 are reported in [milestones-2-7.md](milestones-2-7.md).

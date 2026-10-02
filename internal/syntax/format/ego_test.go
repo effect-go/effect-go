@@ -48,6 +48,9 @@ func TestStdlibLikeGofmt(t *testing.T) {
 	if testing.Short() {
 		t.Skip("formats the whole standard library")
 	}
+	if !strings.HasPrefix(runtime.Version(), "go1.27") {
+		t.Skip("the printer is a copy of Go 1.27's; other versions' gofmt may differ")
+	}
 	root := filepath.Join(runtime.GOROOT(), "src")
 	n := 0
 	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
