@@ -60,7 +60,7 @@ v0.1, experimental. What's built and tested:
 
 The plan, its gates and their results are in [docs/assessment.md](docs/assessment.md), [docs/milestone-1.md](docs/milestone-1.md) and [docs/milestones-2-7.md](docs/milestones-2-7.md). Known limitations:
 - `?.` can't follow a call.
-- Coverage reports point at generated lines (a `//line` limitation; `ego generate -lines=false` turns the directives off).
+- Coverage reports the generated Go, not `.ego` lines: run it with `ego test -cover` (plain `go test -cover` gives positions `go tool cover` can't read).
 - The language server needs gopls on the PATH.
 
 ## Layout

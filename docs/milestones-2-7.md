@@ -75,7 +75,7 @@ The compiler is tested in three ways:
 ## Limitations and next steps
 
 - **The editor gate needs a real VS Code run.** Install the `.vsix`, open `examples/users/ego/users.ego`, and check hover, definition, diagnostics and format-on-save.
-- **`//line` directives break coverage** (golang/go#41222). `-lines=false` turns them off.
+- **Coverage reports the generated Go.** `ego test -cover` rewrites the generated files for the run, without `//line` directives and without the source in their header, since Go 1.27 attributes coverage to both (golang/go#41222), then restores them.
 - **Not supported yet:**
   - `?.` after a call;
   - dialect expressions in `for` and `case` headers. The compiler says so and suggests a variable.
