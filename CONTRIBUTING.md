@@ -16,7 +16,7 @@ go test ./...
 Two kinds of tests skip themselves without what they need:
 - the language server's, without gopls on the PATH (or `EGO_GOPLS` naming it);
 - the todo example's PostgreSQL tests, without `TODO_TEST_DATABASE_URL`.
-  The example is a module of its own: run `go test ./...` in `examples/todo`.
+  The examples are a module of their own: run `go test ./...` in `examples`.
 
 ## Where things are
 
