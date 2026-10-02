@@ -13,21 +13,28 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 )
 
-const version = "v0.1.0"
+// version is the release go install built ego from, or "devel".
+func version() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return "devel"
+}
 
 func usage() {
 	fmt.Fprint(os.Stderr, `ego compiles effect-go (.ego) files to Go.
 
 Usage:
-	ego generate [-check] [dirs]         generate x_ego.go for each x.ego, and layers_ego.go (default ./...)
-	ego fmt [-l] [-w] [paths]            format .ego files (default ./...)
-	ego test [go test flags] [packages]  ego generate, then go test with the same arguments
-	ego vet [packages]                   go vet, then the effect-go analyzers
-	ego eject [-w] [packages]            turn .ego files into plain .go files for good (prints the plan without -w)
-	ego new module/path [dir]            create a project: a small HTTP service, with AGENTS.md
-	ego lsp                              language server: gopls with .ego support
+	ego generate [-check] [dirs]              generate x_ego.go for each x.ego, and layers_ego.go (default ./...)
+	ego fmt [-l] [-w] [paths]                 format .ego files (default ./...)
+	ego test [go test flags] [packages]       ego generate, then go test with the same arguments
+	ego vet [packages]                        go vet, then the effect-go analyzers
+	ego eject [-w] [packages]                 turn .ego files into plain .go files for good (prints the plan without -w)
+	ego new [-replace dir] module/path [dir]  create a project: a small HTTP service, with AGENTS.md
+	ego lsp                                   language server: gopls with .ego support
 	ego version
 `)
 	os.Exit(2)
@@ -59,7 +66,7 @@ func main() {
 	case "lsp":
 		err = lspCmd(args)
 	case "version":
-		fmt.Println("ego", version)
+		fmt.Println("ego", version())
 	case "help", "-h", "--help":
 		usage()
 	default:

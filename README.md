@@ -66,7 +66,12 @@ Analyzers, for plain Go too: `ego vet ./...` runs `go vet`, then checks exhausti
 
 ## Status
 
-v0.1, experimental. What's built and tested:
+v0.1: young, and meant to be used. What you can count on:
+- **Nothing breaks by itself.** The generated Go is committed, so a new effect-go release changes nothing until you run `ego generate`, and `ego eject` leaves for good.
+- **Before v1.0, breaking changes come only in minor versions** (v0.2, v0.3…), for the library and the dialect alike, each with a [changelog](CHANGELOG.md) entry saying how to update. Patch versions only fix bugs.
+- **New Go releases are supported within a month.** The parser is a copy of Go's, and CI checks the newest Go every week.
+
+Contributions: [CONTRIBUTING.md](CONTRIBUTING.md). What's built and tested:
 - the runtime library;
 - the compiler, formatter, language server and VS Code extension;
 - layers and the analyzers;

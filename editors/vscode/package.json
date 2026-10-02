@@ -2,13 +2,24 @@
   "name": "effect-go",
   "displayName": "effect-go",
   "description": "Language support for effect-go (.ego) files: highlighting, and gopls features through ego lsp.",
-  "version": "0.3.2",
+  "keywords": [
+    "go",
+    "golang",
+    "effect-go",
+    "ego",
+    "structured concurrency"
+  ],
+  "version": "0.4.0",
   "publisher": "effect-go",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/effect-go/effect-go"
   },
+  "bugs": {
+    "url": "https://github.com/effect-go/effect-go/issues"
+  },
+  "homepage": "https://github.com/effect-go/effect-go#readme",
   "engines": {
     "vscode": "^1.90.0"
   },

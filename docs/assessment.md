@@ -474,13 +474,13 @@ cd experiments/runtime-bench && go test -bench . -benchmem -count=5
 
 | Project | What it is | Status (2026-10) |
 |---|---|---|
-| [Dingo](https://github.com/MadAppGang/dingo) | `?` with `Result` types, enums, match, lambdas, `?.`/`??`, gopls proxy, VS Code extension, agent docs | 1.9k★, Apache 2.0, started Nov 2025. One maintainer (384 of 387 commits). Fast until Jan 2026 (v0.3→v0.9), then bursts in Mar, Jul (v0.14) and Sep 2026; issues from Jul–Aug unanswered. Missed its 1.0 target |
+| [Dingo](https://github.com/MadAppGang/dingo) | `?` with `Result` types, enums, match, lambdas, `?.`/`??`, gopls proxy, VS Code extension, agent docs | 1.9k★, Apache 2.0, started Nov 2025. One maintainer (384 of 387 commits). Fast until Jan 2026 (v0.3→v0.9), then releases in bursts (Mar, Jul, Sep 2026) |
 | [Lisette](https://github.com/ivov/lisette) | New language compiling to Go, with its own type inference and LSP | 1.5k★, active; Go code can't call it yet |
 | [XGo](https://github.com/goplus/xgo) | Successor to Go+, with a gopls fork | 9.4k★, active |
-| [Borgo](https://github.com/borgo-lang/borgo) | Rust-like language compiling to Go | 4.6k★; dead since 2024; no license |
+| [Borgo](https://github.com/borgo-lang/borgo) | Rust-like language compiling to Go | 4.6k★; no commits since 2024; no license |
 | [templ](https://github.com/a-h/templ) | HTML DSL compiling to Go | 10.5k★; the success model |
 | [fp-go v2](https://github.com/IBM/fp-go) | FP library; has had an `effect` package since Jan 2026 | 2k★; untyped errors; HN verdict on the library: ["no longer Go"](https://news.ycombinator.com/item?id=37171149) |
-| [mbauer83/effect-golang](https://github.com/mbauer83/effect-golang) | `Effect[R,E,A]`, fibers, layers, TestClock | 2★, three weeks old: the brief's scope, and nobody uses it |
+| [mbauer83/effect-golang](https://github.com/mbauer83/effect-golang) | `Effect[R,E,A]`, fibers, layers, TestClock | 2★, three weeks old: Effect's whole model, ported |
 | [Ox](https://ox.softwaremill.com/latest/) (Scala) | Direct-style structured concurrency, retries and resources on virtual threads | 1.0 in Aug 2025; the closest model in spirit |
 | errgroup, [conc](https://github.com/sourcegraph/conc) | Fork/join | errgroup returns only the first error, and its panic propagation was reverted; conc inactive since Jan 2024 |
 | [failsafe-go](https://github.com/failsafe-go/failsafe-go), [backoff](https://github.com/cenkalti/backoff) | Retry policies | Policies stack, but there is no schedule algebra |
@@ -488,9 +488,9 @@ cd experiments/runtime-bench && go test -bench . -benchmem -count=5
 
 What Dingo tells us (checked 2026-10-01):
 - **There is demand.** Nearly 2,000 stars in under a year, with no company behind it.
-- **A sugar-only dialect seems to stall.** After the launch spike it slowed to occasional maintenance and never gained a second regular contributor.
+- **A sugar-only dialect is hard to sustain.** After its launch, it moved to occasional releases, with one regular contributor.
 - **Our v1 shorthand overlaps with it.** Short functions, `match` expressions and `?.`/`??` are Dingo's territory. What only EffectGo has is the Effect part: `effect` functions with implicit `ctx`, structured concurrency, per-service error sets, schedules and checked wiring. That's what to lead with.
-- **Reuse its code, don't depend on it.** It's Apache 2.0, so its parser and gopls proxy can be studied and borrowed with attribution. With a single maintainer, it isn't a foundation to build on.
+- **Reuse its code, don't depend on it.** It's Apache 2.0, so its parser and gopls proxy can be studied and borrowed with attribution. Depending on another young project would add its risks to ours.
 
 ## 8. Risks
 
