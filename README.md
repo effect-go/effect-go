@@ -40,6 +40,7 @@ The library needs Go 1.26 and depends only on OpenTelemetry.
 ```bash
 go install github.com/effect-go/effect-go/cmd/ego@latest
 ego generate ./...   # x.ego -> x_ego.go, committed; layers_ego.go for injectors
+ego test ./...       # ego generate, then go test with the same arguments
 ego fmt -w .         # formats .ego files
 ```
 
@@ -58,7 +59,6 @@ v0.1, experimental. What's built and tested:
 - the demos in [examples](examples).
 
 The plan, its gates and their results are in [docs/assessment.md](docs/assessment.md), [docs/milestone-1.md](docs/milestone-1.md) and [docs/milestones-2-7.md](docs/milestones-2-7.md). Known limitations:
-- `.ego` test files aren't supported; write tests in `_test.go`.
 - `?.` can't follow a call.
 - Coverage reports point at generated lines (a `//line` limitation; `ego generate -lines=false` turns the directives off).
 - The language server needs gopls on the PATH.

@@ -1,0 +1,19 @@
+package checks
+
+import "testing"
+
+// An in-package test in effect-go: it uses the unexported parse.
+func TestInPackage(t *testing.T) {
+	n := must parse("41")
+	got := match n + 1 {
+		42 => "ok"
+		_  => f"got {n + 1}"
+	}
+	if got != "ok" {
+		t.Fatal(got)
+	}
+	v := parse("") else -1
+	if v != -1 {
+		t.Fatal(v)
+	}
+}

@@ -24,6 +24,11 @@ type pkgGen struct {
 	files   []*fileGen
 	goFiles []string
 
+	// Test files, compiled in their own passes.
+	testFiles, xtestFiles []*fileGen // package x, package x_test
+	testGo, xtestGo       []string
+	override              map[string]*types.Package // imports checked here
+
 	topNames map[string]bool         // package-level names, from all files
 	sums     map[string]*ast.SumDecl // error sets and enums declared in .ego files
 	setFuncs map[string]*ast.SumDecl // "Recv.Name" or "Name" of functions returning an error set

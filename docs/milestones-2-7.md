@@ -64,6 +64,7 @@ The compiler is tested in three ways:
   - **String literals are allowed inside f-string interpolations:** `f"until {t.Format("2006-01-02")}"`. The agent test hit this.
   - **The runtime packages are imported automatically** (`scope`, `schedule`, `trace`, `layer`). Also from the agent test: without the import, a lambda passed to `schedule.While` couldn't be typed.
   - **Dialect test packages live outside `testdata`,** because gopls doesn't report diagnostics for packages under `testdata`.
+- **Tests can be written in the dialect.** `x_test.ego` files, both in-package and external (`package x_test`), are type-checked the way `go test` builds them. `ego test` regenerates, then runs `go test`.
 - **A statement-level `match` panics on an error that is outside the set,** unless it has a `_` arm. An `else if err != nil { panic(err) }` makes the "closed set" promise checkable at run time.
 
 ## Limitations and next steps
@@ -71,7 +72,6 @@ The compiler is tested in three ways:
 - **The editor gate needs a real VS Code run.** Install the `.vsix`, open `examples/users/ego/users.ego`, and check hover, definition, diagnostics and format-on-save.
 - **`//line` directives break coverage** (golang/go#41222). `-lines=false` turns them off.
 - **Not supported yet:**
-  - `.ego` test files;
   - `?.` after a call;
   - dialect expressions in `for` and `case` headers. The compiler says so and suggests a variable.
 - **The proxy regenerates on every keystroke** with a cached importer. That is fine for packages the size of the demos, but it isn't measured on large ones.

@@ -53,7 +53,7 @@ func (g *fileGen) lowerStmt(s ast.Stmt) {
 		return
 	case *ast.IfStmt:
 		if s.Init != nil && hasDirectCheck(s.Init) {
-			g.errorf(s.Init.Pos(), "check can't be used in an if header: write it on its own line before the if")
+			g.errorf(s.Init.Pos(), "check can't be used in an if header (nor else or must): write it on its own line before the if")
 		}
 		g.ifStmt(s)
 		return

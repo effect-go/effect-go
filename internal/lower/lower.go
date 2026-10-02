@@ -120,17 +120,74 @@ func Generate(cfg Config) (*Result, error) {
 	if err := p.parse(res); err != nil {
 		return nil, err
 	}
-	if len(p.files) == 0 {
-		return res, nil
+	if len(p.files)+len(p.testFiles)+len(p.xtestFiles) == 0 || len(res.Diags) > 0 {
+		return res, nil // nothing to do, or syntax errors
 	}
-	if len(res.Diags) > 0 { // syntax errors
-		return res, nil
+
+	// The package itself.
+	ti, err := p.run(res, nil)
+	if err != nil {
+		return nil, err
 	}
+
+	// In-package tests are checked with the package, as go test does.
+	if len(p.testFiles) > 0 {
+		v := p.variant(append(slices.Clone(p.files), p.testFiles...), append(slices.Clone(p.goFiles), p.testGo...), p.path, p.name)
+		ti, err = v.run(res, p.testFiles)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// External tests are their own package, importing the one under test
+	// (with its in-package test files, again as go test does).
+	if len(p.xtestFiles) > 0 {
+		v := p.variant(p.xtestFiles, p.xtestGo, p.path+"_test", p.name+"_test")
+		if ti != nil && ti.pkg != nil {
+			v.override = map[string]*types.Package{p.path: ti.pkg}
+		}
+		if _, err := v.run(res, p.xtestFiles); err != nil {
+			return nil, err
+		}
+	}
+	sortDiags(res.Diags)
+	return res, nil
+}
+
+// variant returns a pkgGen for another set of files: the package with its
+// tests, or the external test package.
+func (p *pkgGen) variant(files []*fileGen, goFiles []string, path, name string) *pkgGen {
+	v := &pkgGen{cfg: p.cfg, fset: p.fset, name: name, path: path, goFiles: goFiles, facts: map[ast.Node]*fact{}}
+	for _, f := range files {
+		nf := *f
+		nf.pkg = v
+		v.files = append(v.files, &nf)
+	}
+	return v
+}
+
+// run compiles p's .ego files, adding to res the outputs and diagnostics of
+// the files in only (all of p's files if only is nil). It returns the
+// package's types.
+func (p *pkgGen) run(res *Result, only []*fileGen) (*typeInfo, error) {
+	keep := func(f *fileGen) bool {
+		if only == nil {
+			return true
+		}
+		for _, o := range only {
+			if o.path == f.path {
+				return true
+			}
+		}
+		return false
+	}
+	cfg := p.cfg
 	p.collect()
 
 	// Draft rounds, until the drafts stop changing.
 	var ti *typeInfo
 	var prev [][]byte
+	var err error
 	for i := 0; i < 6; i++ {
 		var drafts [][]byte
 		var ws []*writer
@@ -155,39 +212,48 @@ func Generate(cfg Config) (*Result, error) {
 				fmt.Fprintln(os.Stderr, "draft error:", e)
 			}
 		}
+		if len(p.files) == 0 {
+			break // plain Go: one check gives the types
+		}
 	}
 
 	// Final rendering.
 	var ws []*writer
+	var outs []*Output
+	var diags []Diagnostic
 	for _, f := range p.files {
 		w := f.render(&round{ti: ti, final: true})
 		ws = append(ws, w)
-		res.Diags = append(res.Diags, f.diags...)
-		out := &Output{Ego: f.path, Go: filepath.Join(dir, GoName(f.name)), Src: f.src, Raw: w.buf, Map: newSourceMap(w), File: f.tf}
-		res.Outputs = append(res.Outputs, out)
+		if !keep(f) {
+			continue
+		}
+		diags = append(diags, f.diags...)
+		outs = append(outs, &Output{Ego: f.path, Go: filepath.Join(cfg.Dir, GoName(f.name)), Src: f.src, Raw: w.buf, Map: newSourceMap(w), File: f.tf})
 	}
-	if len(res.Diags) == 0 && !cfg.NoTypeCheck {
+	if len(diags) == 0 && !cfg.NoTypeCheck {
 		// Type-check the result, and report its errors at .ego positions.
 		final, err := p.check(ws, false)
 		if err != nil {
 			return nil, err
 		}
-		res.Diags = append(res.Diags, p.mapErrors(final, res.Outputs)...)
+		diags = append(diags, p.mapErrors(final, outs)...)
+		ti = final
 	}
-	for _, out := range res.Outputs {
+	for _, out := range outs {
 		code := out.Raw
 		if !cfg.NoLines {
 			code = addLineDirectives(code, out)
 		}
 		if formatted, err := format.Source(code); err == nil {
 			code = formatted
-		} else if len(res.Diags) == 0 {
-			res.Diags = append(res.Diags, Diagnostic{Pos: token.Position{Filename: out.Ego}, Msg: "internal error: generated code doesn't parse: " + err.Error()})
+		} else if len(diags) == 0 {
+			diags = append(diags, Diagnostic{Pos: token.Position{Filename: out.Ego}, Msg: "internal error: generated code doesn't parse: " + err.Error()})
 		}
 		out.Code = code
 	}
-	sortDiags(res.Diags)
-	return res, nil
+	res.Outputs = append(res.Outputs, outs...)
+	res.Diags = append(res.Diags, diags...)
+	return ti, nil
 }
 
 func sortDiags(ds []Diagnostic) {
@@ -240,18 +306,15 @@ func (p *pkgGen) parse(res *Result) error {
 		switch {
 		case strings.HasSuffix(name, ".ego"):
 			egos = append(egos, name)
-		case strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go"):
+		case strings.HasSuffix(name, ".go"):
 			gos = append(gos, name)
 		}
 	}
 	sort.Strings(egos)
 	sort.Strings(gos)
 	generated := map[string]bool{}
+	var tests []*fileGen
 	for _, name := range egos {
-		if strings.HasSuffix(name, "_test.ego") {
-			res.Diags = append(res.Diags, Diagnostic{Pos: token.Position{Filename: filepath.Join(p.cfg.Dir, name)}, Msg: "test files can't be written in effect-go yet: use a _test.go file"})
-			continue
-		}
 		generated[GoName(name)] = true
 		path := filepath.Join(p.cfg.Dir, name)
 		src, err := p.read(path)
@@ -273,11 +336,16 @@ func (p *pkgGen) parse(res *Result) error {
 			return err
 		}
 		fg := &fileGen{pkg: p, name: name, path: path, src: src, file: f, tf: p.fset.File(f.Pos())}
+		if strings.HasSuffix(name, "_test.ego") {
+			tests = append(tests, fg)
+			continue
+		}
 		p.files = append(p.files, fg)
 		if p.name == "" {
 			p.name = f.Name.Name
 		}
 	}
+	var testGos []string
 	for _, name := range gos {
 		if generated[name] {
 			continue
@@ -285,7 +353,45 @@ func (p *pkgGen) parse(res *Result) error {
 		if ok, err := build.Default.MatchFile(p.cfg.Dir, name); err != nil || !ok {
 			continue
 		}
-		p.goFiles = append(p.goFiles, filepath.Join(p.cfg.Dir, name))
+		path := filepath.Join(p.cfg.Dir, name)
+		if strings.HasSuffix(name, "_test.go") {
+			testGos = append(testGos, path)
+			continue
+		}
+		p.goFiles = append(p.goFiles, path)
+		if p.name == "" {
+			if src, err := p.read(path); err == nil {
+				if gf, err := goparser.ParseFile(token.NewFileSet(), path, src, goparser.PackageClauseOnly); err == nil {
+					p.name = gf.Name.Name
+				}
+			}
+		}
+	}
+	// Test files in package x_test are the external test package.
+	for _, f := range tests {
+		if p.name == "" {
+			p.name = strings.TrimSuffix(f.file.Name.Name, "_test")
+		}
+		if f.file.Name.Name == p.name+"_test" {
+			p.xtestFiles = append(p.xtestFiles, f)
+		} else {
+			p.testFiles = append(p.testFiles, f)
+		}
+	}
+	for _, path := range testGos {
+		src, err := p.read(path)
+		if err != nil {
+			continue
+		}
+		gf, err := goparser.ParseFile(token.NewFileSet(), path, src, goparser.PackageClauseOnly)
+		if err != nil {
+			continue
+		}
+		if gf.Name.Name == p.name+"_test" {
+			p.xtestGo = append(p.xtestGo, path)
+		} else {
+			p.testGo = append(p.testGo, path)
+		}
 	}
 	path, err := importPath(p.cfg.Dir)
 	if err != nil {
@@ -369,11 +475,16 @@ func (p *pkgGen) check(ws []*writer, draft bool) (*typeInfo, error) {
 			paths = append(paths, path)
 		}
 	}
+	paths = slices.DeleteFunc(paths, func(path string) bool { return p.override[path] != nil })
 	if err := p.cfg.Importer.load(p.cfg.Dir, paths); err != nil {
 		return nil, err
 	}
+	var imp types.Importer = p.cfg.Importer
+	if p.override != nil {
+		imp = overrideImporter{p.override, p.cfg.Importer}
+	}
 	conf := types.Config{
-		Importer:    p.cfg.Importer,
+		Importer:    imp,
 		FakeImportC: true,
 		Error:       func(err error) { ti.errs = append(ti.errs, err) },
 	}
@@ -439,4 +550,18 @@ func matchBuild(src []byte) bool {
 		})
 	}
 	return true
+}
+
+// overrideImporter imports some packages from types checked here: the
+// package under test, for its external tests.
+type overrideImporter struct {
+	pkgs map[string]*types.Package
+	next types.Importer
+}
+
+func (o overrideImporter) Import(path string) (*types.Package, error) {
+	if p, ok := o.pkgs[path]; ok {
+		return p, nil
+	}
+	return o.next.Import(path)
 }

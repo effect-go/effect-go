@@ -1,6 +1,6 @@
 # effect-go in one page
 
-`.ego` files are Go plus the additions below. `ego generate` compiles each `x.ego` to `x_ego.go` (plain Go, committed; never edit it). `ego fmt -w .` formats `.ego` files. Every valid Go file is a valid `.ego` file. Write tests in `_test.go` files. Import packages as usual, except the runtime packages `scope`, `schedule`, `trace` and `layer` (`github.com/effect-go/effect-go/…`), which are imported for you.
+`.ego` files are Go plus the additions below. `ego generate` compiles each `x.ego` to `x_ego.go` (plain Go, committed; never edit it), and `x_test.ego` to `x_ego_test.go`. `ego test` regenerates, then runs `go test` with the same arguments. `ego fmt -w .` formats `.ego` files. Every valid Go file is a valid `.ego` file. Import packages as usual, except the runtime packages `scope`, `schedule`, `trace` and `layer` (`github.com/effect-go/effect-go/…`), which are imported for you.
 
 ## Errors
 

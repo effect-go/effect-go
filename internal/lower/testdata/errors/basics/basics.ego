@@ -39,6 +39,13 @@ func handle(err error) {
 	}
 }
 
+func header() int {
+	if v := load() else 0; v > 0 { // ERROR "check can't be used in an if header"
+		return v
+	}
+	return 0
+}
+
 func lam() {
 	f := x => x // ERROR "can't tell the parameter types"
 	_ = f
