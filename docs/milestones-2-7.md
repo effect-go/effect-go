@@ -79,5 +79,5 @@ The compiler is tested in three ways:
 - **Not supported yet:**
   - `?.` after a call;
   - dialect expressions in `for` and `case` headers. The compiler says so and suggests a variable.
-- **The proxy regenerates on every keystroke** with a cached importer. That is fine for packages the size of the demos, but it isn't measured on large ones.
+- **The proxy regenerates the whole package after each pause in typing,** with dependencies cached. `BenchmarkEditor` measures it: about 6 ms for a 350-line package, 26 ms for 1,750 lines and 110 ms for 7,000 lines of dialect code (M-series Mac), growing linearly. Past roughly 20,000 lines in one package it would be worth regenerating only the edited file.
 - **Still open:** an anonymous form of `effect` for goroutines and callbacks (§10), and the first audience.

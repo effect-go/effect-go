@@ -308,6 +308,24 @@ func sumCases(t types.Type) (set *types.Named, cases []*types.TypeName) {
 }
 
 // setOf returns the sum type a case type belongs to, from its marker method.
+// isSet reports whether t is a named interface with the marker method.
+func isSet(t types.Type, marker string) bool {
+	n, ok := types.Unalias(t).(*types.Named)
+	if !ok {
+		return false
+	}
+	iface, ok := n.Underlying().(*types.Interface)
+	if !ok {
+		return false
+	}
+	for m := range iface.Methods() {
+		if m.Name() == marker {
+			return true
+		}
+	}
+	return false
+}
+
 func setOf(t types.Type) *types.Named {
 	n, ok := types.Unalias(t).(*types.Named)
 	if !ok || n.Obj().Pkg() == nil {
@@ -317,10 +335,10 @@ func setOf(t types.Type) *types.Named {
 	for sel := range ms.Methods() {
 		name := sel.Obj().Name()
 		if rest, ok := strings.CutPrefix(name, "is"); ok && rest != "" {
-			if tn, ok := n.Obj().Pkg().Scope().Lookup(rest).(*types.TypeName); ok {
-				if s, _ := sumCases(tn.Type()); s != nil {
-					return s
-				}
+			// The set is the interface named rest with this marker method;
+			// listing its cases (sumCases) would scan the whole package.
+			if tn, ok := n.Obj().Pkg().Scope().Lookup(rest).(*types.TypeName); ok && isSet(tn.Type(), name) {
+				return tn.Type().(*types.Named)
 			}
 		}
 	}
