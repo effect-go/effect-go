@@ -1,0 +1,70 @@
+package main
+
+import (
+	"slices"
+	"sync"
+	"time"
+)
+
+// MemStore is an in-memory Store, for tests: the test graph swaps it in for
+// PgStore.
+type MemStore struct {
+	mu    sync.Mutex
+	next  int64
+	todos []Todo
+}
+
+func NewMemStore() *MemStore { return &MemStore{} }
+
+effect (m *MemStore) Insert(t Todo) (Todo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.next++
+	t.ID = m.next
+	m.todos = append(m.todos, t)
+	return t, nil
+}
+
+effect (m *MemStore) List() ([]Todo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.todos), nil
+}
+
+effect (m *MemStore) Complete(id int64, at time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	i := slices.IndexFunc(m.todos, t => t.ID == id)
+	if i < 0 {
+		return false, nil
+	}
+	if m.todos[i].DoneAt == nil {
+		m.todos[i].DoneAt = &at
+	}
+	return true, nil
+}
+
+effect (m *MemStore) Delete(id int64) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := len(m.todos)
+	m.todos = slices.DeleteFunc(m.todos, t => t.ID == id)
+	return len(m.todos) < n, nil
+}
+
+effect (m *MemStore) Count(f Filter, now time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, t := range m.todos {
+		ok := match f {
+			Open    => t.DoneAt == nil
+			Done    => t.DoneAt != nil
+			Overdue => t.Overdue(now)
+		}
+		if ok {
+			n++
+		}
+	}
+	return n, nil
+}

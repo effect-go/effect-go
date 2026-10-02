@@ -891,7 +891,8 @@ func (g *fileGen) autoLabel(x ast.Expr) string {
 		case *ast.Ident:
 			parts = append([]string{e.Name}, parts...)
 		case *ast.CallExpr:
-			parts = append([]string{"…"}, parts...)
+			f = e.Fun // a.Query(…).Scan is labelled Query.Scan
+			continue
 		}
 		break
 	}

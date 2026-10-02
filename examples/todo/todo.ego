@@ -1,0 +1,41 @@
+// Command todo is a todo list on PostgreSQL, written in effect-go.
+//
+//	todo add "Buy milk" -p high -due 2026-10-10
+//	todo list [-all]
+//	todo done 3
+//	todo rm 3
+//	todo stats
+//
+// The database is TODO_DATABASE_URL, or a local "todo" database.
+package main
+
+import "time"
+
+// Priority orders the list: an enum without data compiles to constants.
+enum Priority {
+	Low
+	Medium
+	High
+}
+
+// A Todo is one item.
+type Todo struct {
+	ID        int64      `db:"id"`
+	Title     string     `db:"title"`
+	Priority  Priority   `db:"priority"`
+	Due       *time.Time `db:"due"`
+	DoneAt    *time.Time `db:"done_at"`
+	CreatedAt time.Time  `db:"created_at"`
+}
+
+// TodoError is every way a command can fail.
+error TodoError {
+	NotFound{ ID int64 } "no todo #{ID}"
+	Invalid{ Reason string } "{Reason}"
+	Storage{ Cause error } "database error: {Cause}"
+}
+
+// Overdue reports whether t is still open after its due date.
+func (t Todo) Overdue(now time.Time) bool {
+	return t.DoneAt == nil && t.Due != nil && t.Due.Before(now.Truncate(24*time.Hour))
+}

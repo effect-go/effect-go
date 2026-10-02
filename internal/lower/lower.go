@@ -513,13 +513,13 @@ func (p *pkgGen) mapErrors(ti *typeInfo, outs []*Output) []Diagnostic {
 			ds = append(ds, Diagnostic{Msg: err.Error()})
 			continue
 		}
+		// Errors in .go files are the Go compiler's to report: they may
+		// only be waiting for code ego generates next, such as layers.
 		pos := ti.fset.Position(te.Pos)
 		if o, ok := byName[pos.Filename]; ok {
 			src, _ := o.Map.ToSource(pos.Offset)
 			ds = append(ds, Diagnostic{Pos: o.File.Position(o.File.Pos(min(src, o.File.Size()))), Msg: te.Msg})
-			continue
 		}
-		ds = append(ds, Diagnostic{Pos: pos, Msg: te.Msg})
 	}
 	return ds
 }

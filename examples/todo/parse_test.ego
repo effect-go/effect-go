@@ -1,0 +1,26 @@
+package main
+
+import (
+	"testing"
+	"time"
+)
+
+// Tests can be written in effect-go too: match checks every error case.
+func TestParse(t *testing.T) {
+	for in, want := range map[string]string{"": "Medium", "HIGH": "High", "low": "Low", "x": "invalid"} {
+		p, err := ParsePriority(in)
+		got := match err {
+			nil        => p.String()
+			Invalid(_) => "invalid"
+			_          => err.Error()
+		}
+		if got != want {
+			t.Errorf("ParsePriority(%q) = %s, want %s", in, got, want)
+		}
+	}
+	due := must ParseDue("2026-10-20")
+	none := must ParseDue("")
+	if due.Format(time.DateOnly) != "2026-10-20" || none != nil {
+		t.Fatal(due, none)
+	}
+}

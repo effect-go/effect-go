@@ -75,4 +75,4 @@ The plan, its gates and their results are in [docs/assessment.md](docs/assessmen
 | `internal/lsp` | the gopls proxy |
 | `analysis` | the vet analyzers |
 | `internal/egotest` | dialect test packages: each `.ego` file's generated Go is committed and tested |
-| `examples` | the users service and the dashboard, in plain Go and in the dialect (a separate module) |
+| `examples` | the users service and the dashboard, in plain Go and in the dialect, and [todo](examples/todo), a CLI on PostgreSQL (a separate module) |

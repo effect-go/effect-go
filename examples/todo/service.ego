@@ -1,0 +1,97 @@
+package main
+
+import (
+	"cmp"
+	"slices"
+	"strings"
+	"time"
+)
+
+// Clock is the current time; tests swap it.
+type Clock func() time.Time
+
+func NewClock() Clock { return time.Now }
+
+// Service is what the commands do. Its methods return the TodoError set.
+type Service struct {
+	store Store
+	now   Clock
+}
+
+func NewService(store Store, now Clock) *Service { return &Service{store, now} }
+
+effect (s *Service) Add(title string, p Priority, due *time.Time) (Todo, TodoError) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		fail Invalid{Reason: "a todo needs a title"}
+	}
+	t := check s.store.Insert(Todo{Title: title, Priority: p, Due: due}) as Storage
+	return t, nil
+}
+
+// List returns the todos, most urgent first: by priority, then due date.
+effect (s *Service) List(all bool) ([]Todo, TodoError) {
+	todos := check s.store.List() as Storage
+	if !all {
+		todos = slices.DeleteFunc(todos, t => t.DoneAt != nil)
+	}
+	slices.SortFunc(todos, (a, b) => cmp.Or(
+		cmp.Compare(b.Priority, a.Priority),
+		compareDue(a.Due, b.Due),
+		cmp.Compare(a.ID, b.ID),
+	))
+	return todos, nil
+}
+
+// compareDue orders by due date, with no date last.
+func compareDue(a, b *time.Time) int {
+	return if a == nil && b == nil { 0 } else if a == nil { 1 } else if b == nil { -1 } else { a.Compare(*b) }
+}
+
+effect (s *Service) Done(id int64) TodoError {
+	found := check s.store.Complete(id, s.now()) as Storage
+	if !found {
+		fail NotFound{ID: id}
+	}
+	return nil
+}
+
+effect (s *Service) Remove(id int64) TodoError {
+	found := check s.store.Delete(id) as Storage
+	if !found {
+		fail NotFound{ID: id}
+	}
+	return nil
+}
+
+// Stats are the counts the stats command shows.
+type Stats struct{ Open, Done, Overdue int }
+
+// Stats runs the three counts in parallel.
+effect (s *Service) Stats() (Stats, TodoError) {
+	now := s.now()
+	open, done, overdue := check all(s.store.Count(Open, now), s.store.Count(Done, now), s.store.Count(Overdue, now)) as Storage
+	return Stats{open, done, overdue}, nil
+}
+
+// ParsePriority reads a priority flag.
+func ParsePriority(s string) (Priority, TodoError) {
+	match strings.ToLower(s) {
+		"", "medium" => return Medium, nil
+		"low"        => return Low, nil
+		"high"       => return High, nil
+		_            => fail Invalid{Reason: f"unknown priority {s:q}: use low, medium or high"}
+	}
+}
+
+// ParseDue reads a due date flag.
+func ParseDue(s string) (*time.Time, TodoError) {
+	if s == "" {
+		return nil, nil
+	}
+	d, err := time.Parse(time.DateOnly, s)
+	if err != nil {
+		fail Invalid{Reason: f"bad due date {s:q}: use YYYY-MM-DD"}
+	}
+	return &d, nil
+}

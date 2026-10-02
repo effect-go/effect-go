@@ -1,0 +1,107 @@
+package main
+
+import (
+	"errors"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Store keeps the todos. Its methods are effect methods: they take a ctx,
+// which callers in effect functions pass without writing it.
+type Store interface {
+	effect Insert(t Todo) (Todo, error)
+	effect List() ([]Todo, error)
+	effect Complete(id int64, at time.Time) (found bool, err error)
+	effect Delete(id int64) (found bool, err error)
+	effect Count(f Filter, now time.Time) (int, error)
+}
+
+// Filter selects todos to count.
+enum Filter {
+	Open
+	Done
+	Overdue
+}
+
+// PgStore is the PostgreSQL store.
+type PgStore struct{ db *pgxpool.Pool }
+
+func NewPgStore(db *pgxpool.Pool) *PgStore { return &PgStore{db} }
+
+const schema = `CREATE TABLE IF NOT EXISTS todos (
+	id         bigserial PRIMARY KEY,
+	title      text NOT NULL,
+	priority   int NOT NULL DEFAULT 0,
+	due        date,
+	done_at    timestamptz,
+	created_at timestamptz NOT NULL DEFAULT now()
+)`
+
+// connectRetry retries a failed connection: the database may still be
+// starting, as with docker compose. A bad URL won't get better, so it isn't
+// retried.
+var connectRetry = schedule.Max(schedule.Exponential(200*time.Millisecond), schedule.Recurs(4)).
+	Jittered().
+	While(err => !errors.Is(err, errBadURL))
+
+var errBadURL = errors.New("bad database URL")
+
+// Connect opens the pool, waiting for the database, and creates the table.
+effect Connect(cfg Config) (*pgxpool.Pool, error) {
+	db := check retry(connectRetry, open(cfg.DatabaseURL)) "connect to the database"
+	check db.Exec(schema) "create the todos table"
+	return db, nil
+}
+
+effect open(url string) (*pgxpool.Pool, error) {
+	pc, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, errors.Join(errBadURL, err)
+	}
+	db := check pgxpool.NewWithConfig(pc)
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+effect (s *PgStore) Insert(t Todo) (Todo, error) {
+	row := s.db.QueryRow(`INSERT INTO todos (title, priority, due) VALUES ($1, $2, $3) RETURNING id, created_at`, t.Title, t.Priority, t.Due)
+	check row.Scan(&t.ID, &t.CreatedAt)
+	return t, nil
+}
+
+effect (s *PgStore) List() ([]Todo, error) {
+	rows := check s.db.Query(`SELECT id, title, priority, due, done_at, created_at FROM todos`)
+	return pgx.CollectRows(rows, pgx.RowToStructByName[Todo])
+}
+
+effect (s *PgStore) Complete(id int64, at time.Time) (bool, error) {
+	tag := check s.db.Exec(`UPDATE todos SET done_at = $2 WHERE id = $1 AND done_at IS NULL`, id, at)
+	if tag.RowsAffected() > 0 {
+		return true, nil
+	}
+	var exists bool
+	check s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM todos WHERE id = $1)`, id).Scan(&exists)
+	return exists, nil
+}
+
+effect (s *PgStore) Delete(id int64) (bool, error) {
+	tag := check s.db.Exec(`DELETE FROM todos WHERE id = $1`, id)
+	return tag.RowsAffected() > 0, nil
+}
+
+effect (s *PgStore) Count(f Filter, now time.Time) (int, error) {
+	where := match f {
+		Open    => "done_at IS NULL"
+		Done    => "done_at IS NOT NULL"
+		Overdue => "done_at IS NULL AND due < $1::date"
+	}
+	var n int
+	args := if f == Overdue { []any{now} } else { nil }
+	check s.db.QueryRow(`SELECT count(*) FROM todos WHERE `+where, args...).Scan(&n)
+	return n, nil
+}

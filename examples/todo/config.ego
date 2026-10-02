@@ -1,0 +1,9 @@
+package main
+
+import "os"
+
+// databaseURL is TODO_DATABASE_URL, or a local database named todo.
+func databaseURL() string {
+	url := os.LookupEnv("TODO_DATABASE_URL") ?? "postgres://localhost:5432/todo?sslmode=disable"
+	return url
+}
