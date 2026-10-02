@@ -54,6 +54,8 @@ func header() int {
 func lam() {
 	f := x => x // ERROR "can't tell the parameter types"
 	_ = f
+	g := (x int) => { return x } // ERROR "can't tell the result types"
+	_ = g
 }
 
 effect withCtx(ctx int) error { // ERROR "effect functions declare ctx themselves"

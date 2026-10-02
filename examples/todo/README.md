@@ -34,7 +34,7 @@ Exit codes: 1 for a missing todo, 2 for bad input, 3 when the database fails.
 | `all`: three queries in parallel | `Service.Stats` |
 | `retry` with a schedule that skips errors that won't go away | `Connect` and `connectRetry` in [store.ego](store.ego) |
 | `timeout` around a whole command | `CLI.Run` |
-| Command-line mistakes reported before connecting | `ParseArgs` in [args.ego](args.ego), called by `start` in [main.ego](main.ego) |
+| Command-line mistakes reported before connecting | `ParseArgs` in [args.ego](args.ego), called by `run` in [main.ego](main.ego) |
 | Lambdas, with types inferred, even through a generic function | `Service.List`, `MemStore`, `connectRetry`, `scope.Run(ctx, s => …)` in [main.ego](main.ego) |
 | `if` expressions, including `else if` chains | `compareDue`, `ParseArgs`, `CLI.list` |
 | `?.` and `??` | `CLI.list` (the due date), `databaseURL` |

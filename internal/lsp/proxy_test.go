@@ -39,13 +39,13 @@ func start(t *testing.T) (*client, string) {
 		t.Skip("starts gopls")
 	}
 	root, _ := filepath.Abs("../..")
-	cfg := Config{Gopls: gopls(t), Log: io.Discard} // before the goroutine: Skip must run on the test's
+	cfg := Config{Gopls: gopls(t), Log: io.Discard} // here: Skip must run on the test goroutine
+	if f := os.Getenv("EGO_LSP_LOG"); f != "" {
+		cfg.Log, _ = os.Create(f)
+	}
 	cin, sout := io.Pipe()
 	sin, cout := io.Pipe()
 	go func() {
-		if f := os.Getenv("EGO_LSP_LOG"); f != "" {
-			cfg.Log, _ = os.Create(f)
-		}
 		if err := Run(cfg, sin, sout); err != nil {
 			t.Log("proxy:", err)
 		}

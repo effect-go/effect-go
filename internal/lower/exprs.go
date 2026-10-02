@@ -560,9 +560,9 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 				// inferred yet, as in scope.Run(ctx, s => f(s)): the
 				// parameters are known, and the results come from the body.
 				switch {
-				case !g.generic(sig):
+				case !generic(sig):
 					f.sig = sig
-				case !g.generic(sig.Params()):
+				case !generic(sig.Params()):
 					f.sig, f.openRes = sig, true
 				}
 			}
@@ -572,6 +572,9 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 		if b, ok := x.Body.(ast.Expr); ok {
 			f.bodyType = g.typeOf(b)
 		}
+	}
+	if b, ok := x.Body.(*ast.BlockStmt); ok && g.r.final && (f.sig == nil || f.openRes) && returnsValues(b) {
+		g.errorf(x.Pos(), "can't tell the result types of this function: give it an expression body, or write a func literal")
 	}
 	typed := allTyped(x)
 	if f.sig == nil && !typed {
@@ -684,38 +687,54 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 	})
 }
 
-// generic reports whether t mentions a type parameter of the function the
-// lambda is passed to (the expected type is that function's declaration).
-func (g *fileGen) generic(t types.Type) bool {
+// generic reports whether t mentions a type parameter: the expected type of
+// an argument to a generic function, before its type arguments are inferred.
+func generic(t types.Type) bool {
 	switch t := t.(type) {
 	case *types.TypeParam:
 		return true
 	case *types.Tuple:
 		for v := range t.Variables() {
-			if g.generic(v.Type()) {
+			if generic(v.Type()) {
 				return true
 			}
 		}
 	case *types.Signature:
-		return g.generic(t.Params()) || g.generic(t.Results())
+		return generic(t.Params()) || generic(t.Results())
 	case *types.Pointer:
-		return g.generic(t.Elem())
+		return generic(t.Elem())
 	case *types.Slice:
-		return g.generic(t.Elem())
+		return generic(t.Elem())
 	case *types.Array:
-		return g.generic(t.Elem())
+		return generic(t.Elem())
 	case *types.Chan:
-		return g.generic(t.Elem())
+		return generic(t.Elem())
 	case *types.Map:
-		return g.generic(t.Key()) || g.generic(t.Elem())
-	case *types.Named:
+		return generic(t.Key()) || generic(t.Elem())
+	case interface{ TypeArgs() *types.TypeList }: // *types.Named, *types.Alias
 		for a := range t.TypeArgs().Types() {
-			if g.generic(a) {
+			if generic(a) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// returnsValues reports whether body returns values, outside the function
+// literals it contains.
+func returnsValues(body *ast.BlockStmt) bool {
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit, *ast.LambdaExpr:
+			return false
+		case *ast.ReturnStmt:
+			found = found || len(n.Results) > 0
+		}
+		return !found
+	})
+	return found
 }
 
 func countParams(x *ast.LambdaExpr) int {

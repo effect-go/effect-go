@@ -8,25 +8,16 @@ import (
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	code := start(ctx, os.Args[1:])
+	code, err := scope.Run(ctx, s => run(s.Context(), s, os.Args[1:]))
 	stop()
-	os.Exit(code)
+	os.Exit(if err != nil { Report(os.Stderr, err) } else { code })
 }
 
-// start parses the command line before anything connects, then runs the
-// command in a scope, which closes the database pool when the command ends.
-effect start(args []string) int {
-	cmd, err := ParseArgs(args)
-	if err != nil {
-		return Report(os.Stderr, err)
-	}
-	cfg := Config{DatabaseURL: databaseURL(), Out: os.Stdout, Err: os.Stderr}
-	code, err := scope.Run(ctx, s => serve(s.Context(), s, cfg, cmd))
-	return if err != nil { Report(os.Stderr, err) } else { code }
-}
-
-// serve builds the app in s, with the generated BuildCLI, and runs cmd.
-effect serve(s *scope.Scope, cfg Config, cmd Command) (int, TodoError) {
-	cli := check BuildCLI(s, cfg) as Storage
+// run parses the command line before anything connects, then builds the app
+// in s, with the generated BuildCLI, and runs the command. The scope closes
+// the database pool when it ends.
+effect run(s *scope.Scope, args []string) (int, TodoError) {
+	cmd := check ParseArgs(args)
+	cli := check BuildCLI(s, Config{DatabaseURL: databaseURL(), Out: os.Stdout, Err: os.Stderr}) as Storage
 	return cli.Run(cmd), nil
 }

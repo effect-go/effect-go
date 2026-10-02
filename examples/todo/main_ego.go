@@ -14,43 +14,35 @@ import (
 //line main.ego:9
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	code := start(ctx, os.Args[1:])
+	code, err := scope.Run(ctx, func(s *scope.Scope) (int, error) { return run(s.Context(), s, os.Args[1:]) })
 	stop()
-	os.Exit(code)
-}
-
-// start parses the command line before anything connects, then runs the
-// command in a scope, which closes the database pool when the command ends.
-func start(ctx context.Context, args []string) (_ int) {
-	ctx, span := trace.Start(ctx, "main.start")
-	defer trace.End(span, nil)
-//line main.ego:19
-	cmd, err := ParseArgs(args)
-	if err != nil {
-		return Report(os.Stderr, err)
-	}
-	cfg := Config{DatabaseURL: databaseURL(), Out: os.Stdout, Err: os.Stderr}
-	code, err := scope.Run(ctx, func(s *scope.Scope) (int, error) { return serve(s.Context(), s, cfg, cmd) })
 	var v int
 	if err != nil {
 		v = Report(os.Stderr, err)
 	} else {
 		v = code
 	}
-	return v
+	os.Exit(v)
 }
 
-// serve builds the app in s, with the generated BuildCLI, and runs cmd.
+// run parses the command line before anything connects, then builds the app
+// in s, with the generated BuildCLI, and runs the command. The scope closes
+// the database pool when it ends.
 //
-//line main.ego:28
-func serve(ctx context.Context, s *scope.Scope, cfg Config, cmd Command) (_ int, err error) {
-	ctx, span := trace.Start(ctx, "main.serve")
+//line main.ego:16
+func run(ctx context.Context, s *scope.Scope, args []string) (_ int, err error) {
+	ctx, span := trace.Start(ctx, "main.run")
 	defer trace.End(span, &err)
-//line main.ego:30
-	cli, err := BuildCLI(ctx, s, cfg)
+//line main.ego:20
+	cmd, err := ParseArgs(args)
+	if err != nil {
+		return 0, err
+	}
+//line main.ego:21
+	cli, err := BuildCLI(ctx, s, Config{DatabaseURL: databaseURL(), Out: os.Stdout, Err: os.Stderr})
 	if err != nil {
 		return 0, Storage{Cause: err}
 	}
-//line main.ego:31
+//line main.ego:22
 	return cli.Run(ctx, cmd), nil
 }
