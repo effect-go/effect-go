@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1
+
+The extension no longer turns on the explorer's file nesting for every
+workspace, which also nested files like lock files in projects without
+`.ego` files. It still adds the patterns that nest `x_ego.go` under `x.ego`:
+turn on `explorer.fileNesting.enabled` to use them.
+
 ## 0.4.0
 
 The first release on the Marketplace and Open VSX: highlighting for `.ego`

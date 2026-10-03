@@ -20,8 +20,9 @@ generated `_ego.go` files.
 ## Generated files
 
 Go needs `x_ego.go` in the same directory as `x.ego` (a directory is a
-package), so the explorer nests each one under its `.ego` file. Set
-`ego.hideGenerated` to hide them from the explorer and search altogether.
+package). With `explorer.fileNesting.enabled` on, the explorer nests each one
+under its `.ego` file. Set `ego.hideGenerated` to hide them from the explorer
+and search altogether.
 
 ## Settings
 

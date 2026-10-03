@@ -24,8 +24,8 @@ cd editors/vscode && npm install && npx @vscode/vsce package
 code --install-extension effect-go-*.vsix
 ```
 
-It nests each `x_ego.go` under its `x.ego` in the explorer; the
-`ego.hideGenerated` setting hides them instead.
+With `explorer.fileNesting.enabled` on, the explorer nests each `x_ego.go`
+under its `x.ego`; the `ego.hideGenerated` setting hides them instead.
 
 ## GoLand and IntelliJ
 

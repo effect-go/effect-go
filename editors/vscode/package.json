@@ -9,7 +9,7 @@
     "ego",
     "structured concurrency"
   ],
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "effect-go",
   "license": "MIT",
   "repository": {
@@ -78,7 +78,6 @@
         "editor.insertSpaces": false,
         "editor.tabSize": 4
       },
-      "explorer.fileNesting.enabled": true,
       "explorer.fileNesting.patterns": {
         "*.ego": "${capture}_ego.go",
         "*_test.ego": "${capture}_ego_test.go"
