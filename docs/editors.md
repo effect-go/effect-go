@@ -10,7 +10,8 @@ use it; `.go` files stay with gopls as usual.
 |---|---|---|---|
 | VS Code | the extension in [editors/vscode](../editors/vscode) | effect-go grammar | yes |
 | GoLand, IntelliJ | LSP4IJ + TextMate bundle, below | effect-go grammar | no |
-| Neovim | config, below | Go's tree-sitter grammar | no |
+| Neovim | config, below | Go's tree-sitter grammar, or Vim's Go syntax | yes |
+| Vim | config, below | Vim's Go syntax | highlighting only |
 | Helix | config, below | Go's tree-sitter grammar | no |
 | Zed | needs an extension (not written yet) | | |
 
@@ -41,7 +42,20 @@ under its `x.ego`; the `ego.hideGenerated` setting hides them instead.
 
 ```lua
 vim.filetype.add({ extension = { ego = "ego" } })
-vim.treesitter.language.register("go", "ego") -- Go's grammar highlights most of it
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "ego",
+  callback = function(ev)
+    -- Go's tree-sitter grammar if it's installed (:TSInstall go), else Vim's Go syntax.
+    if not pcall(vim.treesitter.start, ev.buf, "go") then
+      vim.schedule(function()
+        vim.api.nvim_buf_call(ev.buf, function()
+          vim.bo.syntax = "go"
+          vim.cmd("syntax keyword goStatement check must fail effect match enum")
+        end)
+      end)
+    end
+  end,
+})
 vim.lsp.config("ego", {
   cmd = { "ego", "lsp" },
   filetypes = { "ego" },
@@ -49,6 +63,22 @@ vim.lsp.config("ego", {
 })
 vim.lsp.enable("ego")
 ```
+
+Format on save with `vim.lsp.buf.format()` in a `BufWritePre` autocommand,
+as for any language server.
+
+## Vim
+
+In `.vimrc`, for highlighting:
+
+```vim
+autocmd BufNewFile,BufRead *.ego setlocal filetype=ego syntax=go
+autocmd Syntax go if &filetype ==# 'ego' | syntax keyword goStatement check must fail effect match enum | endif
+```
+
+Vim has no built-in language server client: with a plugin such as
+[yegappan/lsp](https://github.com/yegappan/lsp), register `ego lsp` for the
+`ego` file type.
 
 ## Helix
 
