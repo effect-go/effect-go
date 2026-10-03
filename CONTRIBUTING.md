@@ -29,6 +29,7 @@ Two kinds of tests skip themselves without what they need:
 | `internal/layers` | the wiring generator |
 | `internal/lsp` | the gopls proxy |
 | `analysis` | the `ego vet` analyzers |
+| `editors` | the VS Code extension and the GoLand plugin |
 | `internal/egotest` | dialect test packages, whose generated Go is committed and tested |
 | `examples` | the users service and the dashboard, in plain Go and in the dialect, and [todo](examples/todo), a CLI on PostgreSQL |
 

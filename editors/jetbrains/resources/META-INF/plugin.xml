@@ -1,0 +1,17 @@
+<idea-plugin>
+  <id>com.github.effect-go</id>
+  <name>effect-go</name>
+  <vendor url="https://github.com/effect-go/effect-go">effect-go</vendor>
+  <description><![CDATA[
+    Support for <a href="https://github.com/effect-go/effect-go">effect-go</a>'s <code>.ego</code> files:
+    highlighting, and hover, go to definition, completion, diagnostics, rename and formatting
+    through <code>ego lsp</code>. Needs <code>ego</code> and <code>gopls</code> installed.
+  ]]></description>
+  <idea-version since-build="242"/>
+  <depends>com.intellij.modules.lsp</depends>
+  <depends>org.jetbrains.plugins.textmate</depends>
+  <extensions defaultExtensionNs="com.intellij">
+    <platform.lsp.serverSupportProvider implementation="com.github.effectgo.EgoLspSupport"/>
+    <textmate.bundleProvider implementation="com.github.effectgo.EgoBundleProvider"/>
+  </extensions>
+</idea-plugin>

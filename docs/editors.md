@@ -9,7 +9,7 @@ use it; `.go` files stay with gopls as usual.
 | Editor | Setup | Highlighting | Tested |
 |---|---|---|---|
 | VS Code | the extension in [editors/vscode](../editors/vscode) | effect-go grammar | yes |
-| GoLand, IntelliJ | LSP4IJ + TextMate bundle, below | effect-go grammar | no |
+| GoLand, IntelliJ Ultimate | the plugin in [editors/jetbrains](../editors/jetbrains) | effect-go grammar | loads in GoLand 2026.2 |
 | Neovim | config, below | Go's tree-sitter grammar, or Vim's Go syntax | yes |
 | Vim | config, below | Vim's Go syntax | highlighting only |
 | Helix | config, below | Go's tree-sitter grammar | no |
@@ -30,13 +30,9 @@ under its `x.ego`; the `ego.hideGenerated` setting hides them instead.
 
 ## GoLand and IntelliJ
 
-1. Install the [LSP4IJ](https://plugins.jetbrains.com/plugin/23257-lsp4ij)
-   plugin. In *Languages & Frameworks › Language Servers*, add a server with
-   the command `ego lsp`, and in *Mappings › File name patterns* map `*.ego`
-   to the language id `ego`.
-2. For highlighting, in *Editor › TextMate Bundles*, add the
-   `editors/vscode` directory: IntelliJ reads the grammar from the VS Code
-   extension.
+Build and install the plugin in [editors/jetbrains](../editors/jetbrains).
+It starts `ego lsp` for `.ego` files, and highlights them with the VS Code
+extension's grammar.
 
 ## Neovim (0.11 and later)
 
