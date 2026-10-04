@@ -55,8 +55,9 @@ func (s *Scope) Context() context.Context { return s.ctx }
 
 // Run calls body with a new scope, and closes the scope when body returns
 // or panics. Errors from releasing resources are joined to body's error. If
-// body panics, Run re-panics after closing the scope; otherwise it re-panics
-// with the panic of a fiber nobody joined, if any.
+// body panics, Run re-panics with the same value after closing the scope,
+// and the errors of closing it (such as a StuckError) are dropped; otherwise
+// it re-panics with the panic of a fiber nobody joined, if any.
 func Run[T any](ctx context.Context, body func(s *Scope) (T, error), opts ...Option) (res T, err error) {
 	s := &Scope{parent: ctx}
 	for _, o := range opts {
