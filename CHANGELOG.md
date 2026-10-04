@@ -35,7 +35,8 @@ New:
   phase.
 - A GoLand plugin ([editors/jetbrains](editors/jetbrains)), and tested setups
   for Neovim and Vim ([docs/editors.md](docs/editors.md)). The VS Code
-  extension (0.4.1) no longer turns on file nesting in every workspace.
+  extension (0.4.2) has icons, and no longer turns on file nesting in every
+  workspace.
 - The `ego` command and its language server are written in `.ego`.
 
 ## v0.1.0 (2026-10-02)

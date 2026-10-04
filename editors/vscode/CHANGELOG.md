@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+
+An icon for the extension, and one for `.ego` files in the explorer, tabs
+and the language picker.
+
 ## 0.4.1
 
 The extension no longer turns on the explorer's file nesting for every
