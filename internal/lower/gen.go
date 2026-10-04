@@ -33,6 +33,7 @@ type pkgGen struct {
 	sums         map[string]*ast.SumDecl       // error sets and enums declared in .ego files
 	sigs         map[string]*setSig            // functions and methods with an error set in their signature, by "Name" or "Recv.Name"
 	overrideSigs map[string]map[string]*setSig // sigs of the packages in override
+	times        *times                        // shared by the variants
 	facts        map[ast.Node]*fact            // what drafts learned, kept across rounds
 }
 

@@ -6,6 +6,7 @@ import (
 	"go/build"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -93,6 +94,59 @@ func (im *Importer) load(dir string, paths []string) error {
 		}
 	})
 	return nil
+}
+
+// Preload loads, at once, what the packages in dirs import and what their
+// generated code may: loading paths one package at a time would load every
+// dependency again for each package that adds one. Directories in other
+// modules than the first are left to load on their own.
+func (im *Importer) Preload(dirs []string) error {
+	if len(dirs) == 0 {
+		return nil
+	}
+	root := moduleRoot(dirs[0])
+	set := map[string]bool{}
+	for _, d := range dirs {
+		if moduleRoot(d) != root {
+			continue
+		}
+		entries, _ := os.ReadDir(d)
+		for _, e := range entries {
+			if !strings.HasSuffix(e.Name(), ".ego") && !strings.HasSuffix(e.Name(), ".go") {
+				continue
+			}
+			f, _ := parser.ParseFile(token.NewFileSet(), filepath.Join(d, e.Name()), nil, parser.ImportsOnly)
+			if f == nil {
+				continue
+			}
+			for _, s := range f.Imports {
+				set[strings.Trim(s.Path.Value, `"`)] = true
+			}
+		}
+	}
+	for _, path := range lowered {
+		set[path] = true
+	}
+	delete(set, "C")
+	delete(set, "unsafe")
+	return im.load(dirs[0], slices.Sorted(maps.Keys(set)))
+}
+
+// moduleRoot returns the directory of the go.mod that dir belongs to, or "".
+func moduleRoot(dir string) string {
+	d, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(d, "go.mod")); err == nil {
+			return d
+		}
+		if filepath.Dir(d) == d {
+			return ""
+		}
+		d = filepath.Dir(d)
+	}
 }
 
 // stale reports whether a loaded workspace file changed since it was loaded.

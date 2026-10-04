@@ -1,0 +1,20 @@
+go run ./experiments/generate-bench . examples ~/goncini ~/miniflux-ego
+M4 Pro, Go 1.27.1, 2026-10-04. Median of 5 runs after a warm-up.
+
+Before (fe61ef8: one dependency load per package that adds imports)
+module                                    files    lines   generate   go build
+.                                            20     2102       2.6s      330ms
+examples                                     14      876      1.41s      410ms
+goncini                                      31     5130      680ms      320ms
+miniflux-ego                                  7      922      2.25s      1.73s
+
+After (one load for every package)
+module                                    files    lines   generate   go build
+.                                            20     2102      470ms      320ms
+examples                                     14      876      510ms      390ms
+goncini                                      31     5130      360ms      310ms
+miniflux-ego                                  7      922      840ms      1.71s
+
+EGO_DEBUG=1 on this repository: the shared load takes about 370 ms; compiling
+a package takes 1 to 10 ms (cmd/ego: parse 0.7, lower 4, type-check 2,
+format 1).

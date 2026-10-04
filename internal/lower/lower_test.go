@@ -15,7 +15,7 @@ var update = flag.Bool("update", false, "rewrite the generated files in testdata
 
 // fixtures are the packages in internal/egotest: their generated files are
 // committed, and their tests run against the generated code.
-func fixtures(t *testing.T) []string {
+func fixtures(t testing.TB) []string {
 	dirs, _ := filepath.Glob("../egotest/*")
 	var out []string
 	for _, d := range dirs {

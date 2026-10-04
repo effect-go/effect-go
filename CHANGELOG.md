@@ -10,6 +10,8 @@
 - `scope.Run` with `StopTimeout` no longer starts a goroutine and a timer to close a scope whose fibers have all stopped: 605 ns to 70 ns.
 - A `match` over an error set handles a pointer to a case (`&NotFound{}`), which is an error too; it used to panic. Each error case now has an `As` method, so regenerate.
 - External test packages (`package p_test` in `_test.ego` files) can pass standard-library values across from the package under test; `ego generate` used to fail with errors like `http.Handler does not implement http.Handler`.
+- `ego generate` loads the dependencies of all packages at once: 2.6 s to 0.5 s on this repository, 2.25 s to 0.84 s on the miniflux port. `EGO_DEBUG=1` prints the time each package spends in each phase.
+- `ego generate ./...` skips nested modules, as `go` does.
 
 ## v0.1.0 (2026-10-02)
 

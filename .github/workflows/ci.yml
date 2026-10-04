@@ -31,6 +31,8 @@ jobs:
       - run: go test -race ./...
       - name: ego fmt formats the standard library like gofmt (skipped under -race)
         run: go test ./internal/syntax/format
+      - name: benchmarks still run
+        run: go test -run '^$' -bench . -benchtime 1x ./...
       - run: go build -o "$RUNNER_TEMP/ego" ./cmd/ego
       - name: generated code is up to date
         run: |

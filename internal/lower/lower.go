@@ -29,6 +29,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/effect-go/effect-go/internal/syntax/ast"
 	"github.com/effect-go/effect-go/internal/syntax/parser"
@@ -83,7 +84,20 @@ type Result struct {
 	Outputs []*Output
 	Diags   []Diagnostic
 	Fset    *token.FileSet
+	Phases  []Phase // where the time went
 }
+
+// A Phase is a step of Generate and the time spent in it.
+type Phase struct {
+	Name string
+	Took time.Duration
+}
+
+// times adds up the time spent in the phases that run more than once.
+type times struct{ load, check, format time.Duration }
+
+// since adds the time since start to *d.
+func since(d *time.Duration, start time.Time) { *d += time.Since(start) }
 
 // Err returns the diagnostics as one error, or nil.
 func (r *Result) Err() error {
@@ -120,11 +134,23 @@ func Generate(cfg Config) (*Result, error) {
 	if cfg.Importer == nil {
 		cfg.Importer = NewImporter()
 	}
-	p := &pkgGen{cfg: cfg, fset: token.NewFileSet(), facts: map[ast.Node]*fact{}}
+	start := time.Now()
+	p := &pkgGen{cfg: cfg, fset: token.NewFileSet(), facts: map[ast.Node]*fact{}, times: &times{}}
 	res := &Result{Fset: p.fset}
 	if err := p.parse(res); err != nil {
 		return nil, err
 	}
+	parsed := time.Since(start)
+	defer func() {
+		t := p.times
+		res.Phases = []Phase{
+			{"parse", parsed},
+			{"load", t.load},
+			{"lower", time.Since(start) - parsed - t.load - t.check - t.format},
+			{"type-check", t.check},
+			{"format", t.format},
+		}
+	}()
 	if len(p.files)+len(p.testFiles)+len(p.xtestFiles) == 0 || len(res.Diags) > 0 {
 		return res, nil // nothing to do, or syntax errors
 	}
@@ -135,7 +161,10 @@ func Generate(cfg Config) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := cfg.Importer.load(cfg.Dir, paths); err != nil {
+	t := time.Now()
+	err = cfg.Importer.load(cfg.Dir, paths)
+	since(&p.times.load, t)
+	if err != nil {
 		return nil, err
 	}
 
@@ -209,7 +238,7 @@ func (p *pkgGen) imports() ([]string, error) {
 // variant returns a pkgGen for another set of files: the package with its
 // tests, or the external test package.
 func (p *pkgGen) variant(files []*fileGen, goFiles []string, path, name string) *pkgGen {
-	v := &pkgGen{cfg: p.cfg, fset: p.fset, name: name, path: path, goFiles: goFiles, facts: map[ast.Node]*fact{}}
+	v := &pkgGen{cfg: p.cfg, fset: p.fset, name: name, path: path, goFiles: goFiles, facts: map[ast.Node]*fact{}, times: p.times}
 	for _, f := range files {
 		nf := *f
 		nf.pkg = v
@@ -296,7 +325,10 @@ func (p *pkgGen) run(res *Result, only []*fileGen) (*typeInfo, error) {
 		if !cfg.NoLines {
 			code = addLineDirectives(code, out)
 		}
-		if formatted, err := format.Source(code); err == nil {
+		t := time.Now()
+		formatted, err := format.Source(code)
+		since(&p.times.format, t)
+		if err == nil {
 			code = formatted
 		} else if len(diags) == 0 {
 			diags = append(diags, Diagnostic{Pos: token.Position{Filename: out.Ego}, Msg: "internal error: generated code doesn't parse: " + err.Error()})
@@ -531,7 +563,10 @@ func (p *pkgGen) check(ws []*writer, draft bool) (*typeInfo, error) {
 		}
 	}
 	paths = slices.DeleteFunc(paths, func(path string) bool { return p.override[path] != nil })
-	if err := p.cfg.Importer.load(p.cfg.Dir, paths); err != nil {
+	t := time.Now()
+	err := p.cfg.Importer.load(p.cfg.Dir, paths)
+	since(&p.times.load, t)
+	if err != nil {
 		return nil, err
 	}
 	var imp types.Importer = p.cfg.Importer
@@ -550,7 +585,9 @@ func (p *pkgGen) check(ws []*writer, draft bool) (*typeInfo, error) {
 		Scopes:     map[goast.Node]*types.Scope{},
 		Selections: map[*goast.SelectorExpr]*types.Selection{},
 	}
+	t = time.Now()
 	ti.pkg, _ = conf.Check(p.path, fset, files, ti.info)
+	since(&p.times.check, t)
 	return ti, nil
 }
 

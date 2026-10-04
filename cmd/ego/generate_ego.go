@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/effect-go/effect-go/internal/syntax/parser"
 
@@ -19,7 +20,7 @@ import (
 	"github.com/effect-go/effect-go/internal/lower"
 )
 
-//line generate.ego:20
+//line generate.ego:21
 func generate(args []string) error {
 	fl := flag.NewFlagSet("generate", flag.ExitOnError)
 	lines := fl.Bool("lines", true, "add //line directives pointing at the .ego files")
@@ -30,21 +31,37 @@ func generate(args []string) error {
 	if err != nil {
 		return err
 	}
-//line generate.ego:27
+//line generate.ego:28
 	dirs = dependencyOrder(dirs)
 	im := lower.NewImporter()
+	debug := os.Getenv("EGO_DEBUG") != ""
+	start := time.Now()
+	if err := im.Preload(dirs); err != nil {
+		return err
+	}
+//line generate.ego:33
+	if debug {
+		fmt.Fprintf(os.Stderr, "preload: %v\n", time.Since(start).Round(time.Millisecond))
+	}
 	failed := false
 	for _, dir := range dirs {
 		res, err := lower.Generate(lower.Config{Dir: dir, NoLines: !*lines, Importer: im})
 		if err != nil {
 			return fmt.Errorf("%v: %w", rel(dir), err)
 		}
-//line generate.ego:32
+//line generate.ego:39
+		if debug {
+			var phases []string
+			for _, ph := range res.Phases {
+				phases = append(phases, fmt.Sprintf("%s %v", ph.Name, ph.Took.Round(time.Millisecond/10)))
+			}
+			fmt.Fprintf(os.Stderr, "%s: %s\n", rel(dir), strings.Join(phases, ", "))
+		}
 		for _, d := range res.Diags {
 			fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
 		}
 		if len(res.Diags) > 0 {
-			if os.Getenv("EGO_DEBUG") != "" {
+			if debug {
 				for _, out := range res.Outputs {
 					fmt.Fprintf(os.Stderr, "--- %s\n%s\n", out.Go, out.Raw)
 				}
@@ -59,12 +76,12 @@ func generate(args []string) error {
 		}
 		// Layers are wired after the .ego files compile: injectors may use
 		// their declarations.
-//line generate.ego:49
+//line generate.ego:63
 		lr, err := layers.Generate(dir)
 		if err != nil {
 			return fmt.Errorf("%v: %w", rel(dir), err)
 		}
-//line generate.ego:50
+//line generate.ego:64
 		if lr != nil {
 			for _, d := range lr.Diags {
 				fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
@@ -78,7 +95,7 @@ func generate(args []string) error {
 			}
 		}
 	}
-//line generate.ego:61
+//line generate.ego:75
 	if failed || stale {
 		return errSilent
 	}
@@ -103,7 +120,7 @@ func write(path string, code []byte) error {
 	if err := os.WriteFile(path, code, 0o666); err != nil {
 		return err
 	}
-//line generate.ego:83
+//line generate.ego:97
 	fmt.Println(rel(path))
 	return nil
 }
@@ -136,9 +153,12 @@ func egoDirs(args []string) ([]string, error) {
 				if err != nil {
 					return err
 				}
-//line generate.ego:113
+//line generate.ego:127
 				if d.IsDir() && path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" || d.Name() == "vendor") {
 					return filepath.SkipDir
+				}
+				if d.IsDir() && path != root && exists(filepath.Join(path, "go.mod")) {
+					return filepath.SkipDir // another module, as go's ./... skips it
 				}
 				if d.IsDir() {
 					if layers.HasInjectors(path) {
@@ -153,7 +173,7 @@ func egoDirs(args []string) ([]string, error) {
 			}); err != nil {
 				return nil, err
 			}
-//line generate.ego:127
+//line generate.ego:144
 			continue
 		}
 		if strings.HasSuffix(a, ".ego") {
@@ -167,6 +187,11 @@ func egoDirs(args []string) ([]string, error) {
 
 // dependencyOrder sorts dirs so that a package comes after the packages it
 // imports: the compiler type-checks against their generated code.
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func dependencyOrder(dirs []string) []string {
 	paths := map[string]string{} // import path -> dir
 	for _, d := range dirs {

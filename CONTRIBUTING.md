@@ -40,9 +40,18 @@ examples are `.ego` code whose generated Go is committed, and `TestGolden`
 compares the two. After a change, regenerate them and look at the diff:
 
 ```bash
-go install ./cmd/ego && ego generate ./...
+go install ./cmd/ego && ego generate ./... && (cd examples && ego generate ./...)
 git diff -- '*_ego.go' '*_ego_test.go'
 ```
+
+`ego generate ./...` skips nested modules, as `go` does, so `examples` is
+generated from inside it.
+
+`EGO_DEBUG=1 ego generate ./...` prints where the time goes for each
+package, and the Go generated for packages that don't compile.
+`go run ./experiments/generate-bench . examples` times `ego generate` on
+whole modules, next to `go build`; `BenchmarkEditor` and `BenchmarkGenerate`
+in `internal/lower` measure the editor's regeneration and the compiler.
 
 A new compile error gets a case in `internal/lower/testdata/errors`: a line
 ending with `// ERROR "regexp"` must get that error, and no other line any.

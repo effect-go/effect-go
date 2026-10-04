@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/effect-go/effect-go/internal/syntax/parser"
 
@@ -26,14 +27,27 @@ func generate(args []string) error {
 	dirs := check egoDirs(fl.Args()) ""
 	dirs = dependencyOrder(dirs)
 	im := lower.NewImporter()
+	debug := os.Getenv("EGO_DEBUG") != ""
+	start := time.Now()
+	check im.Preload(dirs) ""
+	if debug {
+		fmt.Fprintf(os.Stderr, "preload: %v\n", time.Since(start).Round(time.Millisecond))
+	}
 	failed := false
 	for _, dir := range dirs {
 		res := check lower.Generate(lower.Config{Dir: dir, NoLines: !*lines, Importer: im}) "{rel(dir)}"
+		if debug {
+			var phases []string
+			for _, ph := range res.Phases {
+				phases = append(phases, f"{ph.Name} {ph.Took.Round(time.Millisecond/10)}")
+			}
+			fmt.Fprintf(os.Stderr, "%s: %s\n", rel(dir), strings.Join(phases, ", "))
+		}
 		for _, d := range res.Diags {
 			fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
 		}
 		if len(res.Diags) > 0 {
-			if os.Getenv("EGO_DEBUG") != "" {
+			if debug {
 				for _, out := range res.Outputs {
 					fmt.Fprintf(os.Stderr, "--- %s\n%s\n", out.Go, out.Raw)
 				}
@@ -113,6 +127,9 @@ func egoDirs(args []string) ([]string, error) {
 				if d.IsDir() && path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" || d.Name() == "vendor") {
 					return filepath.SkipDir
 				}
+				if d.IsDir() && path != root && exists(filepath.Join(path, "go.mod")) {
+					return filepath.SkipDir // another module, as go's ./... skips it
+				}
 				if d.IsDir() {
 					if layers.HasInjectors(path) {
 						add(path)
@@ -137,6 +154,11 @@ func egoDirs(args []string) ([]string, error) {
 
 // dependencyOrder sorts dirs so that a package comes after the packages it
 // imports: the compiler type-checks against their generated code.
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func dependencyOrder(dirs []string) []string {
 	paths := map[string]string{} // import path -> dir
 	for _, d := range dirs {

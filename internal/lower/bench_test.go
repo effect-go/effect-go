@@ -76,3 +76,21 @@ func BenchmarkEditor(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkGenerate measures ego generate on the fixtures, from scratch:
+// loading the dependencies, then compiling every package. A load per
+// package, instead of one for all, shows up here.
+func BenchmarkGenerate(b *testing.B) {
+	dirs := fixtures(b)
+	for b.Loop() {
+		im := NewImporter()
+		if err := im.Preload(dirs); err != nil {
+			b.Fatal(err)
+		}
+		for _, dir := range dirs {
+			if _, err := Generate(Config{Dir: dir, Importer: im}); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
