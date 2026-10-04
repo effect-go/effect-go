@@ -54,7 +54,9 @@ func (e *StuckError) Error() string {
 func (s *Scope) Context() context.Context { return s.ctx }
 
 // Run calls body with a new scope, and closes the scope when body returns
-// or panics. Errors from releasing resources are joined to body's error.
+// or panics. Errors from releasing resources are joined to body's error. If
+// body panics, Run re-panics after closing the scope; otherwise it re-panics
+// with the panic of a fiber nobody joined, if any.
 func Run[T any](ctx context.Context, body func(s *Scope) (T, error), opts ...Option) (res T, err error) {
 	s := &Scope{parent: ctx}
 	for _, o := range opts {
@@ -63,9 +65,12 @@ func Run[T any](ctx context.Context, body func(s *Scope) (T, error), opts ...Opt
 	s.ctx, s.cancel = context.WithCancelCause(ctx)
 	defer func() {
 		r := recover()
-		cerr := s.close()
+		unjoined, cerr := s.close()
 		if r != nil {
-			panic(r)
+			panic(r) // body's own panic comes first
+		}
+		if unjoined != nil {
+			panic(unjoined)
 		}
 		if cerr != nil {
 			err = errors.Join(err, cerr)
@@ -74,7 +79,10 @@ func Run[T any](ctx context.Context, body func(s *Scope) (T, error), opts ...Opt
 	return body(s)
 }
 
-func (s *Scope) close() error {
+// close stops the fibers and releases the resources. It returns the panic
+// of a fiber nobody joined, which would otherwise be lost, and the errors of
+// releasing.
+func (s *Scope) close() (*Panic, error) {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
@@ -109,13 +117,13 @@ func (s *Scope) close() error {
 			errs = append(errs, err)
 		}
 	}
-	// A panic in a fiber nobody joined would otherwise be lost.
+	err := errors.Join(append([]error{stuck}, errs...)...)
 	for _, f := range s.fibers {
 		if p := f.unjoinedPanic(); p != nil {
-			panic(p)
+			return p, err
 		}
 	}
-	return errors.Join(append([]error{stuck}, errs...)...)
+	return nil, err
 }
 
 func (s *Scope) add() {

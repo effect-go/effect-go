@@ -265,6 +265,22 @@ func TestUnjoinedPanicIsNotLost(t *testing.T) {
 	})
 }
 
+// When body panics too, its own panic is the one that comes out.
+func TestBodyPanicBeatsUnjoinedPanic(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != "body" {
+				t.Fatalf("recovered %v, want body's panic", r)
+			}
+		}()
+		Run(t.Context(), func(s *Scope) (int, error) {
+			Fork(s, panicsInBranch)
+			time.Sleep(time.Millisecond)
+			panic("body")
+		})
+	})
+}
+
 func TestInterrupt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		Run(t.Context(), func(s *Scope) (int, error) {
