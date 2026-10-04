@@ -1,17 +1,42 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 (2026-10-04)
 
-- `check f() ""` returns the error as it is, without a label.
-- `x := check f()` no longer clashes with an `err` declared later in the same block.
-- `ego fmt` names the file in its errors.
-- The `ego` command and its language server are written in `.ego`.
-- `scope.Run`: when the body panics and a fiber nobody joined panicked too, Run re-panics with the body's panic; it used to lose it.
-- `scope.Run` with `StopTimeout` no longer starts a goroutine and a timer to close a scope whose fibers have all stopped: 605 ns to 70 ns.
-- A `match` over an error set handles a pointer to a case (`&NotFound{}`), which is an error too; it used to panic. Each error case now has an `As` method, so regenerate.
-- External test packages (`package p_test` in `_test.ego` files) can pass standard-library values across from the package under test; `ego generate` used to fail with errors like `http.Handler does not implement http.Handler`.
-- `ego generate` loads the dependencies of all packages at once: 2.6 s to 0.5 s on this repository, 2.25 s to 0.84 s on the miniflux port. `EGO_DEBUG=1` prints the time each package spends in each phase.
+**To update:** run `ego generate ./...` in each module (it now skips nested
+modules, so run it inside them too), and rename any error-set case field
+named `As`.
+
+Breaking:
+- Each error-set case gets an `As` method, so a pointer to a case
+  (`&NotFound{}`) matches as the case in `match`, `else` arms and
+  `errors.AsType`; it used to make a `match` without `_` panic. A case can no
+  longer have a field named `As`.
 - `ego generate ./...` skips nested modules, as `go` does.
+
+Fixes:
+- `scope.Run`: when the body panics and a fiber nobody joined panicked too,
+  Run re-panics with the body's panic; it used to lose it.
+- External test packages (`package p_test` in `_test.ego` files) can pass
+  standard-library values across from the package under test; `ego generate`
+  used to fail with errors like `http.Handler does not implement http.Handler`.
+- `x := check f()` no longer clashes with an `err` declared later in the same
+  block.
+- `ego fmt` names the file in its errors.
+
+Faster:
+- `ego generate` loads the dependencies of all packages at once: 2.6 s to
+  0.47 s on this repository, 2.25 s to 0.84 s on the miniflux port.
+- `scope.Run` with `StopTimeout` closes a scope whose fibers have all stopped
+  without a goroutine or a timer: 605 ns to 70 ns.
+
+New:
+- `check f() ""` returns the error as it is, without a label.
+- `EGO_DEBUG=1 ego generate` prints the time each package spends in each
+  phase.
+- A GoLand plugin ([editors/jetbrains](editors/jetbrains)), and tested setups
+  for Neovim and Vim ([docs/editors.md](docs/editors.md)). The VS Code
+  extension (0.4.1) no longer turns on file nesting in every workspace.
+- The `ego` command and its language server are written in `.ego`.
 
 ## v0.1.0 (2026-10-02)
 
