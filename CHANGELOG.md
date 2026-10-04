@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## v0.2.1 (2026-10-04)
+
+**To update:** run `ego generate ./...` in each module; the generated code
+changes, mostly its //line directives.
 
 - Comments on error-set cases and enum members reach the generated Go: a
   comment above a case documents its type or constant, and one after it
