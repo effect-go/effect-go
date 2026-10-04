@@ -7,17 +7,19 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"runtime"
 	"strconv"
 )
 
 // PayError is the error set Declined | Expired | Gateway.
 //
-//line status.ego:10
+//line status.ego:11
 type PayError interface {
 	error
 	isPayError()
 }
 
+// Declined means the bank refused the payment.
 type Declined struct{ Reason string }
 
 func (Declined) isPayError() {}
@@ -33,7 +35,7 @@ func (e Declined) As(target any) bool {
 	return false
 }
 
-type Expired struct{}
+type Expired struct{} // the card's date has passed
 
 func (Expired) isPayError() {}
 
@@ -65,10 +67,17 @@ func (e Gateway) As(target any) bool {
 	return false
 }
 
+// Where returns the line it runs on, which the generated Go must report as
+// this file's, though the error set above takes more lines in Go.
+//
+//line status.ego:20
+func Where() int {
+	_, _, line, _ := runtime.Caller(0) // where
+	return line
+}
+
 // Code maps a payment's result to an HTTP status. err is declared as a
 // PayError, so the match needs no _ arm.
-//
-//line status.ego:16
 func Code(err error) int {
 	var code int
 	if err == nil {
@@ -82,7 +91,7 @@ func Code(err error) int {
 	} else {
 		panic(err)
 	}
-//line status.ego:25
+//line status.ego:34
 	return code
 }
 
@@ -98,7 +107,7 @@ func Describe(err error) string {
 	return v
 }
 
-//line status.ego:36
+//line status.ego:45
 func Charge(amount int) (string, error) {
 	if amount <= 0 {
 		return "", Declined{Reason: "nothing to charge"}
@@ -115,7 +124,7 @@ func Amount(s string) (int, error) {
 	if err != nil {
 		return 0, Declined{Reason: fmt.Sprintf("bad amount %q", s)}
 	}
-//line status.ego:49
+//line status.ego:58
 	return n, nil
 }
 
@@ -125,7 +134,7 @@ func Remote(s string) (int, error) {
 	if err != nil {
 		return 0, Gateway{Cause: err}
 	}
-//line status.ego:55
+//line status.ego:64
 	return n, nil
 }
 
@@ -135,7 +144,7 @@ func Pay(amount int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-//line status.ego:61
+//line status.ego:70
 	return r, nil
 }
 
@@ -150,7 +159,7 @@ func Settle(amount int) (string, error) {
 			return "", fmt.Errorf("settle %v: %w", amount, err)
 		}
 	}
-//line status.ego:68
+//line status.ego:77
 	return r, nil
 }
 
@@ -169,7 +178,7 @@ func State(amount int) (s string) {
 		}
 	}
 	s = v
-//line status.ego:74
+//line status.ego:83
 	return s
 }
 
@@ -184,7 +193,7 @@ func Clamp(s string) (int, error) {
 			return 0, fmt.Errorf("strconv.Atoi: %w", err)
 		}
 	}
-//line status.ego:81
+//line status.ego:90
 	return n, nil
 }
 
@@ -194,7 +203,7 @@ func Parse(s string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-//line status.ego:87
+//line status.ego:96
 	return n, nil
 }
 
@@ -205,12 +214,12 @@ func Both(a, b string) (int, error) {
 	if err2 != nil {
 		return 0, err2
 	}
-//line status.ego:94
+//line status.ego:103
 	y, err3 := strconv.Atoi(b)
 	if err3 != nil {
 		return 0, err3
 	}
-//line status.ego:95
+//line status.ego:104
 	err := error(nil)
 	if x+y < 0 {
 		err = errors.New("negative")

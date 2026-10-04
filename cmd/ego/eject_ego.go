@@ -20,7 +20,7 @@ import (
 // the injector files go. The code still imports the runtime library.
 // Without -w, it prints what it would do.
 //
-//line eject.ego:15
+//line eject.ego:20
 func ejectCmd(args []string) error {
 	fl := flag.NewFlagSet("eject", flag.ExitOnError)
 	write := fl.Bool("w", false, "eject: without -w, only print what would change")

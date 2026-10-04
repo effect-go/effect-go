@@ -337,8 +337,11 @@ func (g *fileGen) render(r *round) *writer {
 			start = doc.Pos()
 		}
 		g.copy(cur, g.off(start))
-		g.mark(start)
 		g.copy(g.off(start), g.off(d.Pos()))
+		// Mark the declaration, not its doc comment: gofmt moves a //line
+		// directive at the top of a doc comment to its end, where it would
+		// give the declaration the comment's first line.
+		g.mark(d.Pos())
 		g.node(d)
 		cur = g.off(d.End())
 	}

@@ -14,7 +14,7 @@ import (
 
 // Config is what the app needs from its environment.
 //
-//line cli.ego:9
+//line cli.ego:10
 type Config struct {
 	DatabaseURL string
 	Out, Err    io.Writer

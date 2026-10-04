@@ -15,6 +15,7 @@ type Shape interface {
 	isShape()
 }
 
+// Circle is round.
 type Circle struct{ R float64 }
 
 func (Circle) isShape() {}
@@ -27,7 +28,7 @@ type Dot struct{}
 
 func (Dot) isShape() {}
 
-//line shapes.ego:12
+//line shapes.ego:13
 func Area(s Shape) float64 {
 	var v float64
 	if c, ok := s.(Circle); ok {
@@ -44,12 +45,13 @@ func Area(s Shape) float64 {
 
 // Color is the enum Red | Green | Blue.
 //
-//line shapes.ego:20
+//line shapes.ego:21
 type Color int
 
 const (
-	Red Color = iota
-	Green
+	// Red is warm.
+	Red   Color = iota
+	Green       // the default
 	Blue
 )
 
@@ -65,7 +67,7 @@ func (v Color) String() string {
 	return "Color(" + strconv.Itoa(int(v)) + ")"
 }
 
-//line shapes.ego:26
+//line shapes.ego:28
 func Warm(c Color) bool {
 	var v bool
 	switch c {
@@ -79,7 +81,7 @@ func Warm(c Color) bool {
 	return v
 }
 
-//line shapes.ego:33
+//line shapes.ego:35
 type Level int
 
 const (
@@ -90,10 +92,10 @@ const (
 func Name(l Level) string {
 	switch l {
 	case Low:
-//line shapes.ego:42
+//line shapes.ego:44
 		return "low"
 	case High:
-//line shapes.ego:43
+//line shapes.ego:45
 		return "high"
 	}
 	return "?"

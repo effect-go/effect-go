@@ -17,7 +17,7 @@ import (
 // vetCmd runs go vet's own checks, then the effect-go analyzers, with ego
 // as go vet's tool.
 //
-//line vet.ego:15
+//line vet.ego:17
 func vetCmd(args []string) error {
 	exe, err := os.Executable()
 	if err != nil {

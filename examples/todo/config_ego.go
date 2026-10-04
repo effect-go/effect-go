@@ -6,7 +6,7 @@ import "os"
 
 // databaseURL is TODO_DATABASE_URL, or a local database named todo.
 //
-//line config.ego:5
+//line config.ego:6
 func databaseURL() string {
 	url, ok := os.LookupEnv("TODO_DATABASE_URL")
 	if !ok {

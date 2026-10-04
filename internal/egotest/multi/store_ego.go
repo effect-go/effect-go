@@ -40,7 +40,7 @@ func (s *Store[K, V]) Put(ctx context.Context, k K, v V) (err error) {
 
 // Size has no error result: it still gets ctx and a span.
 //
-//line store.ego:28
+//line store.ego:29
 func (s *Store[K, V]) Size(ctx context.Context) (_ int) {
 	ctx, span := trace.Start(ctx, "multi.Store.Size")
 	defer trace.End(span, nil)

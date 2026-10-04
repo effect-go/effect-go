@@ -173,7 +173,7 @@ func (c *Countdown) Tick(ctx context.Context) (_ int, err error) {
 // Drain ticks once a minute, like a ticker loop, until ctx ends, and
 // returns the last count.
 //
-//line report.ego:114
+//line report.ego:116
 func Drain(ctx context.Context, c *Countdown) (_ int, err error) {
 	ctx, span := trace.Start(ctx, "report.Drain")
 	defer trace.End(span, &err)

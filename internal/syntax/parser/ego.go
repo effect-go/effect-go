@@ -307,7 +307,10 @@ func (p *parser) parseSumDecl() *ast.SumDecl {
 	d.Name = p.parseIdent()
 	d.Lbrace = p.expect(token.LBRACE)
 	for p.tok == token.IDENT {
-		c := &ast.SumCase{Doc: p.leadComment, Name: p.parseIdent()}
+		// Read the comment before parseIdent moves past it: Go doesn't
+		// order a field read against a call in the same literal.
+		doc := p.leadComment
+		c := &ast.SumCase{Doc: doc, Name: p.parseIdent()}
 		if p.tok == token.LBRACE {
 			c.Fields = &ast.FieldList{Opening: p.pos}
 			p.next()

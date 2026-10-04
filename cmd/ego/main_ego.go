@@ -20,7 +20,7 @@ import (
 
 // version is the release go install built ego from, or "devel".
 //
-//line main.ego:19
+//line main.ego:20
 func version() string {
 	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
 		return bi.Main.Version

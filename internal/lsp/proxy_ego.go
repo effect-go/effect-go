@@ -28,7 +28,7 @@ import (
 
 // Config configures the proxy.
 //
-//line proxy.ego:27
+//line proxy.ego:28
 type Config struct {
 	Gopls string    // path to gopls; "gopls" if empty
 	Log   io.Writer // debug log; may be nil

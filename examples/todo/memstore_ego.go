@@ -14,7 +14,7 @@ import (
 // MemStore is an in-memory Store, for tests: the test graph swaps it in for
 // PgStore.
 //
-//line memstore.ego:9
+//line memstore.ego:11
 type MemStore struct {
 	mu    sync.Mutex
 	next  int64

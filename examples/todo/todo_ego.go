@@ -19,7 +19,7 @@ import (
 
 // Priority orders the list: an enum without data compiles to constants.
 //
-//line todo.ego:14
+//line todo.ego:15
 type Priority int
 
 const (
@@ -42,7 +42,7 @@ func (v Priority) String() string {
 
 // A Todo is one item.
 //
-//line todo.ego:21
+//line todo.ego:22
 type Todo struct {
 	ID        int64      `db:"id"`
 	Title     string     `db:"title"`
@@ -124,7 +124,7 @@ func (e Storage) As(target any) bool {
 
 // Overdue reports whether t is still open after its due date.
 //
-//line todo.ego:39
+//line todo.ego:40
 func (t Todo) Overdue(now time.Time) bool {
 	return t.DoneAt == nil && t.Due != nil && t.Due.Before(now.Truncate(24*time.Hour))
 }

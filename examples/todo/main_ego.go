@@ -29,7 +29,7 @@ func main() {
 // in s, with the generated BuildCLI, and runs the command. The scope closes
 // the database pool when it ends.
 //
-//line main.ego:16
+//line main.ego:19
 func run(s *scope.Scope, args []string) (_ int, err error) {
 	ctx, span := trace.Start(s.Context(), "main.run")
 	defer trace.End(span, &err)

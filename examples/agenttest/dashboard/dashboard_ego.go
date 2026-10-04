@@ -16,7 +16,7 @@ import (
 // recsPolicy backs off from 100ms with jitter, at most 3 retries, and never
 // retries a rejected request.
 //
-//line dashboard.ego:8
+//line dashboard.ego:10
 var recsPolicy = schedule.Max(
 	schedule.Exponential(100*time.Millisecond).Jittered(),
 	schedule.Recurs(3),

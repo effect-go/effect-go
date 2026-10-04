@@ -4,6 +4,7 @@ package shapes
 import "math"
 
 enum Shape {
+	// Circle is round.
 	Circle{ R float64 }
 	Rect{ W, H float64 }
 	Dot
@@ -18,8 +19,9 @@ func Area(s Shape) float64 {
 }
 
 enum Color {
+	// Red is warm.
 	Red
-	Green
+	Green // the default
 	Blue
 }
 

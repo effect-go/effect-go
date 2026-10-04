@@ -15,7 +15,7 @@ import (
 // testCmd regenerates the packages to test, then runs go test with the same
 // arguments, so tests never run against stale generated code.
 //
-//line test.ego:13
+//line test.ego:15
 func testCmd(args []string) error {
 	var pkgs []string
 	for _, a := range args {

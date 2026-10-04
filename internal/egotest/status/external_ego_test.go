@@ -13,7 +13,7 @@ import (
 
 // An external test in effect-go: it matches the package's error set.
 //
-//line external_test.ego:10
+//line external_test.ego:11
 func TestExternal(t *testing.T) {
 	for amount, want := range map[int]string{0: "declined: nothing to charge", 500: "gateway failed: timeout", 5: "ok"} {
 		_, err := status.Pay(amount)

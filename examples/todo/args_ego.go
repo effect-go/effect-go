@@ -50,7 +50,7 @@ func (v Action) String() string {
 // A Command is a parsed command line. Parsing needs no database, so a
 // mistyped command fails before the app connects.
 //
-//line args.ego:29
+//line args.ego:31
 type Command struct {
 	Action   Action
 	Title    string

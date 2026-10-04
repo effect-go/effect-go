@@ -9,7 +9,7 @@ import (
 
 // An in-package test in effect-go: it uses the unexported parse.
 //
-//line inpackage_test.ego:5
+//line inpackage_test.ego:6
 func TestInPackage(t *testing.T) {
 	n, err := parse("41")
 	if err != nil {

@@ -20,7 +20,7 @@ import (
 // Store keeps the todos. Its methods are effect methods: they take a ctx,
 // which callers in effect functions pass without writing it.
 //
-//line store.ego:13
+//line store.ego:15
 type Store interface {
 	Insert(ctx context.Context, t Todo) (Todo, error)
 	List(ctx context.Context) ([]Todo, error)
@@ -52,7 +52,7 @@ func (v Filter) String() string {
 
 // PgStore is the PostgreSQL store.
 //
-//line store.ego:30
+//line store.ego:31
 type PgStore struct{ db *pgxpool.Pool }
 
 func NewPgStore(db *pgxpool.Pool) *PgStore { return &PgStore{db} }
@@ -161,7 +161,7 @@ func (s *PgStore) Delete(ctx context.Context, id int64) (_ bool, err error) {
 // found runs a statement that returns a row for the todo it changed, and
 // reports whether there was one.
 //
-//line store.ego:95
+//line store.ego:97
 func (s *PgStore) found(ctx context.Context, sql string, args ...any) (_ bool, err error) {
 	ctx, span := trace.Start(ctx, "main.PgStore.found")
 	defer trace.End(span, &err)

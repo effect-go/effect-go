@@ -15,7 +15,7 @@ import (
 
 // A message is a JSON-RPC 2.0 request, notification or response.
 //
-//line jsonrpc.ego:14
+//line jsonrpc.ego:15
 type message struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`

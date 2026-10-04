@@ -10,7 +10,7 @@ import (
 
 // Tests can be written in effect-go too: match checks every error case.
 //
-//line parse_test.ego:8
+//line parse_test.ego:9
 func TestParse(t *testing.T) {
 	for in, want := range map[string]string{"": "Medium", "HIGH": "High", "low": "Low", "x": "invalid"} {
 		p, err := ParsePriority(in)

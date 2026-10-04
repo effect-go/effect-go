@@ -16,8 +16,8 @@ import (
 	"text/template"
 )
 
-//line new.ego:17
 //go:embed testdata/template
+//line new.ego:18
 var projectTemplate embed.FS
 
 const modulePath = "github.com/effect-go/effect-go"

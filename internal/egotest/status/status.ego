@@ -4,13 +4,22 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"runtime"
 	"strconv"
 )
 
 error PayError {
+	// Declined means the bank refused the payment.
 	Declined{ Reason string } "declined: {Reason}"
-	Expired{}
+	Expired{} // the card's date has passed
 	Gateway{ Cause error }
+}
+
+// Where returns the line it runs on, which the generated Go must report as
+// this file's, though the error set above takes more lines in Go.
+func Where() int {
+	_, _, line, _ := runtime.Caller(0) // where
+	return line
 }
 
 // Code maps a payment's result to an HTTP status. err is declared as a

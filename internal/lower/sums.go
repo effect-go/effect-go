@@ -52,6 +52,7 @@ func (g *fileGen) sumDecl(d *ast.SumDecl) {
 		} else {
 			g.w.str("{}")
 		}
+		g.lineComment(c)
 		g.w.str("\n\nfunc (" + c.Name.Name + ") is" + name + "() {}\n")
 		if d.Enum {
 			continue
@@ -67,6 +68,15 @@ func (g *fileGen) sumDecl(d *ast.SumDecl) {
 		g.w.str("if t, ok := target.(*" + c.Name.Name + "); ok {\n*t = e\nreturn true\n}\nreturn false\n}\n")
 	}
 	g.trimNewline()
+}
+
+// lineComment copies the comment after a case, as in A{ X int } // text, to
+// the end of the line that declares it.
+func (g *fileGen) lineComment(c *ast.SumCase) {
+	if c.Comment != nil {
+		g.w.str(" ")
+		g.copy(g.off(c.Comment.Pos()), g.off(c.Comment.End()))
+	}
 }
 
 func hasData(d *ast.SumDecl) bool {
@@ -205,6 +215,7 @@ func (g *fileGen) constEnum(d *ast.SumDecl) {
 		if i == 0 {
 			g.w.str(" " + name + " = iota")
 		}
+		g.lineComment(c)
 		g.w.str("\n")
 	}
 	g.w.str(")\n\nfunc (v " + name + ") String() string {\nswitch v {\n")

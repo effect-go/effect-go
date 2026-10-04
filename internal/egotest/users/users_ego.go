@@ -131,7 +131,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 // GetAll loads users four at a time. Get's errors pass through, as they
 // are the same set; each's own cancellation becomes Storage.
 //
-//line users.ego:58
+//line users.ego:60
 func (s *Service) GetAll(ctx context.Context, ids []UserID) (_ []User, err error) {
 	ctx, span := trace.Start(ctx, "users.Service.GetAll")
 	defer trace.End(span, &err)

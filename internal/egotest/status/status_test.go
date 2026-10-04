@@ -4,9 +4,25 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
 )
+
+// Lines in the generated Go report the .ego file's lines, after a doc
+// comment too.
+func TestLines(t *testing.T) {
+	if testing.CoverMode() != "" {
+		t.Skip("ego test -cover reports the generated Go's lines")
+	}
+	src, _ := os.ReadFile("status.ego")
+	want := slices.IndexFunc(strings.Split(string(src), "\n"), func(l string) bool { return strings.HasSuffix(l, "// where") }) + 1
+	if got := Where(); got != want {
+		t.Errorf("Where reports line %d, want %d", got, want)
+	}
+}
 
 func TestStatus(t *testing.T) {
 	cases := []struct {

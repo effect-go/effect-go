@@ -14,7 +14,7 @@ import (
 // Count stores the length of each word, in parallel, and returns how many
 // distinct words there were.
 //
-//line counts.ego:8
+//line counts.ego:10
 func Count(ctx context.Context, s *Store[string, int], text string) (_ int, err error) {
 	ctx, span := trace.Start(ctx, "multi.Count")
 	defer trace.End(span, &err)

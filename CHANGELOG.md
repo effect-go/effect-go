@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Comments on error-set cases and enum members reach the generated Go: a
+  comment above a case documents its type or constant, and one after it
+  stays at the end of its line. They were dropped.
+- Generated code reports the right lines for a documented declaration that
+  follows code lowering made longer (an error set, say): panics and the
+  debugger pointed at the doc comment, and the lines below by as much.
+
 ## v0.2.0 (2026-10-04)
 
 **To update:** run `ego generate ./...` in each module (it now skips nested

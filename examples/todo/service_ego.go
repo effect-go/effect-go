@@ -16,7 +16,7 @@ import (
 
 // Clock is the current time; tests swap it.
 //
-//line service.ego:10
+//line service.ego:11
 type Clock func() time.Time
 
 func NewClock() Clock { return time.Now }
