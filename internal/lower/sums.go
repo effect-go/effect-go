@@ -11,6 +11,7 @@ import (
 //
 // An error set, or an enum whose cases carry data, becomes a sealed
 // interface (an unexported is<Name> marker method) plus one struct per case.
+// An error case also gets Error, Unwrap if it has a cause, and As.
 // An enum whose cases carry no data becomes Go's usual iota constants.
 func (g *fileGen) sumDecl(d *ast.SumDecl) {
 	g.w.anchor(g.off(d.Pos()))
@@ -59,6 +60,11 @@ func (g *fileGen) sumDecl(d *ast.SumDecl) {
 		if cause := causeField(c); cause != "" {
 			g.w.str("\nfunc (e " + c.Name.Name + ") Unwrap() error { return e." + cause + " }\n")
 		}
+		// &Case{} is an error too, through the value methods; As lets
+		// errors.AsType[Case], and so match, find it.
+		g.w.str("\n// As lets pointers to " + c.Name.Name + " match as " + c.Name.Name + ".\n")
+		g.w.str("func (e " + c.Name.Name + ") As(target any) bool {\n")
+		g.w.str("if t, ok := target.(*" + c.Name.Name + "); ok {\n*t = e\nreturn true\n}\nreturn false\n}\n")
 	}
 	g.trimNewline()
 }

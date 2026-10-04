@@ -38,11 +38,29 @@ func (NotFound) isUserError() {}
 
 func (e NotFound) Error() string { return fmt.Sprintf("not found (ID %v)", e.ID) }
 
+// As lets pointers to NotFound match as NotFound.
+func (e NotFound) As(target any) bool {
+	if t, ok := target.(*NotFound); ok {
+		*t = e
+		return true
+	}
+	return false
+}
+
 type Suspended struct{ Until time.Time }
 
 func (Suspended) isUserError() {}
 
 func (e Suspended) Error() string { return fmt.Sprintf("suspended (Until %v)", e.Until) }
+
+// As lets pointers to Suspended match as Suspended.
+func (e Suspended) As(target any) bool {
+	if t, ok := target.(*Suspended); ok {
+		*t = e
+		return true
+	}
+	return false
+}
 
 type Storage struct{ Cause error }
 
@@ -51,6 +69,15 @@ func (Storage) isUserError() {}
 func (e Storage) Error() string { return fmt.Sprintf("storage: %v", e.Cause) }
 
 func (e Storage) Unwrap() error { return e.Cause }
+
+// As lets pointers to Storage match as Storage.
+func (e Storage) As(target any) bool {
+	if t, ok := target.(*Storage); ok {
+		*t = e
+		return true
+	}
+	return false
+}
 
 //line users.ego:28
 type Service struct {

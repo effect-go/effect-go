@@ -24,11 +24,29 @@ func (Declined) isPayError() {}
 
 func (e Declined) Error() string { return fmt.Sprintf("declined: %v", e.Reason) }
 
+// As lets pointers to Declined match as Declined.
+func (e Declined) As(target any) bool {
+	if t, ok := target.(*Declined); ok {
+		*t = e
+		return true
+	}
+	return false
+}
+
 type Expired struct{}
 
 func (Expired) isPayError() {}
 
 func (e Expired) Error() string { return "expired" }
+
+// As lets pointers to Expired match as Expired.
+func (e Expired) As(target any) bool {
+	if t, ok := target.(*Expired); ok {
+		*t = e
+		return true
+	}
+	return false
+}
 
 type Gateway struct{ Cause error }
 
@@ -37,6 +55,15 @@ func (Gateway) isPayError() {}
 func (e Gateway) Error() string { return fmt.Sprintf("gateway: %v", e.Cause) }
 
 func (e Gateway) Unwrap() error { return e.Cause }
+
+// As lets pointers to Gateway match as Gateway.
+func (e Gateway) As(target any) bool {
+	if t, ok := target.(*Gateway); ok {
+		*t = e
+		return true
+	}
+	return false
+}
 
 // Code maps a payment's result to an HTTP status. err is declared as a
 // PayError, so the match needs no _ arm.

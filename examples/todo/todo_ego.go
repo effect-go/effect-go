@@ -64,11 +64,29 @@ func (NotFound) isTodoError() {}
 
 func (e NotFound) Error() string { return fmt.Sprintf("no todo #%v", e.ID) }
 
+// As lets pointers to NotFound match as NotFound.
+func (e NotFound) As(target any) bool {
+	if t, ok := target.(*NotFound); ok {
+		*t = e
+		return true
+	}
+	return false
+}
+
 type Invalid struct{ Reason string }
 
 func (Invalid) isTodoError() {}
 
 func (e Invalid) Error() string { return fmt.Sprintf("%v", e.Reason) }
+
+// As lets pointers to Invalid match as Invalid.
+func (e Invalid) As(target any) bool {
+	if t, ok := target.(*Invalid); ok {
+		*t = e
+		return true
+	}
+	return false
+}
 
 type Usage struct{ Cause error }
 
@@ -78,6 +96,15 @@ func (e Usage) Error() string { return fmt.Sprintf("%v", e.Cause) }
 
 func (e Usage) Unwrap() error { return e.Cause }
 
+// As lets pointers to Usage match as Usage.
+func (e Usage) As(target any) bool {
+	if t, ok := target.(*Usage); ok {
+		*t = e
+		return true
+	}
+	return false
+}
+
 type Storage struct{ Cause error }
 
 func (Storage) isTodoError() {}
@@ -85,6 +112,15 @@ func (Storage) isTodoError() {}
 func (e Storage) Error() string { return fmt.Sprintf("database error: %v", e.Cause) }
 
 func (e Storage) Unwrap() error { return e.Cause }
+
+// As lets pointers to Storage match as Storage.
+func (e Storage) As(target any) bool {
+	if t, ok := target.(*Storage); ok {
+		*t = e
+		return true
+	}
+	return false
+}
 
 // Overdue reports whether t is still open after its due date.
 //

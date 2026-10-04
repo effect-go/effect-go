@@ -17,6 +17,8 @@ func TestStatus(t *testing.T) {
 		{Declined{Reason: "x"}, 402},
 		{fmt.Errorf("wrapped: %w", Expired{}), 410},
 		{Gateway{Cause: errors.New("io")}, 502},
+		{&Declined{Reason: "pointer"}, 402}, // &Case{} is an error too
+		{fmt.Errorf("wrapped: %w", &Expired{}), 410},
 	}
 	for _, c := range cases {
 		if got := Code(c.err); got != c.code {
