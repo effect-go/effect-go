@@ -88,7 +88,7 @@ func (s *Scope) close() (*Panic, error) {
 	s.mu.Unlock()
 	s.cancel(errClosed)
 	var stuck error
-	if s.stopIn > 0 {
+	if s.stopIn > 0 && !s.allStopped() {
 		done := make(chan struct{})
 		go func() { s.wg.Wait(); close(done) }()
 		t := time.NewTimer(s.stopIn)
@@ -126,13 +126,27 @@ func (s *Scope) close() (*Panic, error) {
 	return nil, err
 }
 
-func (s *Scope) add() {
+// allStopped reports whether every fiber has stopped, as is usual when the
+// scope closes: then waiting needs no timer. Only called once closed is set.
+func (s *Scope) allStopped() bool {
+	for _, f := range s.fibers {
+		if !f.stopped() {
+			return false
+		}
+	}
+	return true
+}
+
+// add registers a fiber about to start. Counting and listing it under one
+// lock means close, once it has set closed, sees every fiber.
+func (s *Scope) add(f joinable) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		panic("scope: Fork after Run returned")
 	}
 	s.wg.Add(1)
+	s.fibers = append(s.fibers, f)
 }
 
 type joinable interface {
@@ -153,12 +167,9 @@ type Fiber[T any] struct {
 // Fork starts task in the background. It stops when the scope closes, if
 // it hasn't finished before.
 func Fork[T any](s *Scope, task Task[T]) *Fiber[T] {
-	s.add()
 	ctx, cancel := context.WithCancelCause(s.ctx)
 	f := &Fiber[T]{done: make(chan struct{}), cancel: cancel}
-	s.mu.Lock()
-	s.fibers = append(s.fibers, f)
-	s.mu.Unlock()
+	s.add(f)
 	go func() {
 		defer s.wg.Done()
 		defer close(f.done)
