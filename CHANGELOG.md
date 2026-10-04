@@ -9,6 +9,7 @@
 - `scope.Run`: when the body panics and a fiber nobody joined panicked too, Run re-panics with the body's panic; it used to lose it.
 - `scope.Run` with `StopTimeout` no longer starts a goroutine and a timer to close a scope whose fibers have all stopped: 605 ns to 70 ns.
 - A `match` over an error set handles a pointer to a case (`&NotFound{}`), which is an error too; it used to panic. Each error case now has an `As` method, so regenerate.
+- External test packages (`package p_test` in `_test.ego` files) can pass standard-library values across from the package under test; `ego generate` used to fail with errors like `http.Handler does not implement http.Handler`.
 
 ## v0.1.0 (2026-10-02)
 

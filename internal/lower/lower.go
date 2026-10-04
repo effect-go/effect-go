@@ -23,6 +23,7 @@ import (
 	goparser "go/parser"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -127,6 +128,16 @@ func Generate(cfg Config) (*Result, error) {
 	if len(p.files)+len(p.testFiles)+len(p.xtestFiles) == 0 || len(res.Diags) > 0 {
 		return res, nil // nothing to do, or syntax errors
 	}
+	// Load what the package and its tests import at once. Loading more paths
+	// later loads their dependencies again, so the external tests would see
+	// another net/http than the package under test does.
+	paths, err := p.imports()
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Importer.load(cfg.Dir, paths); err != nil {
+		return nil, err
+	}
 
 	// The package itself.
 	ti, err := p.run(res, nil)
@@ -158,6 +169,41 @@ func Generate(cfg Config) (*Result, error) {
 	}
 	sortDiags(res.Diags)
 	return res, nil
+}
+
+// lowered are the packages generated code may import that its .ego file
+// doesn't.
+var lowered = []string{"context", "errors", "fmt", "strconv", "time", scopePath, schedulePath, tracePath}
+
+// imports returns every package the package and its tests import, and
+// those that lowering may add, except the package itself.
+func (p *pkgGen) imports() ([]string, error) {
+	set := map[string]bool{}
+	for _, f := range slices.Concat(p.files, p.testFiles, p.xtestFiles) {
+		for _, s := range f.file.Imports {
+			set[strings.Trim(s.Path.Value, `"`)] = true
+		}
+	}
+	for _, path := range slices.Concat(p.goFiles, p.testGo, p.xtestGo) {
+		src, err := p.read(path)
+		if err != nil {
+			return nil, err
+		}
+		gf, err := goparser.ParseFile(token.NewFileSet(), path, src, goparser.ImportsOnly)
+		if gf == nil {
+			return nil, err
+		}
+		for _, s := range gf.Imports {
+			set[strings.Trim(s.Path.Value, `"`)] = true
+		}
+	}
+	for _, path := range lowered {
+		set[path] = true
+	}
+	delete(set, p.path)
+	delete(set, "C")
+	delete(set, "unsafe")
+	return slices.Sorted(maps.Keys(set)), nil
 }
 
 // variant returns a pkgGen for another set of files: the package with its

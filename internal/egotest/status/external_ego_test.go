@@ -5,6 +5,7 @@ package status_test
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/effect-go/effect-go/internal/egotest/status"
@@ -12,7 +13,7 @@ import (
 
 // An external test in effect-go: it matches the package's error set.
 //
-//line external_test.ego:9
+//line external_test.ego:10
 func TestExternal(t *testing.T) {
 	for amount, want := range map[int]string{0: "declined: nothing to charge", 500: "gateway failed: timeout", 5: "ok"} {
 		_, err := status.Pay(amount)
@@ -28,9 +29,17 @@ func TestExternal(t *testing.T) {
 		} else {
 			panic(err)
 		}
-//line external_test.ego:19
+//line external_test.ego:20
 		if got != want {
 			t.Errorf("Pay(%d): %s, want %s", amount, got, want)
 		}
+	}
+}
+
+// The external test and the package share the standard library's types.
+func TestSharedTypes(t *testing.T) {
+	var h http.Handler = status.Handler()
+	if h == nil {
+		t.Fatal("no handler")
 	}
 }

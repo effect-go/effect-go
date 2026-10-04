@@ -1,6 +1,7 @@
 package status_test
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/effect-go/effect-go/internal/egotest/status"
@@ -19,5 +20,13 @@ func TestExternal(t *testing.T) {
 		if got != want {
 			t.Errorf("Pay(%d): %s, want %s", amount, got, want)
 		}
+	}
+}
+
+// The external test and the package share the standard library's types.
+func TestSharedTypes(t *testing.T) {
+	var h http.Handler = status.Handler()
+	if h == nil {
+		t.Fatal("no handler")
 	}
 }

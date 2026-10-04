@@ -217,3 +217,6 @@ func Both(a, b string) (int, error) {
 	}
 	return x + y, err
 }
+
+// Handler returns a net/http type, for the external test.
+func Handler() http.Handler { return http.NotFoundHandler() }
