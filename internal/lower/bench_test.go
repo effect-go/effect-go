@@ -37,7 +37,7 @@ effect (s *S%[1]d) Both(a, b int) (int, error) {
 	return z, nil
 }
 
-func Code%[1]d(err error) int {
+func Code%[1]d(err E%[1]d) int {
 	return match err { nil => 0; A%[1]d(_) => 1; B%[1]d(_) => 2 }
 }
 
