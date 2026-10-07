@@ -6,6 +6,8 @@ import (
 	"errors"
 	"slices"
 	"testing"
+
+	"github.com/effect-go/effect-go/internal/egotest/regress/disk"
 )
 
 func TestErrKept(t *testing.T) {
@@ -27,10 +29,10 @@ func TestPercent(t *testing.T) {
 	if s := PercentF(); s != "100%" {
 		t.Errorf("f-string: %q", s)
 	}
-	if s := (Full{}).Error(); s != "disk 100% full" {
+	if s := (disk.Full{}).Error(); s != "disk 100% full" {
 		t.Errorf("case message: %q", s)
 	}
-	if s := (Gone{}).Error(); s != "gone" {
+	if s := (disk.Gone{}).Error(); s != "gone" {
 		t.Errorf("default message: %q", s)
 	}
 }

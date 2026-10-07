@@ -29,7 +29,8 @@ func ElseKeepsErr(a, b string) (int, error) {
 
 // ElseKeepsNamedErr: nor a named err result.
 func ElseKeepsNamedErr(b string) (n int, err error) {
-	n = strconv.Atoi(b) else 7
+	y := strconv.Atoi(b) else 7
+	n = y
 	return
 }
 
@@ -40,12 +41,6 @@ func Percent() (string, error) {
 
 // PercentF is the same with an f-string.
 func PercentF() string { return f"100%" }
-
-// Disk has cases without fields, so no message needs fmt.
-error Disk {
-	Full{} "disk 100% full"
-	Gone{}
-}
 
 // Sentinel: a match on an error with only sentinel arms uses errors.Is.
 func Sentinel(err error) string {

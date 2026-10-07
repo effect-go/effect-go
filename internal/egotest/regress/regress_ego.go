@@ -43,12 +43,12 @@ func ElseKeepsErr(a, b string) (int, error) {
 
 // ElseKeepsNamedErr: nor a named err result.
 func ElseKeepsNamedErr(b string) (n int, err error) {
-	if v, err2 := strconv.Atoi(b); err2 != nil {
-		n = 7
-	} else {
-		n = v
+	y, err2 := strconv.Atoi(b)
+	if err2 != nil {
+		y = 7
 	}
 //line regress.ego:33
+	n = y
 	return
 }
 
@@ -60,45 +60,7 @@ func Percent() (string, error) {
 // PercentF is the same with an f-string.
 func PercentF() string { return "100%" }
 
-// Disk has cases without fields, so no message needs fmt.
-type Disk interface {
-	error
-	isDisk()
-}
-
-type Full struct{}
-
-func (Full) isDisk() {}
-
-func (e Full) Error() string { return "disk 100% full" }
-
-// As lets pointers to Full match as Full.
-func (e Full) As(target any) bool {
-	if t, ok := target.(*Full); ok {
-		*t = e
-		return true
-	}
-	return false
-}
-
-type Gone struct{}
-
-func (Gone) isDisk() {}
-
-func (e Gone) Error() string { return "gone" }
-
-// As lets pointers to Gone match as Gone.
-func (e Gone) As(target any) bool {
-	if t, ok := target.(*Gone); ok {
-		*t = e
-		return true
-	}
-	return false
-}
-
 // Sentinel: a match on an error with only sentinel arms uses errors.Is.
-//
-//line regress.ego:51
 func Sentinel(err error) string {
 	var v string
 	if err == nil {
@@ -111,7 +73,7 @@ func Sentinel(err error) string {
 	return v
 }
 
-//line regress.ego:59
+//line regress.ego:54
 type User struct{ Name string }
 
 // OptAssign: x = u?.Name gives the zero value when u is nil.
@@ -124,7 +86,7 @@ func OptAssign(us []*User) []string {
 		} else {
 			name = ""
 		}
-//line regress.ego:67
+//line regress.ego:62
 		out = append(out, name)
 	}
 	return out
@@ -170,7 +132,7 @@ func (e Unavailable) As(target any) bool {
 
 // inTx runs fn as a transaction would: its error comes back as an error.
 //
-//line regress.ego:79
+//line regress.ego:74
 func inTx(fn func() error) error { return fn() }
 
 // PassThrough: check … as Unavailable lets a case of the set through.
@@ -181,13 +143,13 @@ func PassThrough(slug string) error {
 		}
 		return Unavailable{Cause: err}
 	}
-//line regress.ego:84
+//line regress.ego:79
 	if err := inTx(func() error { return io.EOF }); err != nil {
 		if _, ok := errors.AsType[ArticleError](err); ok {
 			return err
 		}
 		return Unavailable{Cause: err}
 	}
-//line regress.ego:85
+//line regress.ego:80
 	return nil
 }

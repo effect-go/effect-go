@@ -1,0 +1,8 @@
+// Package disk has an error set whose cases have no fields, and nothing
+// else: no message needs fmt, so the generated Go mustn't import it.
+package disk
+
+error Disk {
+	Full{} "disk 100% full"
+	Gone{}
+}
