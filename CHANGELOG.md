@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `must (x).M()` and `check (x).M()`, with a space, are the keywords before
+  a parenthesized expression (also `&`, `*` and `[`); they were taken for
+  calls of functions named `must` and `check`, and `ego fmt` then removed
+  the space. `must(x)` still calls a function named `must`. Reported by
+  goncini.
+
 ## v0.3.0 (2026-10-07)
 
 From a review of the whole codebase. **To update:** run `ego generate

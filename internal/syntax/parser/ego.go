@@ -16,6 +16,20 @@ func (p *parser) peek() token.Token {
 	return tok
 }
 
+// checkFollows reports whether check or must at the current position is
+// the keyword: before a name, or before ( & * [ after a space, as in
+// must (&w).Run(). check(x) stays a call of a function named check.
+func (p *parser) checkFollows() bool {
+	pos, tok, _ := p.scanner.Lookahead().ScanToken()
+	switch tok {
+	case token.IDENT:
+		return true
+	case token.LPAREN, token.AND, token.MUL, token.LBRACK:
+		return int(pos) > int(p.pos)+len(p.lit)
+	}
+	return false
+}
+
 // startsOperand reports whether tok can follow a contextual keyword such as
 // check, fail or match. It's what makes "check x" new syntax while
 // "check(x)", "check := 1" and "check.x" stay ordinary Go.
@@ -32,7 +46,7 @@ func startsOperand(tok token.Token) bool {
 func (p *parser) parseEgoOperand() ast.Expr {
 	switch p.lit {
 	case "check", "must":
-		if p.peek() == token.IDENT {
+		if p.checkFollows() {
 			return p.parseCheck()
 		}
 	case "match":

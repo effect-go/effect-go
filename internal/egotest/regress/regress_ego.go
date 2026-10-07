@@ -280,3 +280,23 @@ func LocalNames(s string) (int, error) {
 //line regress.ego:155
 	return n + fmt, nil
 }
+
+// Counter has a method to call on a parenthesized receiver.
+type Counter struct{ N string }
+
+func (c *Counter) Value() (int, error) { return strconv.Atoi(c.N) }
+
+// ParenReceiver: must and check before a parenthesized expression.
+func ParenReceiver(s string) (int, error) {
+	a, err := (&Counter{N: "1"}).Value()
+	if err != nil {
+		panic(err)
+	}
+//line regress.ego:166
+	b, err := (&Counter{N: s}).Value()
+	if err != nil {
+		return 0, err
+	}
+//line regress.ego:167
+	return a + b, nil
+}

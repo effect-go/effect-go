@@ -125,3 +125,9 @@ func TestLocalNames(t *testing.T) {
 		t.Error("no error")
 	}
 }
+
+func TestParenReceiver(t *testing.T) {
+	if n, err := ParenReceiver("2"); n != 3 || err != nil {
+		t.Errorf("got %d %v", n, err)
+	}
+}

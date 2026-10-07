@@ -17,7 +17,7 @@
 | `check err` | return `err` if it isn't nil (for an error value you already have) |
 | `fail NotFound{ID: id}` / `fail "bad {id}"` | return this error, with zero values for the other results |
 
-`check` and `must` only start a statement or the right side of `=`/`:=`. `check f()` and `must f()` alone drop the other results. A function using `check` or `fail` must return an `error` (or an error set) last. A function that returns an error set returns only its cases: every `check` needs `as Case` unless the callee returns the same set, and `return` gives `nil`, a case, or a call returning the set. `timeout` and `each` can fail with a cancellation of their own, so they need `as Case` too: `check each(ids, 4, s.Get) as Storage` passes `Get`'s errors through and makes the cancellation a `Storage`.
+`check` and `must` only start a statement or the right side of `=`/`:=`. Before a parenthesized expression they need a space, `must (&w).Run()`: `must(x)` calls a function named `must`. `check f()` and `must f()` alone drop the other results. A function using `check` or `fail` must return an `error` (or an error set) last. A function that returns an error set returns only its cases: every `check` needs `as Case` unless the callee returns the same set, and `return` gives `nil`, a case, or a call returning the set. `timeout` and `each` can fail with a cancellation of their own, so they need `as Case` too: `check each(ids, 4, s.Get) as Storage` passes `Get`'s errors through and makes the cancellation a `Storage`.
 
 ## Error sets, enums, match
 
