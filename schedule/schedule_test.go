@@ -24,18 +24,6 @@ func delays(s Schedule, n int) []time.Duration {
 	return out
 }
 
-func equal(a, b []time.Duration) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func TestShapes(t *testing.T) {
 	ms := time.Millisecond
 	cases := []struct {
@@ -51,7 +39,7 @@ func TestShapes(t *testing.T) {
 		{"capped", Max(Exponential(100*ms), Recurs(4)).UpTo(250 * ms), []time.Duration{100 * ms, 200 * ms, 250 * ms, 250 * ms}},
 	}
 	for _, c := range cases {
-		if got := delays(c.s, 4); !equal(got, c.want) {
+		if got := delays(c.s, 4); !slices.Equal(got, c.want) {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
 	}
@@ -165,5 +153,42 @@ func TestRepeat(t *testing.T) {
 		if err != errFlaky {
 			t.Fatalf("failure: %v", err)
 		}
+
+		// Delayed survives the methods after it, and While doesn't judge
+		// repeats, which have no error.
+		at, start = nil, time.Now()
+		ctx, cancel = context.WithTimeout(t.Context(), 150*time.Second)
+		defer cancel()
+		n, err = Repeat(ctx, Max(Spaced(time.Minute).Delayed()).UpTo(time.Hour).While(func(error) bool { return false }), task)
+		if err != nil || n != 2 || !slices.Equal(at, []time.Duration{time.Minute, 2 * time.Minute}) {
+			t.Fatalf("Delayed, then methods: got %d %v, calls at %v", n, err, at)
+		}
+
+		// A call that ctx's end interrupts stops the repeat, without an error.
+		ctx, cancel = context.WithTimeout(t.Context(), 90*time.Second)
+		defer cancel()
+		n, err = Repeat(ctx, Spaced(time.Minute), func(ctx context.Context) (int, error) {
+			if time.Since(start) < time.Hour {
+				select {
+				case <-time.After(time.Hour):
+				case <-ctx.Done():
+					return 0, ctx.Err()
+				}
+			}
+			return 1, nil
+		})
+		if err != nil {
+			t.Fatalf("interrupted call: %v", err)
+		}
 	})
+}
+
+// Jitter on a delay near the largest Duration saturates instead of
+// overflowing into a negative one.
+func TestJitterSaturates(t *testing.T) {
+	for range 100 {
+		if d, _ := Exponential(time.Second).Jittered().Next(80, nil); d <= 0 {
+			t.Fatalf("delay %v", d)
+		}
+	}
 }

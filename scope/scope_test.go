@@ -3,6 +3,7 @@ package scope
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -71,11 +72,15 @@ func TestEachKeepsOrderAndLimit(t *testing.T) {
 		var running, most atomic.Int32
 		start := time.Now()
 		got, err := Each(t.Context(), []int{1, 2, 3, 4, 5, 6}, 2, func(ctx context.Context, n int) (int, error) {
-			most.Store(max(most.Load(), running.Add(1)))
+			for n := running.Add(1); ; {
+				if m := most.Load(); n <= m || most.CompareAndSwap(m, n) {
+					break
+				}
+			}
 			defer running.Add(-1)
 			return sleep(time.Duration(n)*10*time.Millisecond, n*n, nil)(ctx)
 		})
-		if err != nil || len(got) != 6 || got[0] != 1 || got[5] != 36 {
+		if err != nil || !slices.Equal(got, []int{1, 4, 9, 16, 25, 36}) {
 			t.Fatalf("got %v %v", got, err)
 		}
 		if most.Load() != 2 {
@@ -86,6 +91,14 @@ func TestEachKeepsOrderAndLimit(t *testing.T) {
 		}
 		if got, err := Each(t.Context(), []int(nil), 4, func(context.Context, int) (int, error) { return 0, errA }); got == nil || len(got) != 0 || err != nil {
 			t.Fatalf("no items: %v %v", got, err)
+		}
+		// A limit below 1 means no limit: all six at once.
+		start = time.Now()
+		Each(t.Context(), []int{1, 1, 1, 1, 1, 1}, 0, func(ctx context.Context, n int) (int, error) {
+			return sleep(10*time.Millisecond, n, nil)(ctx)
+		})
+		if took := time.Since(start); took != 10*time.Millisecond {
+			t.Fatalf("limit 0 took %v, want 10ms", took)
 		}
 	})
 }
@@ -183,6 +196,18 @@ func TestRaceIgnoresEarlyFailure(t *testing.T) {
 	})
 }
 
+// Cancelled from outside, Race reports the cancellation once.
+func TestRaceCancelledFromOutside(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		time.AfterFunc(10*time.Millisecond, cancel)
+		_, err := Race(ctx, sleep(time.Second, 0, nil), sleep(time.Second, 0, nil), sleep(time.Second, 0, nil))
+		if err != context.Canceled {
+			t.Fatalf("err = %v", err)
+		}
+	})
+}
+
 func TestRaceReturnsAllFailures(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		_, err := Race(t.Context(), sleep(10*time.Millisecond, 0, errA), sleep(20*time.Millisecond, 0, errB))
@@ -204,6 +229,14 @@ func TestTimeout(t *testing.T) {
 		v, err := Timeout(t.Context(), time.Second, sleep(100*time.Millisecond, 7, nil))
 		if err != nil || v != 7 {
 			t.Fatalf("got %v %v", v, err)
+		}
+		// A task that fails on its own after the deadline keeps its error.
+		_, err = Timeout(t.Context(), 10*time.Millisecond, func(ctx context.Context) (int, error) {
+			time.Sleep(20 * time.Millisecond)
+			return 0, errA
+		})
+		if err != errA {
+			t.Fatalf("own error: %v", err)
 		}
 	})
 }
@@ -295,16 +328,68 @@ func TestInterrupt(t *testing.T) {
 	})
 }
 
-func TestForkAfterCloseDoesNotLeak(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		var s *Scope
-		Run(t.Context(), func(sc *Scope) (int, error) { s = sc; return 0, nil })
-		defer func() {
-			if recover() == nil {
-				t.Fatal("Fork on a closed scope should panic")
-			}
-		}()
-		Fork(s, sleep(time.Hour, 0, nil))
+// Once the scope is closing, Fork starts nothing and returns an
+// interrupted fiber: a fiber that forks until its context ends can race
+// with the scope closing.
+func TestForkOnClosingScope(t *testing.T) {
+	var s *Scope
+	Run(t.Context(), func(sc *Scope) (int, error) { s = sc; return 0, nil })
+	if _, err := Fork(s, sleep(time.Hour, 0, nil)).Join(); KindOf(err) != Interrupt {
+		t.Fatalf("Fork after Run: %v", err)
+	}
+	for range 200 {
+		Run(t.Context(), func(s *Scope) (int, error) {
+			Fork(s, func(ctx context.Context) (int, error) {
+				for ctx.Err() == nil {
+					Fork(s, func(context.Context) (int, error) { return 0, nil })
+				}
+				return 0, nil
+			})
+			return 0, nil
+		})
+	}
+}
+
+// A release that panics doesn't keep the others from running, and its
+// panic comes back once they have.
+func TestReleasePanic(t *testing.T) {
+	released := false
+	defer func() {
+		if r := recover(); !released || r == nil {
+			t.Fatalf("released %v, recovered %v", released, r)
+		}
+	}()
+	Run(t.Context(), func(s *Scope) (int, error) {
+		s.Defer(func(context.Context) error { released = true; return nil })
+		s.Defer(func(context.Context) error { panic("release failed") })
+		return 0, nil
+	})
+}
+
+// After the scope released its resources, Defer releases at once and
+// Acquire opens nothing.
+func TestLateRelease(t *testing.T) {
+	var s *Scope
+	Run(t.Context(), func(sc *Scope) (int, error) { s = sc; return 0, nil })
+	released, opened := false, false
+	s.Defer(func(context.Context) error { released = true; return nil })
+	_, err := Acquire(s, func(context.Context) (int, error) { opened = true; return 1, nil }, func(context.Context, int) error { return nil })
+	if !released || opened || KindOf(err) != Interrupt {
+		t.Fatalf("released %v, opened %v, err %v", released, opened, err)
+	}
+}
+
+// A scope that lives as long as the program doesn't keep the fibers that
+// finished.
+func TestFinishedFibersAreForgotten(t *testing.T) {
+	Run(t.Context(), func(s *Scope) (int, error) {
+		for range 100 {
+			Fork(s, func(context.Context) (int, error) { return 0, nil }).Join()
+		}
+		if n := len(s.fibers); n != 0 {
+			t.Fatalf("%d finished fibers kept", n)
+		}
+		return 0, nil
 	})
 }
 

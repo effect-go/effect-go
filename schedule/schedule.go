@@ -7,6 +7,7 @@ package schedule
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -26,8 +27,9 @@ type Schedule struct {
 	delayed bool
 }
 
-// Next reports the delay before the attempt that follows the n-th failure,
-// and whether there should be one.
+// Next reports the delay before the attempt that follows the n-th one, and
+// whether there should be one. Retry passes the n-th failure's error;
+// Repeat passes nil.
 func (s Schedule) Next(n int, err error) (time.Duration, bool) {
 	if s.step == nil {
 		return 0, false
@@ -60,7 +62,7 @@ func Recurs(n int) Schedule {
 // Min continues while any of the schedules continues, and waits for the
 // shortest of their delays.
 func Min(ss ...Schedule) Schedule {
-	return Schedule{step: func(n int, err error) (time.Duration, bool) {
+	return Schedule{delayed: anyDelayed(ss), step: func(n int, err error) (time.Duration, bool) {
 		var best time.Duration
 		ok := false
 		for _, s := range ss {
@@ -76,7 +78,7 @@ func Min(ss ...Schedule) Schedule {
 // of their delays. Max(Exponential(100*time.Millisecond), Recurs(5)) backs
 // off exponentially, five times.
 func Max(ss ...Schedule) Schedule {
-	return Schedule{step: func(n int, err error) (time.Duration, bool) {
+	return Schedule{delayed: anyDelayed(ss), step: func(n int, err error) (time.Duration, bool) {
 		var worst time.Duration
 		for _, s := range ss {
 			d, more := s.Next(n, err)
@@ -89,49 +91,71 @@ func Max(ss ...Schedule) Schedule {
 	}}
 }
 
+func anyDelayed(ss []Schedule) bool {
+	for _, s := range ss {
+		if s.delayed {
+			return true
+		}
+	}
+	return false
+}
+
+// with returns a schedule with another step, keeping Delayed.
+func (s Schedule) with(step func(n int, err error) (time.Duration, bool)) Schedule {
+	return Schedule{step: step, delayed: s.delayed}
+}
+
 // Jittered spreads each delay randomly between 80% and 120%, so clients that
 // failed together don't retry together.
 func (s Schedule) Jittered() Schedule {
-	return Schedule{step: func(n int, err error) (time.Duration, bool) {
+	return s.with(func(n int, err error) (time.Duration, bool) {
 		d, ok := s.Next(n, err)
-		return time.Duration(float64(d) * (0.8 + 0.4*rand.Float64())), ok
-	}}
+		// Past math.MaxInt64, converting back to a Duration is undefined
+		// (negative on amd64): saturate, as Exponential does.
+		if f := float64(d) * (0.8 + 0.4*rand.Float64()); f < math.MaxInt64 {
+			d = time.Duration(f)
+		} else {
+			d = math.MaxInt64
+		}
+		return d, ok
+	})
 }
 
 // While retries only errors for which retryable returns true. Use it to stop
-// on errors that won't go away, such as a rejected request.
+// on errors that won't go away, such as a rejected request. It doesn't
+// apply to Repeat, which has no error to judge.
 func (s Schedule) While(retryable func(error) bool) Schedule {
-	return Schedule{step: func(n int, err error) (time.Duration, bool) {
-		if !retryable(err) {
+	return s.with(func(n int, err error) (time.Duration, bool) {
+		if err != nil && !retryable(err) {
 			return 0, false
 		}
 		return s.Next(n, err)
-	}}
+	})
 }
 
 // UpTo caps each delay at d.
 func (s Schedule) UpTo(d time.Duration) Schedule {
-	return Schedule{step: func(n int, err error) (time.Duration, bool) {
+	return s.with(func(n int, err error) (time.Duration, bool) {
 		next, ok := s.Next(n, err)
 		return min(next, d), ok
-	}}
+	})
 }
 
 // Tap calls fn before each retry with the number of failures so far, the
 // last error and the delay before the next attempt: for logs and metrics.
 // Put it last, after Jittered or UpTo, so it sees the delay Retry waits.
 func (s Schedule) Tap(fn func(n int, err error, wait time.Duration)) Schedule {
-	return Schedule{step: func(n int, err error) (time.Duration, bool) {
+	return s.with(func(n int, err error) (time.Duration, bool) {
 		d, ok := s.Next(n, err)
 		if ok {
 			fn(n, err, d)
 		}
 		return d, ok
-	}}
+	})
 }
 
 // Delayed makes Repeat wait for the schedule's first delay before the first
-// call too, as a time.Ticker does. Put it last: other methods drop it.
+// call too, as a time.Ticker does.
 func (s Schedule) Delayed() Schedule {
 	s.delayed = true
 	return s
@@ -166,6 +190,10 @@ func Repeat[T any](ctx context.Context, s Schedule, task func(context.Context) (
 		}
 		v, err := task(ctx)
 		if err != nil {
+			// A call that ctx's end interrupted is a stop, not a failure.
+			if ctx.Err() != nil && (errors.Is(err, ctx.Err()) || errors.Is(err, context.Cause(ctx))) {
+				return last, nil
+			}
 			var zero T
 			return zero, err
 		}

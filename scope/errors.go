@@ -31,8 +31,9 @@ func (k Kind) String() string {
 	return fmt.Sprintf("Kind(%d)", uint8(k))
 }
 
-// KindOf classifies an error returned by a task. Any error that isn't a
-// panic, a timeout or a cancellation is a Fail.
+// KindOf classifies an error returned by a task: a *Panic is a Die, a
+// cancellation is an Interrupt, and any other error, a *TimeoutError
+// included, is a Fail. err must not be nil.
 func KindOf(err error) Kind {
 	if _, ok := errors.AsType[*Panic](err); ok {
 		return Die
@@ -86,7 +87,7 @@ var ErrInterrupted error = &interrupted{"scope: interrupted"}
 var (
 	errSibling error = &interrupted{"scope: a sibling task failed"}
 	errLost    error = &interrupted{"scope: another task won the race"}
-	errClosed  error = &interrupted{"scope: the scope closed"}
+	errClosed  error = &interrupted{"scope: closed"}
 )
 
 func isInterrupt(err error) bool { return KindOf(err) == Interrupt }

@@ -10,9 +10,11 @@ package trace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
@@ -25,7 +27,8 @@ func Start(ctx context.Context, name string) (context.Context, oteltrace.Span) {
 	return otel.Tracer(Instrumentation).Start(ctx, name)
 }
 
-// End ends span, recording *err as the span's error if it isn't nil. Defer it
+// End ends span, recording *err as the span's error if it isn't nil; a
+// cancellation is an "interrupted" event instead, as the span didn't fail. Defer it
 // directly (defer trace.End(span, &err)): it then also records a panic on the
 // span and lets the panic continue, with its original stack.
 func End(span oteltrace.Span, err *error) {
@@ -35,7 +38,13 @@ func End(span oteltrace.Span, err *error) {
 		span.End()
 		panic(r)
 	}
-	if err != nil && *err != nil {
+	switch {
+	case err == nil || *err == nil:
+	case errors.Is(*err, context.Canceled):
+		// Interrupted, as a race's loser or a failed task's sibling: not
+		// a failure of this span's own.
+		span.AddEvent("interrupted", oteltrace.WithAttributes(attribute.String("reason", (*err).Error())))
+	default:
 		span.RecordError(*err)
 		span.SetStatus(codes.Error, (*err).Error())
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime/debug"
 	"runtime/pprof"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -116,12 +117,16 @@ func All[T any](ctx context.Context, tasks ...Task[T]) ([]T, error) {
 // Each calls f on every item, at most limit at a time, and returns the
 // results in the order of items. Failures work as in All: the first one
 // cancels the calls in progress and the items not yet started, and the
-// error holds every real failure. A limit below 1 means one at a time.
+// error holds every real failure. A limit below 1 means no limit, as in
+// errgroup.
 func Each[T, R any](ctx context.Context, items []T, limit int, f func(context.Context, T) (R, error)) ([]R, error) {
 	res := make([]R, len(items))
 	var next atomic.Int64
 	g := newGroup(ctx)
-	for range min(max(limit, 1), len(items)) {
+	if limit < 1 {
+		limit = len(items)
+	}
+	for range min(limit, len(items)) {
 		g.spawn(func(ctx context.Context) error {
 			for {
 				i := int(next.Add(1)) - 1
@@ -206,6 +211,7 @@ func Race[T any](ctx context.Context, tasks ...Task[T]) (T, error) {
 	if len(tasks) == 0 {
 		panic("scope.Race needs at least one task")
 	}
+	parent := ctx
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	var (
@@ -213,10 +219,10 @@ func Race[T any](ctx context.Context, tasks ...Task[T]) (T, error) {
 		mu   sync.Mutex
 		won  bool
 		val  T
-		errs []error
+		errs = make([]error, len(tasks)) // in the order of tasks
 		pnc  *Panic
 	)
-	for _, t := range tasks {
+	for i, t := range tasks {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -237,7 +243,7 @@ func Race[T any](ctx context.Context, tasks ...Task[T]) (T, error) {
 				won, val = true, v
 				cancel(errLost)
 			case err != nil && !(won && isInterrupt(err)):
-				errs = append(errs, err)
+				errs[i] = err
 			}
 		}()
 	}
@@ -249,6 +255,11 @@ func Race[T any](ctx context.Context, tasks ...Task[T]) (T, error) {
 		return val, nil
 	}
 	var zero T
+	// Cancelled from outside, every task reports it: report it once.
+	if parent.Err() != nil && !slices.ContainsFunc(errs, func(err error) bool { return err != nil && !isInterrupt(err) }) {
+		return zero, context.Cause(parent)
+	}
+	errs = slices.DeleteFunc(errs, func(err error) bool { return err == nil })
 	if len(errs) == 1 {
 		return zero, errs[0]
 	}
@@ -256,14 +267,16 @@ func Race[T any](ctx context.Context, tasks ...Task[T]) (T, error) {
 }
 
 // Timeout runs task with a deadline. If the task stops because the deadline
-// passed, Timeout returns a *TimeoutError. Cancellation is cooperative: a
+// passed, returning an error that matches context.DeadlineExceeded,
+// Timeout returns a *TimeoutError; other errors are returned as they are. Cancellation is cooperative: a
 // task that ignores its context runs to completion.
 func Timeout[T any](ctx context.Context, d time.Duration, task Task[T]) (T, error) {
 	terr := &TimeoutError{After: d}
 	ctx, cancel := context.WithTimeoutCause(ctx, d, terr)
 	defer cancel()
 	v, err := task(ctx)
-	if err != nil && ctx.Err() != nil && context.Cause(ctx) == terr {
+	// The task's own error stays, unless it is the deadline's.
+	if err != nil && context.Cause(ctx) == terr && errors.Is(err, context.DeadlineExceeded) {
 		var zero T
 		return zero, terr
 	}

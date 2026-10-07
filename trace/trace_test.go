@@ -3,7 +3,9 @@ package trace
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -82,5 +84,37 @@ func TestLogHandler(t *testing.T) {
 	want := `"trace_id":"` + span.SpanContext().TraceID().String() + `","span_id":"` + span.SpanContext().SpanID().String() + `"`
 	if len(lines) != 2 || !strings.Contains(lines[0], want) || !strings.Contains(lines[0], `"app":"shop"`) || strings.Contains(lines[1], "trace_id") {
 		t.Fatalf("logged:\n%s\nwant %s on the first line only", buf.String(), want)
+	}
+}
+
+// A span whose function was interrupted isn't an error: it gets an event.
+func TestInterruptedSpan(t *testing.T) {
+	rec := record(t)
+	func() {
+		_, span := Start(t.Context(), "Race.Loser")
+		err := fmt.Errorf("fetch: %w", context.Canceled)
+		End(span, &err)
+	}()
+	s := rec.Ended()[0]
+	if s.Status().Code != codes.Unset || len(s.Events()) != 1 || s.Events()[0].Name != "interrupted" {
+		t.Fatalf("status %v, events %v", s.Status(), s.Events())
+	}
+}
+
+// The IDs stay at the top level of a record logged inside a group.
+func TestLogHandlerGroup(t *testing.T) {
+	record(t)
+	var buf bytes.Buffer
+	log := slog.New(LogHandler(slog.NewJSONHandler(&buf, nil))).With("app", "shop").WithGroup("req").With("id", 1)
+	ctx, span := Start(t.Context(), "Shop.Checkout")
+	defer span.End()
+	log.InfoContext(ctx, "charged", "amount", 3)
+	var line map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := line["req"].(map[string]any)
+	if line["trace_id"] != span.SpanContext().TraceID().String() || line["app"] != "shop" || req["id"] != 1.0 || req["amount"] != 3.0 {
+		t.Fatalf("logged %s", buf.Bytes())
 	}
 }

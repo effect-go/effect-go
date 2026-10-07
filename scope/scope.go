@@ -1,7 +1,9 @@
-// Package scope runs tasks concurrently without leaking them. Every
-// goroutine it starts has stopped by the time the call that started it
-// returns, a failure cancels the work that depends on it, and a panic comes
-// back to the caller with its original stack.
+// Package scope runs tasks concurrently without leaking them. The
+// goroutines that All, Race, Each and Timeout start have stopped when they
+// return, and the fibers forked in a scope have stopped when its Run
+// returns (unless they outlive a StopTimeout). A failure cancels the work
+// that depends on it, and a panic comes back to the caller with its
+// original stack.
 //
 // Cancellation is cooperative, as everywhere in Go: a task stops early only
 // if it watches its context.
@@ -24,8 +26,9 @@ type Scope struct {
 	cancel   context.CancelCauseFunc
 	wg       sync.WaitGroup
 	mu       sync.Mutex
-	closed   bool
-	fibers   []joinable
+	closed   bool                  // no more fibers: close has begun
+	released bool                  // no more resources: they were released
+	fibers   map[joinable]struct{} // running, or holding a panic
 	releases []func(context.Context) error
 	stopIn   time.Duration // 0: wait for fibers indefinitely
 }
@@ -59,7 +62,7 @@ func (s *Scope) Context() context.Context { return s.ctx }
 // and the errors of closing it (such as a StuckError) are dropped; otherwise
 // it re-panics with the panic of a fiber nobody joined, if any.
 func Run[T any](ctx context.Context, body func(s *Scope) (T, error), opts ...Option) (res T, err error) {
-	s := &Scope{parent: ctx}
+	s := &Scope{parent: ctx, fibers: map[joinable]struct{}{}}
 	for _, o := range opts {
 		o(s)
 	}
@@ -81,15 +84,15 @@ func Run[T any](ctx context.Context, body func(s *Scope) (T, error), opts ...Opt
 }
 
 // close stops the fibers and releases the resources. It returns the panic
-// of a fiber nobody joined, which would otherwise be lost, and the errors of
-// releasing.
+// of a fiber nobody joined, or else of a release, which would otherwise be
+// lost, and the errors of releasing.
 func (s *Scope) close() (*Panic, error) {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
 	s.cancel(errClosed)
 	var stuck error
-	if s.stopIn > 0 && !s.allStopped() {
+	if s.stopIn > 0 && s.running() > 0 {
 		done := make(chan struct{})
 		go func() { s.wg.Wait(); close(done) }()
 		t := time.NewTimer(s.stopIn)
@@ -97,57 +100,78 @@ func (s *Scope) close() (*Panic, error) {
 		case <-done:
 			t.Stop()
 		case <-t.C:
-			n := 0
-			for _, f := range s.fibers {
-				if !f.stopped() {
-					n++
-				}
-			}
-			stuck = &StuckError{Fibers: n, After: s.stopIn}
+			stuck = &StuckError{Fibers: s.running(), After: s.stopIn}
 		}
 	} else {
 		s.wg.Wait()
 	}
 
-	// Resources may need I/O to close, so they get a context that keeps the
-	// parent's values but isn't cancelled.
-	ctx := context.WithoutCancel(s.parent)
-	var errs []error
-	for i := len(s.releases) - 1; i >= 0; i-- {
-		if err := s.releases[i](ctx); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	err := errors.Join(append([]error{stuck}, errs...)...)
-	for _, f := range s.fibers {
+	s.mu.Lock()
+	s.released = true
+	releases := s.releases
+	var panicked *Panic
+	for f := range s.fibers {
 		if p := f.unjoinedPanic(); p != nil {
-			return p, err
+			panicked = p
+			break
 		}
 	}
-	return nil, err
+	s.mu.Unlock()
+	// Resources may need I/O to close, so they get a context that keeps the
+	// parent's values but isn't cancelled. A release that panics doesn't
+	// stop the others.
+	ctx := context.WithoutCancel(s.parent)
+	errs := []error{stuck}
+	for i := len(releases) - 1; i >= 0; i-- {
+		err := protect(ctx, releases[i])
+		if p, ok := err.(*Panic); ok {
+			if panicked == nil {
+				panicked = p
+			}
+			continue
+		}
+		errs = append(errs, err)
+	}
+	return panicked, errors.Join(errs...)
 }
 
-// allStopped reports whether every fiber has stopped, as is usual when the
-// scope closes: then waiting needs no timer. Only called once closed is set.
-func (s *Scope) allStopped() bool {
-	for _, f := range s.fibers {
+// running returns how many fibers are still running.
+func (s *Scope) running() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for f := range s.fibers {
 		if !f.stopped() {
-			return false
+			n++
 		}
 	}
-	return true
+	return n
 }
 
-// add registers a fiber about to start. Counting and listing it under one
-// lock means close, once it has set closed, sees every fiber.
-func (s *Scope) add(f joinable) {
+// add registers a fiber about to start, reporting false if the scope is
+// closing. Counting and listing it under one lock means close, once it has
+// set closed, sees every fiber.
+func (s *Scope) add(f joinable) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		panic("scope: Fork after Run returned")
+		return false
 	}
 	s.wg.Add(1)
-	s.fibers = append(s.fibers, f)
+	s.fibers[f] = struct{}{}
+	return true
+}
+
+// done forgets a fiber that stopped, unless it panicked: close may need to
+// re-panic with it. A scope that runs for the whole program, as in Main,
+// would otherwise keep every fiber it ever forked.
+func (s *Scope) done(f joinable, err error) {
+	if _, ok := err.(*Panic); ok {
+		return
+	}
+	s.mu.Lock()
+	delete(s.fibers, f)
+	s.mu.Unlock()
 }
 
 type joinable interface {
@@ -166,17 +190,25 @@ type Fiber[T any] struct {
 }
 
 // Fork starts task in the background. It stops when the scope closes, if
-// it hasn't finished before.
+// it hasn't finished before. Once the scope is closing, Fork starts
+// nothing and returns a fiber already interrupted, so a loop that forks
+// until its context ends needs no special case.
 func Fork[T any](s *Scope, task Task[T]) *Fiber[T] {
 	ctx, cancel := context.WithCancelCause(s.ctx)
 	f := &Fiber[T]{done: make(chan struct{}), cancel: cancel}
-	s.add(f)
+	if !s.add(f) {
+		cancel(nil)
+		f.err = errClosed
+		close(f.done)
+		return f
+	}
 	go func() {
 		defer s.wg.Done()
 		defer close(f.done)
 		defer cancel(nil)
 		label(ctx)
 		f.err = protect(ctx, func(ctx context.Context) (err error) { f.val, err = task(ctx); return })
+		s.done(f, f.err)
 	}()
 	return f
 }
@@ -194,7 +226,8 @@ func (f *Fiber[T]) Join() (T, error) {
 	return f.val, f.err
 }
 
-// Interrupt cancels the fiber with cause and waits for it to stop.
+// Interrupt cancels the fiber with cause and waits for it to stop. A fiber
+// can't interrupt itself: it would wait for itself forever.
 func (f *Fiber[T]) Interrupt(cause error) {
 	if cause == nil {
 		cause = ErrInterrupted
@@ -229,23 +262,43 @@ func (f *Fiber[T]) unjoinedPanic() *Panic {
 
 // Acquire opens a resource and registers release to run when the scope
 // closes. Resources are released last-in first-out, after every fiber in the
-// scope has stopped.
+// scope has stopped. Once the scope has released its resources, Acquire
+// opens nothing and fails with a cancellation.
 func Acquire[T any](s *Scope, open Task[T], release func(context.Context, T) error) (T, error) {
+	var zero T
+	s.mu.Lock()
+	released := s.released
+	s.mu.Unlock()
+	if released {
+		return zero, errClosed
+	}
 	v, err := open(s.ctx)
 	if err != nil {
-		var zero T
 		return zero, err
 	}
-	s.mu.Lock()
-	s.releases = append(s.releases, func(ctx context.Context) error { return release(ctx, v) })
-	s.mu.Unlock()
+	if !s.register(func(ctx context.Context) error { return release(ctx, v) }) {
+		return zero, errClosed
+	}
 	return v, nil
 }
 
 // Defer registers release to run when the scope closes, with the resources:
-// last-in first-out, after every fiber has stopped.
+// last-in first-out, after every fiber has stopped. Once the scope has
+// released its resources, Defer runs release at once.
 func (s *Scope) Defer(release func(context.Context) error) {
+	s.register(release)
+}
+
+// register adds a release, or runs it at once if the resources are
+// released already, reporting whether it was added.
+func (s *Scope) register(release func(context.Context) error) bool {
 	s.mu.Lock()
-	s.releases = append(s.releases, release)
+	if !s.released {
+		s.releases = append(s.releases, release)
+		s.mu.Unlock()
+		return true
+	}
 	s.mu.Unlock()
+	release(context.WithoutCancel(s.parent))
+	return false
 }
