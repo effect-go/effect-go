@@ -301,7 +301,9 @@ func (p *pkgGen) run(res *Result, only []*fileGen) (*typeInfo, error) {
 	cfg := p.cfg
 	p.collect()
 
-	// Draft rounds, until the drafts stop changing.
+	// Draft rounds, until the drafts stop changing: two or three in
+	// practice. The cap only bounds a pathological case; the final round
+	// then reports whatever doesn't type-check.
 	var ti *typeInfo
 	var prev [][]byte
 	var err error

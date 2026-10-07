@@ -884,8 +884,8 @@ func allTyped(x *ast.LambdaExpr) bool {
 	return true
 }
 
-// combinator renders all, race, retry or timeout as a Go call returning the
-// branch values and an error.
+// combinator renders all, race, retry, repeat, timeout or each as a Go call
+// returning the branch values and an error.
 func (g *fileGen) combinator(x *ast.CallExpr) []types.Type {
 	kind := g.builtin(x)
 	if g.fn == nil || !g.fn.ctx {

@@ -95,10 +95,7 @@ func (g *fileGen) ifStmt(s *ast.IfStmt) {
 	}
 	cur := g.off(s.Pos())
 	for _, c := range []ast.Node{s.Init, s.Cond, s.Body} {
-		if c == nil || c == ast.Stmt(nil) {
-			continue
-		}
-		if st, ok := c.(ast.Stmt); ok && st == nil {
+		if c == nil {
 			continue
 		}
 		g.copy(cur, g.off(c.Pos()))
@@ -147,12 +144,7 @@ func (g *fileGen) renderStr(n ast.Node) string {
 // types of its results, the error excluded.
 func (g *fileGen) value(x ast.Expr) (vals []types.Type, hasErr, known bool) {
 	if c, ok := ast.Unparen(x).(*ast.CallExpr); ok && g.builtin(c) != "" {
-		vals = g.combinator(c)
-		var out []types.Type
-		for _, v := range vals {
-			out = append(out, v)
-		}
-		return out, true, true
+		return g.combinator(c), true, true
 	}
 	if _, ok := ast.Unparen(x).(*ast.CallExpr); !ok {
 		g.errorf(x.Pos(), "expected a call")

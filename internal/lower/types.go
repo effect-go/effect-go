@@ -303,7 +303,7 @@ func newFileTypes(fset *token.FileSet, f *goast.File, w *writer) *fileTypes {
 	return ft
 }
 
-// expr returns the go/ast expression n was rendered as in the draft.
+// goExpr returns the go/ast expression n was rendered as in the draft.
 func (g *fileGen) goExpr(n ast.Node) goast.Expr {
 	ti := g.r.ti
 	if ti == nil || n == nil {
@@ -462,7 +462,6 @@ func sumCases(t types.Type) (set *types.Named, cases []*types.TypeName) {
 	return n, cases
 }
 
-// setOf returns the sum type a case type belongs to, from its marker method.
 // isSet reports whether t is a named interface with the marker method.
 func isSet(t types.Type, marker string) bool {
 	n, ok := types.Unalias(t).(*types.Named)
@@ -481,6 +480,7 @@ func isSet(t types.Type, marker string) bool {
 	return false
 }
 
+// setOf returns the sum type a case type belongs to, from its marker method.
 func setOf(t types.Type) *types.Named {
 	n, ok := types.Unalias(t).(*types.Named)
 	if !ok || n.Obj().Pkg() == nil {

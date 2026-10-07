@@ -1,7 +1,6 @@
 package lower
 
 import (
-	"bytes"
 	"sort"
 
 	"github.com/effect-go/effect-go/internal/syntax/ast"
@@ -77,15 +76,6 @@ func (w *writer) add(o *writer) {
 	for _, m := range o.marks {
 		w.marks = append(w.marks, mark{m.out + off, m.line})
 	}
-}
-
-// line returns the 1-based line of the end of the output so far.
-func (w *writer) line() int { return bytes.Count(w.buf, []byte{'\n'}) + 1 }
-
-// atLineStart reports whether only spaces and tabs follow the last newline.
-func (w *writer) atLineStart() bool {
-	i := bytes.LastIndexByte(w.buf, '\n')
-	return len(bytes.Trim(w.buf[i+1:], " \t")) == 0
 }
 
 // A SourceMap maps offsets between a .ego file and the Go generated from it,
