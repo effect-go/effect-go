@@ -5,10 +5,13 @@
 package regress
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"strconv"
+
+	"github.com/effect-go/effect-go/trace"
 )
 
 // CheckKeepsErr: check doesn't overwrite an err declared before it.
@@ -206,4 +209,36 @@ func Shadow(err error) string {
 		}
 	}
 	return v
+}
+
+// DivOneLine panics on a line that a stack trace must report as this one.
+//
+//line regress.ego:111
+func DivOneLine(ctx context.Context, m map[string]int) (_ int, err error) {
+	ctx, span := trace.Start(ctx, "regress.DivOneLine")
+	defer trace.End(span, &err)
+//line regress.ego:111
+	return m["a"] / len(m), nil
+} // one-line
+
+type City string
+
+type Player struct {
+	Score float64
+	Home  City
+}
+
+// OptFallback: p?.Score ?? 0 is a float64, and p?.Home ?? "none" a City.
+func OptFallback(p *Player) (float64, City) {
+	var s float64 = 0
+	if p != nil {
+		s = p.Score
+	}
+//line regress.ego:123
+	var h City = "none"
+	if p != nil {
+		h = p.Home
+	}
+//line regress.ego:124
+	return s, h
 }

@@ -479,9 +479,18 @@ func (g *fileGen) coalesceInto(target string, declare bool, t types.Type, x *ast
 	}
 	switch {
 	case isOptChain(left) && declare && isCheap(x.Y) && !nillable(g.typeOf(left)):
-		// city := "unknown"; if u != nil { city = u.City }
+		// city := "unknown"; if u != nil { city = u.City }. A constant
+		// fallback, such as 0 for a float64 or "none" for a named string
+		// type, is declared with the chain's type: := would give it its
+		// default type.
+		decl := target + " := "
+		if def := literalType(x.Y); def != nil {
+			if lt := g.typeOf(left); lt != nil && !types.Identical(lt, def) {
+				decl = "var " + target + " " + g.typeString(lt) + " = "
+			}
+		}
 		g.genStmt(func() {
-			g.w.str(target + " := ")
+			g.w.str(decl)
 			g.node(x.Y)
 		})
 		g.w.str("if " + strings.Join(g.guards(left), " && ") + " {\n")
@@ -531,6 +540,33 @@ func (g *fileGen) coalesceInto(target string, declare bool, t types.Type, x *ast
 	default:
 		g.errorf(x.OpPos, "?? needs a value that can be missing: a pointer, map lookup, type assertion, ?. chain or a call returning (value, ok)")
 	}
+}
+
+// literalType is the type := gives a literal (-1, 2.5, "s", 'c'), or nil
+// for other expressions. The draft's types can't tell: there, the literal
+// took the type of what it was used with.
+func literalType(x ast.Expr) types.Type {
+	x = ast.Unparen(x)
+	if u, ok := x.(*ast.UnaryExpr); ok && (u.Op == token.SUB || u.Op == token.ADD) {
+		x = u.X
+	}
+	lit, ok := x.(*ast.BasicLit)
+	if !ok {
+		return nil
+	}
+	switch lit.Kind {
+	case token.INT:
+		return types.Typ[types.Int]
+	case token.FLOAT:
+		return types.Typ[types.Float64]
+	case token.IMAG:
+		return types.Typ[types.Complex128]
+	case token.CHAR:
+		return types.Universe.Lookup("rune").Type()
+	case token.STRING:
+		return types.Typ[types.String]
+	}
+	return nil
 }
 
 func nillable(t types.Type) bool {

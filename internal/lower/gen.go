@@ -245,12 +245,13 @@ type edit struct {
 
 // fileGen renders one .ego file.
 type fileGen struct {
-	pkg  *pkgGen
-	name string // users.ego
-	path string
-	src  []byte
-	file *ast.File
-	tf   *token.File
+	editMarks map[int]token.Pos // edit offsets after whose text a .ego line starts
+	pkg       *pkgGen
+	name      string // users.ego
+	path      string
+	src       []byte
+	file      *ast.File
+	tf        *token.File
 
 	// Per rendering.
 	r       *round
@@ -444,6 +445,9 @@ func (g *fileGen) copy(a, b int) {
 		g.w.copySrc(g.src, a, e.off)
 		g.w.anchor(e.off)
 		g.w.str(e.text)
+		if pos, ok := g.editMarks[e.off]; ok {
+			g.mark(pos)
+		}
 		a = max(a, e.end)
 	}
 	g.w.copySrc(g.src, a, b)
@@ -880,7 +884,13 @@ func (g *fileGen) funcHeaderEdits(ft *ast.FuncType, body *ast.BlockStmt, spanNam
 	}
 	text := fmt.Sprintf("\n%s, %s := %s.Start(%s, %q)\ndefer %s.End(%s, %s)", ctxVar, span, tr, src, spanName, tr, span, end)
 	if rest := g.src[g.off(body.Lbrace)+1:]; len(rest) > 0 && rest[0] != '\n' && rest[0] != '\r' {
-		text += "\n" // a one-line body: { return x }
+		// A one-line body, { return x }: x moves to a line of its own,
+		// which must still report the .ego line.
+		text += "\n"
+		if g.editMarks == nil {
+			g.editMarks = map[int]token.Pos{}
+		}
+		g.editMarks[g.off(body.Lbrace)+1] = body.Lbrace
 	}
 	g.edits = append(g.edits, edit{g.off(body.Lbrace) + 1, g.off(body.Lbrace) + 1, text})
 }

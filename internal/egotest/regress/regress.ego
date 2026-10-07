@@ -106,3 +106,20 @@ func Shadow(err error) string {
 		_            => if ok { e } else { "shadowed" }
 	}
 }
+
+// DivOneLine panics on a line that a stack trace must report as this one.
+effect DivOneLine(m map[string]int) (int, error) { return m["a"] / len(m), nil } // one-line
+
+type City string
+
+type Player struct {
+	Score float64
+	Home  City
+}
+
+// OptFallback: p?.Score ?? 0 is a float64, and p?.Home ?? "none" a City.
+func OptFallback(p *Player) (float64, City) {
+	s := p?.Score ?? 0
+	h := p?.Home ?? "none"
+	return s, h
+}

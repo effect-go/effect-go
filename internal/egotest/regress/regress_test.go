@@ -3,8 +3,12 @@ package regress
 import (
 	"fmt"
 	"io"
+	"os"
+	"runtime/debug"
 	"errors"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/effect-go/effect-go/internal/egotest/regress/disk"
@@ -73,5 +77,30 @@ func TestShadow(t *testing.T) {
 	}
 	if got := Shadow(Duplicate{Slug: "a"}); got != "a" {
 		t.Errorf("Duplicate arm: %q", got)
+	}
+}
+
+// A panic in a one-line effect body reports the .ego line.
+func TestOneLineBody(t *testing.T) {
+	if testing.CoverMode() != "" {
+		t.Skip("ego test -cover reports the generated Go's lines")
+	}
+	src, _ := os.ReadFile("regress.ego")
+	line := slices.IndexFunc(strings.Split(string(src), "\n"), func(l string) bool { return strings.HasSuffix(l, "// one-line") }) + 1
+	defer func() {
+		recover()
+		if want := "regress.ego:" + strconv.Itoa(line); !strings.Contains(string(debug.Stack()), want) {
+			t.Errorf("stack doesn't name %s:\n%s", want, debug.Stack())
+		}
+	}()
+	DivOneLine(t.Context(), map[string]int{})
+}
+
+func TestOptFallback(t *testing.T) {
+	if s, h := OptFallback(nil); s != 0 || h != "none" {
+		t.Errorf("nil: %v %v", s, h)
+	}
+	if s, h := OptFallback(&Player{Score: 1.5, Home: "Lyon"}); s != 1.5 || h != "Lyon" {
+		t.Errorf("set: %v %v", s, h)
 	}
 }

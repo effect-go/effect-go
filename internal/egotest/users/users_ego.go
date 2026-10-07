@@ -230,10 +230,10 @@ func (s *Service) Names(ctx context.Context, ids []UserID) (_ []string, err erro
 			fibers = append(fibers, scope.Fork(sc, func(ctx context.Context) (_ string, err error) {
 				ctx, span := trace.Start(ctx, "users.Service.Names.func1.1")
 				defer trace.End(span, &err)
+//line users.ego:103
 				return s.Lookup(ctx, id)
 			}))
 		}
-//line users.ego:105
 		var names []string
 		for _, f := range fibers {
 			name, err := f.Join()
