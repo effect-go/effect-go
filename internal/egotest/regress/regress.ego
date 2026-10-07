@@ -123,3 +123,12 @@ func OptFallback(p *Player) (float64, City) {
 	h := p?.Home ?? "none"
 	return s, h
 }
+
+// FStringLoop: an f-string in a for condition.
+func FStringLoop(b string) int {
+	n := 0
+	for f"{b}{n}" != "x2" {
+		n++
+	}
+	return n
+}

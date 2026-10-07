@@ -242,3 +242,12 @@ func OptFallback(p *Player) (float64, City) {
 //line regress.ego:124
 	return s, h
 }
+
+// FStringLoop: an f-string in a for condition.
+func FStringLoop(b string) int {
+	n := 0
+	for fmt.Sprintf("%s%d", b, n) != "x2" {
+		n++
+	}
+	return n
+}

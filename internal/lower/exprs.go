@@ -148,6 +148,9 @@ func (g *fileGen) binary(x *ast.BinaryExpr) bool {
 // needsHoist reports whether x contains an expression that has to be
 // computed by statements before its own.
 func needsHoist(x ast.Node) bool {
+	if x == nil {
+		return false
+	}
 	found := false
 	ast.Inspect(x, func(n ast.Node) bool {
 		switch n.(type) {
@@ -1245,7 +1248,9 @@ func (g *fileGen) expected(x ast.Expr) types.Type {
 	case *ast.KeyValueExpr:
 		if p.Value == x {
 			if lit, ok := g.parent(p).(*ast.CompositeLit); ok {
-				if st, ok := g.typeOf(lit).Underlying().(*types.Struct); ok {
+				if lt := g.typeOf(lit); lt == nil {
+					return nil // an undefined type, reported by the type check
+				} else if st, ok := lt.Underlying().(*types.Struct); ok {
 					if k, ok := p.Key.(*ast.Ident); ok {
 						for f := range st.Fields() {
 							if f.Name() == k.Name {

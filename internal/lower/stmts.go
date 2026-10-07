@@ -58,6 +58,9 @@ func (g *fileGen) lowerStmt(s ast.Stmt) {
 	case *ast.IfStmt:
 		if s.Init != nil && hasDirectCheck(s.Init) {
 			g.errorf(s.Init.Pos(), "check can't be used in an if header (nor else or must): write it on its own line before the if")
+		} else if needsHoist(s.Init) {
+			g.errorf(s.Init.Pos(), "this expression can't be used in an if header: write it on its own line before the if")
+			return
 		}
 		g.ifStmt(s)
 		return
@@ -66,6 +69,10 @@ func (g *fileGen) lowerStmt(s ast.Stmt) {
 			g.errorf(s.Pos(), "this expression can't be used in a for header: assign it to a variable in the loop")
 		}
 	case *ast.SwitchStmt:
+		if needsHoist(s.Init) {
+			g.errorf(s.Init.Pos(), "this expression can't be used in a switch header: write it on its own line before the switch")
+			return
+		}
 		for _, c := range s.Body.List {
 			for _, e := range c.(*ast.CaseClause).List {
 				if needsHoist(e) {

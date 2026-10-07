@@ -104,3 +104,9 @@ func TestOptFallback(t *testing.T) {
 		t.Errorf("set: %v %v", s, h)
 	}
 }
+
+func TestFStringLoop(t *testing.T) {
+	if n := FStringLoop("x"); n != 2 {
+		t.Errorf("got %d", n)
+	}
+}

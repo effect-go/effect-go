@@ -1,0 +1,13 @@
+package headers
+
+func If(m map[string]int) {
+	if v := m["k"] ?? 0; v > 1 { // ERROR "can't be used in an if header"
+	}
+}
+
+func Switch(m map[string]int) {
+	switch v := m["k"] ?? 0; v { // ERROR "can't be used in a switch header"
+	}
+}
+
+var x = Undefined{F: v => v} // ERROR "undefined: Undefined|parameter types"
