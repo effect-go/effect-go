@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.0 (2026-10-07)
 
 From a review of the whole codebase. **To update:** run `ego generate
 ./...` in each module, and pass `1` to `scope.Each` (or `each`) where a
