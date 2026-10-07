@@ -1,5 +1,61 @@
 # Changelog
 
+## Unreleased
+
+From a review of the whole codebase. **To update:** run `ego generate
+./...` in each module, and pass `1` to `scope.Each` (or `each`) where a
+limit of `0` meant one at a time: it now means no limit.
+
+Behavior changes:
+- `check f() as Case` lets errors that already are cases of the
+  function's set through unchanged; it used to wrap them in `Case`.
+- `scope.Each` with a limit below 1 runs without a limit, as errgroup's
+  negative limit; it ran one at a time.
+- `scope.Timeout` keeps a task's own error; once the deadline had passed,
+  it replaced any error with `*TimeoutError`.
+- `scope.Fork` on a closing scope returns a fiber already interrupted; it
+  panicked, crashing a fiber that forks until its context ends.
+- `scope.Main` exits with status 0 when the signal's cancellation stops
+  the program, lets a second signal kill it, and takes `Run`'s options.
+- `schedule.Repeat` treats a call that ctx's end interrupts as a stop, not
+  a failure; `While` no longer stops a `Repeat`.
+- `trace.End` records a cancellation as an "interrupted" event, not as the
+  span's error.
+
+Fixes:
+- `check` and `else` lost the user's `err` when one was in scope:
+  `x, err := f(); y := check g()` overwrote it.
+- A `match` on an error with only sentinel arms used `==`, not `errors.Is`.
+- `if`, `match` and `??` expressions after `&&`/`||` ran even when the
+  left side short-circuited, and ran before operands to their left.
+- A `match` arm's bindings hid the user's variables from later arms.
+- `x = u?.Name` kept `x`'s old value when `u` was nil.
+- `%` was doubled in strings with nothing interpolated; an error set whose
+  cases have no fields imported `fmt` without using it.
+- `p?.Score ?? 0` failed for a float64 field; a typed lambda passed to a
+  generic function got an `any` result; a local variable named `fmt` or
+  `errors` hid the package from generated code.
+- Panics in one-line effect bodies reported the wrong line.
+- The compiler crashed on `for f"…"` conditions and on lambdas in literals
+  of undefined types; `??` in an `if` or `switch` header gives a clear
+  error.
+- The parser looped forever on a file ending inside `effect(`, freezing
+  `ego fmt` and the language server; `effect` literals taking `struct{}`
+  didn't parse.
+- `scope`: a panicking release skipped the others; `Defer` and `Acquire`
+  after the scope closed leaked; a scope kept every finished fiber; `Race`
+  cancelled from outside reported the cancellation once per task.
+- `schedule`: `Jittered`, `While`, `UpTo`, `Tap`, `Min` and `Max` dropped
+  `Delayed`; jitter near the largest delay overflowed on amd64.
+- `trace.LogHandler` put the IDs inside `WithGroup` groups.
+- `layer`: a provider bound through interfaces ran once per interface;
+  `layer.Close` on a type without `Close` crashed `ego generate`.
+- `ego fmt -l ./...` checked nothing; `ego test` took flag values for
+  packages; the language server crashed on a negative `Content-Length`
+  and could map positions with an outdated source map.
+- `ego vet`'s exhaustive check flagged switches on durations and bit
+  flags; ctxcheck checks `TryGo`, fiberjoin `var f = scope.Fork(…)`.
+
 ## v0.2.2 (2026-10-07)
 
 **To update:** run `ego generate ./...`; only `layers_ego.go` files may
