@@ -116,3 +116,12 @@ func TestGenericLambda(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestLocalNames(t *testing.T) {
+	if n, err := LocalNames("2"); n != 3 || err != nil {
+		t.Errorf("got %d %v", n, err)
+	}
+	if _, err := LocalNames("x"); err == nil {
+		t.Error("no error")
+	}
+}

@@ -6,8 +6,8 @@ package regress
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	egoerrors "errors"
+	egofmt "fmt"
 	"io"
 	"strconv"
 
@@ -21,7 +21,7 @@ func CheckKeepsErr(a, b string) (int, error) {
 	x, err := strconv.Atoi(a)
 	y, err2 := strconv.Atoi(b)
 	if err2 != nil {
-		return 0, fmt.Errorf("strconv.Atoi: %w", err2)
+		return 0, egofmt.Errorf("strconv.Atoi: %w", err2)
 	}
 //line regress.ego:14
 	if err != nil {
@@ -57,7 +57,7 @@ func ElseKeepsNamedErr(b string) (n int, err error) {
 
 // Percent: a % in a string with nothing interpolated stays one %.
 func Percent() (string, error) {
-	return "", errors.New("disk 100% full")
+	return "", egoerrors.New("disk 100% full")
 }
 
 // PercentF is the same with an f-string.
@@ -68,7 +68,7 @@ func Sentinel(err error) string {
 	var v string
 	if err == nil {
 		v = "ok"
-	} else if errors.Is(err, io.EOF) {
+	} else if egoerrors.Is(err, io.EOF) {
 		v = "eof"
 	} else {
 		v = "other"
@@ -105,7 +105,7 @@ type Duplicate struct{ Slug string }
 
 func (Duplicate) isArticleError() {}
 
-func (e Duplicate) Error() string { return fmt.Sprintf("%v exists", e.Slug) }
+func (e Duplicate) Error() string { return egofmt.Sprintf("%v exists", e.Slug) }
 
 // As lets pointers to Duplicate match as Duplicate.
 func (e Duplicate) As(target any) bool {
@@ -120,7 +120,7 @@ type Unavailable struct{ Cause error }
 
 func (Unavailable) isArticleError() {}
 
-func (e Unavailable) Error() string { return fmt.Sprintf("unavailable: %v", e.Cause) }
+func (e Unavailable) Error() string { return egofmt.Sprintf("unavailable: %v", e.Cause) }
 
 func (e Unavailable) Unwrap() error { return e.Cause }
 
@@ -141,14 +141,14 @@ func inTx(fn func() error) error { return fn() }
 // PassThrough: check … as Unavailable lets a case of the set through.
 func PassThrough(slug string) error {
 	if err := inTx(func() error { return Duplicate{Slug: slug} }); err != nil {
-		if _, ok := errors.AsType[ArticleError](err); ok {
+		if _, ok := egoerrors.AsType[ArticleError](err); ok {
 			return err
 		}
 		return Unavailable{Cause: err}
 	}
 //line regress.ego:79
 	if err := inTx(func() error { return io.EOF }); err != nil {
-		if _, ok := errors.AsType[ArticleError](err); ok {
+		if _, ok := egoerrors.AsType[ArticleError](err); ok {
 			return err
 		}
 		return Unavailable{Cause: err}
@@ -198,7 +198,7 @@ func Shadow(err error) string {
 	ok := true
 	e := "outer"
 	var v string
-	if e2, ok2 := errors.AsType[Duplicate](err); ok2 {
+	if e2, ok2 := egoerrors.AsType[Duplicate](err); ok2 {
 		e := e2
 		v = e.Slug
 	} else {
@@ -246,7 +246,7 @@ func OptFallback(p *Player) (float64, City) {
 // FStringLoop: an f-string in a for condition.
 func FStringLoop(b string) int {
 	n := 0
-	for fmt.Sprintf("%s%d", b, n) != "x2" {
+	for egofmt.Sprintf("%s%d", b, n) != "x2" {
 		n++
 	}
 	return n
@@ -264,4 +264,19 @@ func Map[T, R any](xs []T, f func(T) R) []R {
 // GenericLambda: a typed lambda passed to Map gives Map its result type.
 func GenericLambda(us []User) []string {
 	return Map(us, func(u User) string { return u.Name })
+}
+
+// LocalNames: variables named like the packages the generated code uses.
+func LocalNames(s string) (int, error) {
+	errors := []string{"a"}
+	fmt := len(errors)
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		if _, ok := egoerrors.AsType[ArticleError](err); ok {
+			return 0, err
+		}
+		return 0, Unavailable{Cause: err}
+	}
+//line regress.ego:155
+	return n + fmt, nil
 }

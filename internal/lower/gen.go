@@ -246,6 +246,7 @@ type edit struct {
 // fileGen renders one .ego file.
 type fileGen struct {
 	editMarks map[int]token.Pos // edit offsets after whose text a .ego line starts
+	locals    map[string]bool   // names declared in functions: see localNames
 	pkg       *pkgGen
 	name      string // users.ego
 	path      string
@@ -409,14 +410,16 @@ func (g *fileGen) render(r *round) *writer {
 // use returns the name to refer to an imported package by, importing it if
 // the file doesn't.
 func (g *fileGen) use(p, name string) string {
-	if n, ok := g.names[p]; ok {
+	// A name a function declares, as in fmt := "json", would hide the
+	// package there: the package is imported again under another name.
+	if n, ok := g.names[p]; ok && !g.localNames()[n] {
 		return n
 	}
 	if n, ok := g.added[p]; ok {
 		return n
 	}
 	n := name
-	for i := 2; g.taken[n] || g.pkg.topNames[n]; i++ {
+	for i := 2; g.taken[n] || g.pkg.topNames[n] || g.localNames()[n]; i++ {
 		n = "ego" + name
 		if i > 2 {
 			n += strconv.Itoa(i)
@@ -425,6 +428,67 @@ func (g *fileGen) use(p, name string) string {
 	g.added[p] = n
 	g.taken[n] = true
 	return n
+}
+
+// localNames returns the names declared inside the file's functions.
+func (g *fileGen) localNames() map[string]bool {
+	if g.locals != nil {
+		return g.locals
+	}
+	g.locals = map[string]bool{}
+	add := func(xs ...ast.Expr) {
+		for _, x := range xs {
+			if id, ok := x.(*ast.Ident); ok {
+				g.locals[id.Name] = true
+			}
+		}
+	}
+	fields := func(l *ast.FieldList) {
+		if l != nil {
+			for _, f := range l.List {
+				for _, n := range f.Names {
+					add(n)
+				}
+			}
+		}
+	}
+	for _, d := range g.file.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		ast.Inspect(fd, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncType:
+				fields(n.Params)
+				fields(n.Results)
+			case *ast.FuncDecl:
+				fields(n.Recv)
+			case *ast.LambdaExpr:
+				fields(n.Params)
+			case *ast.AssignStmt:
+				if n.Tok == token.DEFINE {
+					add(n.Lhs...)
+				}
+			case *ast.RangeStmt:
+				if n.Tok == token.DEFINE {
+					add(n.Key, n.Value)
+				}
+			case *ast.ValueSpec:
+				for _, id := range n.Names {
+					add(id)
+				}
+			case *ast.MatchArm:
+				for _, pat := range n.Patterns {
+					if c, ok := pat.(*ast.CallExpr); ok {
+						add(c.Args...)
+					}
+				}
+			}
+			return true
+		})
+	}
+	return g.locals
 }
 
 func (g *fileGen) pkgRef(p string) string { return g.use(p, path.Base(p)) }

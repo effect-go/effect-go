@@ -146,3 +146,11 @@ func Map[T, R any](xs []T, f func(T) R) []R {
 func GenericLambda(us []User) []string {
 	return Map(us, (u User) => u.Name)
 }
+
+// LocalNames: variables named like the packages the generated code uses.
+func LocalNames(s string) (int, ArticleError) {
+	errors := []string{"a"}
+	fmt := len(errors)
+	n := check strconv.Atoi(s) as Unavailable
+	return n + fmt, nil
+}
