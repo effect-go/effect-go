@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.1 (2026-10-07)
 
 - `must (x).M()` and `check (x).M()`, with a space, are the keywords before
   a parenthesized expression (also `&`, `*` and `[`); they were taken for
