@@ -638,6 +638,44 @@ func (g *fileGen) fstring(x *ast.FString, wrap string, extra []string) {
 	g.w.str(")")
 }
 
+// genericResults reports whether x is an argument of a call to a generic
+// function, whose declaration gives the parameter x is passed as results
+// that depend on type parameters: func(T) R in Map(xs []T, f func(T) R).
+func (g *fileGen) genericResults(x ast.Expr) bool {
+	call, ok := g.parent(x).(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	fn, ok := g.objectOf(call.Fun).(*types.Func)
+	if !ok {
+		return false
+	}
+	sig := fn.Origin().Signature()
+	if sig.TypeParams().Len() == 0 {
+		return false
+	}
+	for i, a := range call.Args {
+		if a != x {
+			continue
+		}
+		if g.leavesCtx(call, sig) {
+			i++
+		}
+		n := sig.Params().Len()
+		var t types.Type
+		switch {
+		case sig.Variadic() && i >= n-1:
+			t = sig.Params().At(n - 1).Type().(*types.Slice).Elem()
+		case i < n:
+			t = sig.Params().At(i).Type()
+		}
+		if fs, ok := t.(*types.Signature); ok {
+			return generic(fs.Results())
+		}
+	}
+	return false
+}
+
 // lambda renders x => body as a function literal, with types from where the
 // lambda is used.
 func (g *fileGen) lambda(x *ast.LambdaExpr) {
@@ -648,8 +686,11 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 				// Passed to a generic function whose type arguments aren't
 				// inferred yet, as in scope.Run(ctx, s => f(s)): the
 				// parameters are known, and the results come from the body.
+				// Once inferred, as in Map(us, u => u.Name), results that
+				// are type parameters in the declaration still come from
+				// the body: the draft inferred them from a placeholder.
 				switch {
-				case !generic(sig):
+				case !generic(sig) && !g.genericResults(x):
 					f.sig = sig
 				case !generic(sig.Params()):
 					f.sig, f.openRes = sig, true

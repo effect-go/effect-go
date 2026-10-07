@@ -251,3 +251,17 @@ func FStringLoop(b string) int {
 	}
 	return n
 }
+
+// Map is a generic function taking a callback.
+func Map[T, R any](xs []T, f func(T) R) []R {
+	var out []R
+	for _, x := range xs {
+		out = append(out, f(x))
+	}
+	return out
+}
+
+// GenericLambda: a typed lambda passed to Map gives Map its result type.
+func GenericLambda(us []User) []string {
+	return Map(us, func(u User) string { return u.Name })
+}

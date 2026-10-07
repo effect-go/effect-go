@@ -110,3 +110,9 @@ func TestFStringLoop(t *testing.T) {
 		t.Errorf("got %d", n)
 	}
 }
+
+func TestGenericLambda(t *testing.T) {
+	if got := GenericLambda([]User{{"a"}, {"b"}}); !slices.Equal(got, []string{"a", "b"}) {
+		t.Errorf("got %q", got)
+	}
+}
