@@ -21,6 +21,9 @@
 // cleanup is func(), func() error or func(context.Context) error. Wrap it
 // in Close to have T's Close method called when the scope closes.
 //
+// A Set may be declared in another package, such as a framework's: its
+// providers must then be exported.
+//
 // Providers passed to Build directly take precedence over those in a Set,
 // so a test graph swaps one provider: layer.Build(AppSet, NewMemoryRepo).
 // An interface parameter is satisfied by the one provided type that

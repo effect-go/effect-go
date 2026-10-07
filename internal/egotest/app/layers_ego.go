@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/effect-go/effect-go/internal/egotest/framework"
 	"github.com/effect-go/effect-go/scope"
 )
 
@@ -46,4 +47,10 @@ func BuildTestApp(ctx context.Context, s *scope.Scope, cfg Config) (*App, error)
 		return nil, fmt.Errorf("NewApp: %w", err)
 	}
 	return app, nil
+}
+
+// BuildClock builds from a set that another package declares.
+func BuildClock(ctx context.Context, s *scope.Scope) (*framework.Clock, error) {
+	clock := framework.NewClock()
+	return clock, nil
 }

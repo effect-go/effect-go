@@ -53,3 +53,11 @@ func TestProviderError(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+// An injector can use a layer.Set declared in another package.
+func TestSetFromAnotherPackage(t *testing.T) {
+	clock, err := BuildClock(t.Context(), nil)
+	if err != nil || clock.Now().IsZero() {
+		t.Fatal(clock, err)
+	}
+}
