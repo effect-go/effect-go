@@ -79,9 +79,9 @@ func generate(args []string) error {
 // can compile. It reports whether the package compiled, and whether a file
 // changed; its diagnostics go to report.
 func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]string) (ok, changed bool, err error) {
-	res, err := lower.Generate(lower.Config{Dir: dir, NoLines: !lines, Importer: im})
-	if err != nil {
-		return false, false, fmt.Errorf("%v: %w", rel(dir), err)
+	res, err2 := lower.Generate(lower.Config{Dir: dir, NoLines: !lines, Importer: im})
+	if err2 != nil {
+		return false, false, fmt.Errorf("%v: %w", rel(dir), err2)
 	}
 //line generate.ego:69
 	if debug {
@@ -104,9 +104,9 @@ func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]st
 	}()
 	for _, out := range res.Outputs {
 		if len(res.Diags) == 0 || onlyTests && !isTest(out.Ego) {
-			wrote, err := write(out.Go, out.Code)
-			if err != nil {
-				return false, false, err
+			wrote, err3 := write(out.Go, out.Code)
+			if err3 != nil {
+				return false, false, err3
 			}
 //line generate.ego:90
 			changed = changed || wrote
@@ -122,9 +122,9 @@ func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]st
 	}
 	// Layers are wired after the .ego files compile: injectors may use
 	// their declarations.
-	lr, err := layers.Generate(dir)
-	if err != nil {
-		return false, false, fmt.Errorf("%v: %w", rel(dir), err)
+	lr, err4 := layers.Generate(dir)
+	if err4 != nil {
+		return false, false, fmt.Errorf("%v: %w", rel(dir), err4)
 	}
 //line generate.ego:104
 	if lr == nil {
@@ -136,9 +136,9 @@ func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]st
 	if len(lr.Diags) > 0 {
 		return false, changed, nil
 	}
-	wrote, err := write(lr.Path, lr.Code)
-	if err != nil {
-		return false, false, err
+	wrote, err5 := write(lr.Path, lr.Code)
+	if err5 != nil {
+		return false, false, err5
 	}
 //line generate.ego:114
 	return true, changed || wrote, nil

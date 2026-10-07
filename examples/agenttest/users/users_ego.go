@@ -92,6 +92,9 @@ func (s *Service) Get(ctx context.Context, id UserID) (_ User, err error) {
 //line users.ego:36
 	u, found, err := s.Repo.Find(ctx, id)
 	if err != nil {
+		if _, ok := errors.AsType[UserError](err); ok {
+			return User{}, err
+		}
 		return User{}, Storage{Cause: err}
 	}
 //line users.ego:37

@@ -97,8 +97,8 @@ func Run(cfg Config, in io.Reader, out io.Writer) error {
 		return err3
 	}
 //line proxy.ego:88
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting gopls: %w", err)
+	if err4 := cmd.Start(); err4 != nil {
+		return fmt.Errorf("starting gopls: %w", err4)
 	}
 //line proxy.ego:89
 	p := &Proxy{

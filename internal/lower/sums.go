@@ -117,13 +117,13 @@ func (g *fileGen) message(c *ast.SumCase) string {
 			}
 		}
 	}
-	fmtName := g.pkgRef("fmt")
 	if c.Message != nil {
-		var format strings.Builder
+		var format, plain strings.Builder // with % escaped for Sprintf, and as written
 		var args []string
 		for _, p := range c.Message.Parts {
 			if p.X == nil {
 				format.WriteString(strings.ReplaceAll(p.Text, "%", "%%"))
+				plain.WriteString(p.Text)
 				continue
 			}
 			if p.Spec != "" {
@@ -134,9 +134,9 @@ func (g *fileGen) message(c *ast.SumCase) string {
 			args = append(args, g.fieldExpr(p.X, fields))
 		}
 		if len(args) == 0 {
-			return `"` + format.String() + `"`
+			return `"` + plain.String() + `"`
 		}
-		return fmtName + `.Sprintf("` + format.String() + `", ` + strings.Join(args, ", ") + ")"
+		return g.pkgRef("fmt") + `.Sprintf("` + format.String() + `", ` + strings.Join(args, ", ") + ")"
 	}
 	text := words(c.Name.Name)
 	var args []string
@@ -155,7 +155,7 @@ func (g *fileGen) message(c *ast.SumCase) string {
 	if len(args) == 0 {
 		return `"` + text + `"`
 	}
-	return fmtName + `.Sprintf("` + text + `", ` + strings.Join(args, ", ") + ")"
+	return g.pkgRef("fmt") + `.Sprintf("` + text + `", ` + strings.Join(args, ", ") + ")"
 }
 
 // fieldExpr renders an expression in a case message, reading the case's

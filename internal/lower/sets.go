@@ -107,26 +107,6 @@ func sameSet(a, b *types.Named) bool {
 	return a != nil && b != nil && a.Obj().Name() == b.Obj().Name() && a.Obj().Pkg().Path() == b.Obj().Pkg().Path()
 }
 
-// innerSet returns the error set of the calls in timeout or each: their
-// errors of that set pass through check … as Case, which holds only the
-// cancellation.
-func (g *fileGen) innerSet(c *ast.CallExpr) *types.Named {
-	switch g.builtin(c) {
-	case "timeout":
-		if len(c.Args) == 2 {
-			return g.argSet(c.Args[1])
-		}
-	case "each":
-		if l := eachLambda(c); l != nil {
-			return g.argSet(l.Body.(ast.Expr))
-		}
-		if len(c.Args) == 3 {
-			return g.funcSet(c.Args[2])
-		}
-	}
-	return nil
-}
-
 // passesSet reports whether x is a call whose errors are all of set, so
 // they can be passed on as they are.
 func (g *fileGen) passesSet(x ast.Expr, set *ast.SumDecl) bool { return g.isErrorSet(g.argSet(x), set) }

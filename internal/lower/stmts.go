@@ -191,27 +191,12 @@ func (g *fileGen) check(lhs []ast.Expr, tok token.Token, c *ast.CheckExpr) {
 		n = len(lhs)
 	}
 
-	// The variable for the error: an if scopes it; otherwise it stays in
-	// the block, where a later err := of the user's would clash with it.
-	ev := "err"
-	if lhs != nil && g.declaresErrLater(c) {
-		ev = g.temp("err")
-	}
+	ev := g.errVar(c)
 
 	// What to do with the error.
-	var handle string
-	switch {
-	case c.Must:
-		handle = "panic(" + ev + ")"
-	default:
-		handle = g.ret(g.wrap(c, ev))
-		if call, ok := ast.Unparen(c.X).(*ast.CallExpr); ok && c.Case != nil && g.fn != nil && g.fn.set != nil {
-			if set := g.fn.set; g.isErrorSet(g.innerSet(call), set) {
-				// timeout or each of calls returning this set: their errors
-				// pass through, and the case holds the cancellation.
-				handle = "if _, ok := " + g.pkgRef("errors") + ".AsType[" + set.Name.Name + "](" + ev + "); ok {\n" + g.ret(ev) + "\n}\n" + handle
-			}
-		}
+	handle := "panic(" + ev + ")"
+	if !c.Must {
+		handle = g.returnErr(c, ev)
 	}
 
 	switch {
@@ -238,10 +223,80 @@ func (g *fileGen) check(lhs []ast.Expr, tok token.Token, c *ast.CheckExpr) {
 	}
 }
 
-// declaresErrLater reports whether a statement after check c's, in the
-// same block, declares a variable named err.
-func (g *fileGen) declaresErrLater(c *ast.CheckExpr) bool {
-	stmt := g.parent(c)
+// returnErr returns the error in ev as check c does: labelled, or as a
+// case of the function's error set. An error that is a case of the set
+// already passes through unchanged, as when the callee takes a callback
+// that failed with one (a transaction), or for timeout and each of calls
+// returning the set.
+func (g *fileGen) returnErr(c *ast.CheckExpr, ev string) string {
+	ret := g.ret(g.wrap(c, ev))
+	if c.Case == nil || g.fn == nil || g.fn.set == nil {
+		return ret
+	}
+	return "if _, ok := " + g.pkgRef("errors") + ".AsType[" + g.fn.set.Name.Name + "](" + ev + "); ok {\n" + g.ret(ev) + "\n}\n" + ret
+}
+
+// errVar names the variable that holds the error of a check or an else at
+// n: err, unless the user has an err in scope there (:= would reuse it, or
+// hide it from what follows) or declares one later in the block (it would
+// clash).
+func (g *fileGen) errVar(n ast.Node) string {
+	if g.errInScope(n) || g.declaresErrLater(n) {
+		return g.temp("err")
+	}
+	return "err"
+}
+
+// errInScope reports whether a variable named err is declared before n in
+// an enclosing scope, a function's parameters and results included.
+func (g *fileGen) errInScope(n ast.Node) bool {
+	child := n
+	for p := g.parent(n); p != nil; child, p = p, g.parent(p) {
+		var before []ast.Stmt
+		switch p := p.(type) {
+		case *ast.BlockStmt:
+			before = p.List
+		case *ast.CaseClause:
+			before = p.Body
+		case *ast.CommClause:
+			before = p.Body
+		case *ast.IfStmt:
+			before = []ast.Stmt{p.Init}
+		case *ast.ForStmt:
+			before = []ast.Stmt{p.Init}
+		case *ast.SwitchStmt:
+			before = []ast.Stmt{p.Init}
+		case *ast.TypeSwitchStmt:
+			before = []ast.Stmt{p.Init, p.Assign}
+		case *ast.RangeStmt:
+			if p.Tok == token.DEFINE && (isIdent(p.Key, "err") || isIdent(p.Value, "err")) && child == p.Body {
+				return true
+			}
+		case *ast.FuncDecl:
+			if hasField(p.Recv, "err") || hasField(p.Type.Params, "err") || hasField(p.Type.Results, "err") {
+				return true
+			}
+		case *ast.FuncLit:
+			if hasField(p.Type.Params, "err") || hasField(p.Type.Results, "err") {
+				return true
+			}
+		}
+		for _, s := range before {
+			if s == child {
+				break
+			}
+			if declaresErr(s) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// declaresErrLater reports whether a statement after n's, in the same
+// block, declares a variable named err.
+func (g *fileGen) declaresErrLater(n ast.Node) bool {
+	stmt := g.parent(n)
 	var list []ast.Stmt
 	switch b := g.parent(stmt).(type) {
 	case *ast.BlockStmt:
@@ -253,29 +308,52 @@ func (g *fileGen) declaresErrLater(c *ast.CheckExpr) bool {
 	}
 	after := false
 	for _, s := range list {
-		if s == stmt {
-			after = true
-			continue
+		if after && declaresErr(s) {
+			return true
 		}
-		if !after {
-			continue
-		}
-		switch s := s.(type) {
-		case *ast.AssignStmt:
+		after = after || s == stmt
+	}
+	return false
+}
+
+// declaresErr reports whether s declares a variable named err.
+func declaresErr(s ast.Stmt) bool {
+	switch s := s.(type) {
+	case *ast.AssignStmt:
+		if s.Tok == token.DEFINE {
 			for _, l := range s.Lhs {
-				if id, ok := l.(*ast.Ident); ok && id.Name == "err" && s.Tok == token.DEFINE {
+				if isIdent(l, "err") {
 					return true
 				}
 			}
-		case *ast.DeclStmt:
-			if gd, ok := s.Decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
-				for _, spec := range gd.Specs {
-					for _, n := range spec.(*ast.ValueSpec).Names {
-						if n.Name == "err" {
-							return true
-						}
+		}
+	case *ast.DeclStmt:
+		if gd, ok := s.Decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+			for _, spec := range gd.Specs {
+				for _, n := range spec.(*ast.ValueSpec).Names {
+					if n.Name == "err" {
+						return true
 					}
 				}
+			}
+		}
+	}
+	return false
+}
+
+func isIdent(x ast.Expr, name string) bool {
+	id, ok := x.(*ast.Ident)
+	return ok && id.Name == name
+}
+
+func hasField(l *ast.FieldList, name string) bool {
+	if l == nil {
+		return false
+	}
+	for _, f := range l.List {
+		for _, n := range f.Names {
+			if n.Name == name {
+				return true
 			}
 		}
 	}
@@ -442,18 +520,19 @@ func (g *fileGen) elseStmt(lhs []ast.Expr, tok token.Token, e *ast.ElseExpr) {
 		t = vals[0]
 	}
 	target := g.renderStr(lhs[0])
+	ev := g.errVar(e)
 	if tok == token.DEFINE {
-		g.w.str(target + ", err := ")
+		g.w.str(target + ", " + ev + " := ")
 		g.w.add(call)
-		g.w.str("\nif err != nil {\n")
+		g.w.str("\nif " + ev + " != nil {\n")
 		g.lowerInto(target, false, t, e.Fallback)
 		g.w.str("}")
 		return
 	}
 	v := g.temp("v")
-	g.w.str("if " + v + ", err := ")
+	g.w.str("if " + v + ", " + ev + " := ")
 	g.w.add(call)
-	g.w.str("; err != nil {\n")
+	g.w.str("; " + ev + " != nil {\n")
 	g.lowerInto(target, false, t, e.Fallback)
 	g.w.str("} else {\n" + target + " = " + v + "\n}")
 }
@@ -506,7 +585,8 @@ func (g *fileGen) elseArms(lhs []ast.Expr, tok token.Token, e *ast.ElseExpr) {
 	if len(vals) == 1 {
 		t = vals[0]
 	}
-	p := &matchPlan{arms: e.Arms, mode: modeErrors, tag: "err", rest: "panic(err)"}
+	ev := g.errVar(e)
+	p := &matchPlan{arms: e.Arms, mode: modeErrors, tag: ev, rest: "panic(" + ev + ")"}
 	g.planArms(p)
 	if p.hasNil {
 		g.errorf(e.Lbrace, "an else arm can't match nil: else only sees errors")
@@ -516,7 +596,7 @@ func (g *fileGen) elseArms(lhs []ast.Expr, tok token.Token, e *ast.ElseExpr) {
 		if g.fn == nil || !g.fn.hasErr {
 			g.errorf(c.Pos(), "check needs a function that returns an error: use must, or else")
 		}
-		p.rest = g.ret(g.wrap(c, "err"))
+		p.rest = g.returnErr(c, ev)
 	case c == nil && !p.blank:
 		if set := g.argSet(call); set != nil {
 			g.exhaustive(p, set, nil, e.Lbrace, false)
@@ -531,9 +611,9 @@ func (g *fileGen) elseArms(lhs []ast.Expr, tok token.Token, e *ast.ElseExpr) {
 	if tok != token.DEFINE {
 		v = g.temp("v")
 	}
-	g.w.str(v + ", err := ")
+	g.w.str(v + ", " + ev + " := ")
 	g.w.add(callW)
-	g.w.str("\nif err != nil {\n")
+	g.w.str("\nif " + ev + " != nil {\n")
 	g.chain(p, false, func(a *ast.MatchArm) { g.armBody(a, v, t) })
 	g.w.str("}")
 	if v != target {

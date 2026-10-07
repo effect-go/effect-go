@@ -208,10 +208,7 @@ func (g *fileGen) lowerInto(target string, declare bool, t types.Type, x ast.Exp
 		if !declareVar() {
 			return
 		}
-		guards := g.guards(x)
-		g.w.str("if " + strings.Join(guards, " && ") + " {\n")
-		g.genStmt(func() { g.w.str(target + " = " + g.plain(x)) })
-		g.w.str("}\n")
+		g.optInto(target, declare, t, x)
 	default:
 		if hasOpt(x) && !isOptChain(x) {
 			g.errorf(x.Pos(), "?. must end its expression here: assign it to a variable first")
@@ -220,9 +217,7 @@ func (g *fileGen) lowerInto(target string, declare bool, t types.Type, x ast.Exp
 			if !declareVar() {
 				return
 			}
-			g.w.str("if " + strings.Join(g.guards(x), " && ") + " {\n")
-			g.genStmt(func() { g.w.str(target + " = " + g.plain(x)) })
-			g.w.str("}\n")
+			g.optInto(target, declare, t, x)
 			return
 		}
 		op := " = "
@@ -234,6 +229,17 @@ func (g *fileGen) lowerInto(target string, declare bool, t types.Type, x ast.Exp
 			g.node(x)
 		})
 	}
+}
+
+// optInto stores a ?. chain in target: its value, or the zero value when
+// the chain stops at a nil, which a declared target already holds.
+func (g *fileGen) optInto(target string, declare bool, t types.Type, x ast.Expr) {
+	g.w.str("if " + strings.Join(g.guards(x), " && ") + " {\n")
+	g.genStmt(func() { g.w.str(target + " = " + g.plain(x)) })
+	if !declare && t != nil {
+		g.w.str("} else {\n" + target + " = " + g.zero(t) + "\n")
+	}
+	g.w.str("}\n")
 }
 
 // branchInto stores a branch's value in target.
@@ -499,12 +505,13 @@ func nillable(t types.Type) bool {
 // wrap is set ("%w" appended). Without interpolation it's a plain string.
 func (g *fileGen) fstring(x *ast.FString, wrap string, extra []string) {
 	raw := x.Raw()
-	var format strings.Builder
+	var format, plain strings.Builder // with % escaped for Sprintf, and as written
 	var args []ast.Expr
 	var specs []string
 	for _, p := range x.Parts {
 		if p.X == nil {
 			format.WriteString(strings.ReplaceAll(p.Text, "%", "%%"))
+			plain.WriteString(p.Text)
 			continue
 		}
 		args = append(args, p.X)
@@ -528,7 +535,7 @@ func (g *fileGen) fstring(x *ast.FString, wrap string, extra []string) {
 		format.WriteString("%w")
 	}
 	if len(args) == 0 && wrap == "" {
-		g.w.str(quote(format.String()))
+		g.w.str(quote(plain.String()))
 		return
 	}
 	fn := g.pkgRef("fmt") + ".Sprintf("

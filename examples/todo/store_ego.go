@@ -108,9 +108,9 @@ func open(ctx context.Context, url string) (_ *pgxpool.Pool, err error) {
 	if err != nil {
 		return nil, errors.Join(errBadURL, err)
 	}
-	db, err := pgxpool.NewWithConfig(ctx, pc)
-	if err != nil {
-		return nil, fmt.Errorf("pgxpool.NewWithConfig: %w", err)
+	db, err2 := pgxpool.NewWithConfig(ctx, pc)
+	if err2 != nil {
+		return nil, fmt.Errorf("pgxpool.NewWithConfig: %w", err2)
 	}
 //line store.ego:68
 	if err := db.Ping(ctx); err != nil {

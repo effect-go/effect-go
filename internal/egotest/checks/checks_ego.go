@@ -35,9 +35,9 @@ func Sum(a, b string) (int, error) {
 }
 
 func Assign(s string) (n int, err error) {
-	v, err := parse(s)
-	if err != nil {
-		return 0, fmt.Errorf("parse: %w", err)
+	v, err2 := parse(s)
+	if err2 != nil {
+		return 0, fmt.Errorf("parse: %w", err2)
 	}
 	n = v
 //line checks.ego:27

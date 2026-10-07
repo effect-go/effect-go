@@ -53,9 +53,9 @@ func newCmd(args []string) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		src, err := projectTemplate.ReadFile(p)
-		if err != nil {
-			return err
+		src, err2 := projectTemplate.ReadFile(p)
+		if err2 != nil {
+			return err2
 		}
 //line new.ego:51
 		name := path.Base(p)
@@ -64,8 +64,8 @@ func newCmd(args []string) error {
 		}
 		if base, ok := strings.CutSuffix(name, ".tmpl"); ok {
 			var b bytes.Buffer
-			if err := template.Must(template.New(name).Parse(string(src))).Execute(&b, data); err != nil {
-				return err
+			if err3 := template.Must(template.New(name).Parse(string(src))).Execute(&b, data); err3 != nil {
+				return err3
 			}
 //line new.ego:58
 			name, src = base, b.Bytes()

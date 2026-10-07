@@ -86,7 +86,8 @@ func (g *fileGen) plan(tag ast.Expr, arms []*ast.MatchArm, isExpr bool) *matchPl
 	tt := g.typeOf(tag)
 	hasCase := g.planArms(p)
 	switch {
-	case hasCase && (tt == nil || implementsError(tt)):
+	// On an error, sentinel arms (io.EOF) use errors.Is too.
+	case hasCase && tt == nil, tt != nil && types.IsInterface(tt) && implementsError(tt):
 		p.mode = modeErrors
 	case hasCase:
 		p.mode = modeSum

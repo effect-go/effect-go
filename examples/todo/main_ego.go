@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 
@@ -41,6 +42,9 @@ func run(s *scope.Scope, args []string) (_ int, err error) {
 //line main.ego:21
 	cli, err := BuildCLI(ctx, s, Config{DatabaseURL: databaseURL(), Out: os.Stdout, Err: os.Stderr})
 	if err != nil {
+		if _, ok := errors.AsType[TodoError](err); ok {
+			return 0, err
+		}
 		return 0, Storage{Cause: err}
 	}
 //line main.ego:22

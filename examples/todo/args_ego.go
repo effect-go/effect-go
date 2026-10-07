@@ -78,6 +78,9 @@ func ParseArgs(args []string) (Command, error) {
 		prio := fs.String("p", "medium", "priority")
 		due := fs.String("due", "", "due date")
 		if err := fs.Parse(flags); err != nil {
+			if _, ok := errors.AsType[TodoError](err); ok {
+				return Command{}, err
+			}
 			return Command{}, Usage{Cause: err}
 		}
 //line args.ego:56
@@ -100,6 +103,9 @@ func ParseArgs(args []string) (Command, error) {
 		cmd.Action = List
 		all := fs.Bool("all", false, "include done todos")
 		if err := fs.Parse(flags); err != nil {
+			if _, ok := errors.AsType[TodoError](err); ok {
+				return Command{}, err
+			}
 			return Command{}, Usage{Cause: err}
 		}
 //line args.ego:64
@@ -115,6 +121,9 @@ func ParseArgs(args []string) (Command, error) {
 		}
 //line args.ego:68
 		if err := fs.Parse(flags); err != nil {
+			if _, ok := errors.AsType[TodoError](err); ok {
+				return Command{}, err
+			}
 			return Command{}, Usage{Cause: err}
 		}
 //line args.ego:69
@@ -124,6 +133,9 @@ func ParseArgs(args []string) (Command, error) {
 		for _, w := range words {
 			id, err := strconv.ParseInt(w, 10, 64)
 			if err != nil {
+				if _, ok := errors.AsType[TodoError](err); ok {
+					return Command{}, err
+				}
 				return Command{}, Invalid{Reason: fmt.Sprintf("bad id %q", w)}
 			}
 //line args.ego:74
@@ -135,6 +147,9 @@ func ParseArgs(args []string) (Command, error) {
 //line args.ego:78
 		cmd.Action = ShowStats
 		if err := fs.Parse(flags); err != nil {
+			if _, ok := errors.AsType[TodoError](err); ok {
+				return Command{}, err
+			}
 			return Command{}, Usage{Cause: err}
 		}
 

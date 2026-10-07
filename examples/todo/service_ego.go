@@ -5,6 +5,7 @@ package main
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -39,6 +40,9 @@ func (s *Service) Add(ctx context.Context, title string, p Priority, due *time.T
 	}
 	t, err := s.store.Insert(ctx, Todo{Title: title, Priority: p, Due: due})
 	if err != nil {
+		if _, ok := errors.AsType[TodoError](err); ok {
+			return Todo{}, err
+		}
 		return Todo{}, Storage{Cause: err}
 	}
 //line service.ego:29
@@ -52,6 +56,9 @@ func (s *Service) List(ctx context.Context, all bool) (_ []Todo, err error) {
 //line service.ego:34
 	todos, err := s.store.List(ctx)
 	if err != nil {
+		if _, ok := errors.AsType[TodoError](err); ok {
+			return nil, err
+		}
 		return nil, Storage{Cause: err}
 	}
 //line service.ego:35
@@ -90,6 +97,9 @@ func (s *Service) Done(ctx context.Context, id int64) (err error) {
 //line service.ego:52
 	found, err := s.store.Complete(ctx, id, s.now())
 	if err != nil {
+		if _, ok := errors.AsType[TodoError](err); ok {
+			return err
+		}
 		return Storage{Cause: err}
 	}
 //line service.ego:53
@@ -105,6 +115,9 @@ func (s *Service) Remove(ctx context.Context, id int64) (err error) {
 //line service.ego:60
 	found, err := s.store.Delete(ctx, id)
 	if err != nil {
+		if _, ok := errors.AsType[TodoError](err); ok {
+			return err
+		}
 		return Storage{Cause: err}
 	}
 //line service.ego:61
@@ -129,6 +142,9 @@ func (s *Service) Stats(ctx context.Context) (_ Stats, err error) {
 		func(ctx context.Context) (int, error) { return s.store.Count(ctx, Overdue, now) },
 	)
 	if err != nil {
+		if _, ok := errors.AsType[TodoError](err); ok {
+			return Stats{}, err
+		}
 		return Stats{}, Storage{Cause: err}
 	}
 //line service.ego:74
@@ -160,6 +176,9 @@ func ParseDue(s string) (*time.Time, error) {
 	}
 	d, err := time.Parse(time.DateOnly, s)
 	if err != nil {
+		if _, ok := errors.AsType[TodoError](err); ok {
+			return nil, err
+		}
 		return nil, Invalid{Reason: fmt.Sprintf("bad due date %q: use YYYY-MM-DD", s)}
 	}
 //line service.ego:93

@@ -122,6 +122,9 @@ func Charge(amount int) (string, error) {
 func Amount(s string) (int, error) {
 	n, err := strconv.Atoi(s)
 	if err != nil {
+		if _, ok := errors.AsType[PayError](err); ok {
+			return 0, err
+		}
 		return 0, Declined{Reason: fmt.Sprintf("bad amount %q", s)}
 	}
 //line status.ego:58
@@ -132,6 +135,9 @@ func Amount(s string) (int, error) {
 func Remote(s string) (int, error) {
 	n, err := strconv.Atoi(s)
 	if err != nil {
+		if _, ok := errors.AsType[PayError](err); ok {
+			return 0, err
+		}
 		return 0, Gateway{Cause: err}
 	}
 //line status.ego:64

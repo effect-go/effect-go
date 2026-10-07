@@ -1,0 +1,86 @@
+// Package regress holds programs the compiler once got wrong, with the
+// behavior a test checks.
+package regress
+
+import (
+	"io"
+	"strconv"
+)
+
+// CheckKeepsErr: check doesn't overwrite an err declared before it.
+func CheckKeepsErr(a, b string) (int, error) {
+	x, err := strconv.Atoi(a)
+	y := check strconv.Atoi(b)
+	if err != nil {
+		return -1, err
+	}
+	return x + y, nil
+}
+
+// ElseKeepsErr: neither does else.
+func ElseKeepsErr(a, b string) (int, error) {
+	x, err := strconv.Atoi(a)
+	y := strconv.Atoi(b) else 0
+	if err != nil {
+		return -1, err
+	}
+	return x + y, nil
+}
+
+// ElseKeepsNamedErr: nor a named err result.
+func ElseKeepsNamedErr(b string) (n int, err error) {
+	n = strconv.Atoi(b) else 7
+	return
+}
+
+// Percent: a % in a string with nothing interpolated stays one %.
+func Percent() (string, error) {
+	fail "disk 100% full"
+}
+
+// PercentF is the same with an f-string.
+func PercentF() string { return f"100%" }
+
+// Disk has cases without fields, so no message needs fmt.
+error Disk {
+	Full{} "disk 100% full"
+	Gone{}
+}
+
+// Sentinel: a match on an error with only sentinel arms uses errors.Is.
+func Sentinel(err error) string {
+	return match err {
+		nil    => "ok"
+		io.EOF => "eof"
+		_      => "other"
+	}
+}
+
+type User struct{ Name string }
+
+// OptAssign: x = u?.Name gives the zero value when u is nil.
+func OptAssign(us []*User) []string {
+	var out []string
+	name := "unset"
+	for _, u := range us {
+		name = u?.Name
+		out = append(out, name)
+	}
+	return out
+}
+
+// Article is what InTx fails with.
+error ArticleError {
+	Duplicate{ Slug string } "{Slug} exists"
+	Unavailable{ Cause error }
+}
+
+// inTx runs fn as a transaction would: its error comes back as an error.
+func inTx(fn func() error) error { return fn() }
+
+// PassThrough: check … as Unavailable lets a case of the set through.
+func PassThrough(slug string) ArticleError {
+	check inTx(func() error { return Duplicate{Slug: slug} }) as Unavailable
+	check inTx(func() error { return io.EOF }) as Unavailable
+	return nil
+}
