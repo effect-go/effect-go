@@ -1,5 +1,7 @@
 # Milestone 1: runtime library and demos
 
+*A report written during development (2026-10-01). It records what each milestone gate showed then; for how things work now, see [AGENTS.md](../AGENTS.md) and the [CHANGELOG](../CHANGELOG.md).*
+
 *2026-10-01. Plan step 1 of [assessment.md](assessment.md) §9.*
 
 ## Verdict

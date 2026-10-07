@@ -544,7 +544,7 @@ How the plan is ordered:
 - *one expression per `if` branch;*
 - *f-strings take format specs.*
 
-*Still open: anonymous `effect`, where panics may become values, unexported error-set inference, and the first audience.*
+*Still open: where panics may become values (frameworks such as goncini turn them into 500s at the HTTP boundary), unexported error-set inference, and the first audience. Anonymous `effect` functions exist: `effect() (T, error) { … }`.*
 
 - Should generated signatures return `error` (interop) or the sealed type (precision)? Current choice: `error`.
 - Should unexported functions declare their error sets or have them inferred?

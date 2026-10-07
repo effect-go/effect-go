@@ -1,7 +1,7 @@
 # Case study: miniflux's feed refreshing in effect-go
 
 *2026-10-02. [miniflux](https://github.com/miniflux/v2) at 703fe82: a
-self-hosted RSS reader (Apache-2.0, 9.7k stars, 81k lines of Go).*
+self-hosted RSS reader (Apache-2.0, 81k lines of Go).*
 
 We ported the part of miniflux that refreshes feeds in the background to
 effect-go:
@@ -182,7 +182,7 @@ We checked the error paths against the original on a real database: a feed whose
 
 ## Reproducing it
 
-The port is the `effect-go` branch of a local clone of miniflux at 703fe82 (its last commit is the `layer` experiment above). Its `go.mod` points at a local effect-go with a `replace` directive until effect-go is published. Steps:
+The port is the `effect-go` branch of a local clone of miniflux at 703fe82 (its last commit is the `layer` experiment above). Its `go.mod` points at a local effect-go with a `replace` directive; with a released effect-go, `go get github.com/effect-go/effect-go@latest` replaces it. Steps:
 1. `ego generate ./internal/...` regenerates the Go.
 2. `go test ./internal/...` runs miniflux's tests.
 3. [experiments/miniflux-shutdown](../experiments/miniflux-shutdown) has the test feed server, the script that times SIGTERM (`run.sh`) and the one that compares recorded errors (`errors.sh`).

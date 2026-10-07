@@ -1,7 +1,8 @@
 # effect-go for GoLand
 
 Support for `.ego` files in GoLand and the other JetBrains IDEs with
-language server support (IntelliJ IDEA Ultimate…), version 2024.2 or later:
+language server support (IntelliJ IDEA Ultimate…), tested on 2026.2 and
+built to load from 2024.2:
 highlighting, and hover, go to definition, completion, diagnostics, rename
 and formatting through `ego lsp`.
 

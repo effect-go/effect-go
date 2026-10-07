@@ -49,7 +49,9 @@ ego generate ./...        # writes service_ego.go: plain Go, commit it
 ```
 
 - **Review** the `.ego` file. Mark the generated files so GitHub collapses
-  them in diffs: `*_ego.go linguist-generated=true` in `.gitattributes`.
+  them in diffs, and highlight `.ego` files as Go, in `.gitattributes`:
+  `*_ego.go linguist-generated=true`, `*_ego_test.go linguist-generated=true`
+  and `*.ego linguist-language=Go` (`ego new` writes these).
 - **CI**: `ego generate -check ./...` fails if a generated file is stale,
   and `test -z "$(ego fmt -l .)"` if a `.ego` file isn't formatted.
 - **Tests**: `ego test ./...` regenerates, then runs `go test`. For

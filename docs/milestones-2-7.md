@@ -1,5 +1,7 @@
 # Milestones 2–7: the dialect, its tools, and layers
 
+*A report written during development (2026-10-02). It records what each milestone gate showed then; for how things work now, see [AGENTS.md](../AGENTS.md) and the [CHANGELOG](../CHANGELOG.md).*
+
 *2026-10-02. Plan steps 2–5 of [assessment.md](assessment.md) §9. Week 1 is in [milestone-1.md](milestone-1.md).*
 
 ## Verdict

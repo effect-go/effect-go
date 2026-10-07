@@ -44,7 +44,7 @@ effect Load(d Deps, id string) (Page, error) {
 }
 ```
 
-Both errors come back, a panic returns to the caller with its stack trace,
+Both errors come back, a panic re-panics in the caller with its original stack,
 the right `ctx` is passed for you, and `Load` gets a tracing span.
 `ego generate` turns this into [the Go you'd have written by hand](examples/dashboard/dashboard_ego.go),
 which you commit like any other code.
@@ -72,7 +72,7 @@ is the whole language on one page, for you and for coding agents.
 - [`trace`](trace): an OpenTelemetry span per call, and `slog` records that
   carry trace IDs.
 - [`layer`](layer): dependency wiring checked at build time, for large
-  graphs that tests vary.
+  graphs that tests vary (`ego generate` writes it).
 
 **The dialect**, in `.ego` files:
 - **Errors**: `check f()` returns the error for you; error sets list a
@@ -103,7 +103,7 @@ With one slow feed, its shutdown went from 18 seconds to instant.
 
 ## Status
 
-effect-go is young (v0.1) and meant to be used. A new release never
+effect-go is young (v0.2) and meant to be used. A new release never
 changes your build until you run `ego generate`. Before v1.0, breaking
 changes only come in minor versions (v0.2, v0.3…), each with a
 [changelog](CHANGELOG.md) entry saying how to update. New Go releases are

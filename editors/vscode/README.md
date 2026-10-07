@@ -33,5 +33,5 @@ and search altogether.
 
 ```bash
 npm install && npx @vscode/vsce package
-code --install-extension effect-go-0.4.0.vsix
+code --install-extension effect-go-*.vsix
 ```

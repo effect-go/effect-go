@@ -9,8 +9,8 @@
 | `x := check f(a)` | if `f` fails, return its error wrapped as `"f: <err>"` (the label is the last two parts of the callee: `repo.Find`) |
 | `x := check f(a) "load {a}"` | same, as `"load <a>: <err>"`; `{expr}` interpolates |
 | `x := check f(a) ""` | return the error as it is, without a label (when it already says enough, or callers compare it to `io.EOF`) |
-| `x := check f(a) as Storage` | return the error as the case `Storage{Cause: err}` of this function's error set |
-| `x := check f(a) as Invalid{Reason: "bad {a}"}` | the same, with fields of your own; the cause still goes in an error field if the case has one |
+| `x := check f(a) as Storage` | return the error as the case `Storage{Cause: err}` of this function's error set; an error that already is one of the set's cases passes through unchanged |
+| `x := check f(a) as Invalid{Reason: f"bad {a}"}` | the same, with fields of your own; the cause still goes in an error field if the case has one |
 | `x := f(a) else fallback` | on error, use `fallback` |
 | `x := check f(a) else { NotFound(_) => 0; io.EOF => 0 }` | the arms give the value for the errors they match (cases as in `match`, sentinels with `errors.Is`); other errors are returned as by `check`. Without `check` the arms must cover every error |
 | `x := must f(a)` | on error, panic |
@@ -29,12 +29,13 @@ error UserError {                  // sealed interface + one struct per case
 enum Shape { Circle{ R float64 }; Dot }  // with data: a sealed interface
 enum Color { Red; Green }                // without: iota constants + String()
 
-match err {                         // statement; on errors it uses errors.AsType
+match err {                         // statement; on errors it uses errors.AsType and errors.Is
     nil         => ok(w)
     NotFound(e) => http.Error(w, f"no user {e.ID}", 404)  // e is the case value
     Storage(_)  => { log(err); http.Error(w, "retry", 503) }
 }
 code := match c { Red => 1; _ => 0 }   // expression form: every arm is one value
+msg := match err { nil => "ok"; Timeout(_), Busy(_) => "retry"; _ => "failed" }  // several patterns per arm; on an error, the expression form needs a nil arm
 ```
 
 `match` must cover every case of an error set, enum or named-constant type, or have a `_` arm. A match on an `error` can leave out `_` only if the error can't be anything else: it comes from a function declared to return the set (from any package), or from a variable only assigned such errors, or it is a parameter declared as the set. Otherwise (a parameter of type `error`, an error from plain Go) it needs `_`. Functions declared to return `(T, UserError)` compile to `(T, error)`; `fail` takes one of its cases. A parameter declared as `UserError` compiles to `error`, and callers in `.ego` must pass an error of the set: `func Code(err UserError) int { return match err {…} }`.
@@ -46,8 +47,8 @@ effect (s *Shop) Checkout(id CartID) (Receipt, error) {   // instead of func
     cart := check s.carts.Load(id)                          // ctx passed for you
     user, hold := check all(s.users.Get(cart.User), s.stock.Reserve(cart.Items))
     pay := check retry(s.policy, s.pay.Charge(user, cart.Total)) "charge {id}"
-    img := race(s.cdn.Primary(k), s.cdn.Mirror(k)) else DefaultImage
-    return Receipt{cart, hold, pay}, nil
+    img := race(s.cdn.Primary(cart.Image), s.cdn.Mirror(cart.Image)) else DefaultImage
+    return Receipt{cart, hold, pay, img}, nil
 }
 ```
 
@@ -57,8 +58,8 @@ effect (s *Shop) Checkout(id CartID) (Receipt, error) {   // instead of func
 - Interface methods: `effect Get(id ID) (User, error)` declares `Get(ctx context.Context, id ID)`. From plain Go: `u, err := svc.Get(r.Context(), id)`.
 - To bound several steps with `timeout`, put them in their own effect function: `return timeout(2*time.Second, load(d, id))`.
 - `each(items, 8, x => s.load(x))` calls `s.load` on every item, 8 at a time, and returns the results in order; it fails like `all`. The function can be a method taking `(ctx, item)`: `each(ids, 8, s.users.Get)`.
-- `all(a(), b())` runs calls in parallel (up to 4, any types; more must share a type) and returns all values; the first failure cancels the others, and the error joins every real failure. `race(a(), b())`: first success wins, losers are cancelled; if all fail, the error joins them all. `retry(policy, f())` with a `schedule.Schedule`. `repeat(policy, f())` calls `f` now, then after each delay of the policy, until the policy stops, `f` fails or `ctx` ends (which is not an error): `repeat(schedule.Spaced(time.Minute).Delayed(), poll())` is a ticker loop that stops with `ctx`. `timeout(d, f())` fails with an error matching `context.DeadlineExceeded`. Arguments are calls, run lazily with their own `ctx`; they nest: `all(a(), retry(p, b()))`. They need an effect function (or a `ctx` in scope). They return `(values…, error)`: use `check` (a label goes after the closing parenthesis), `else`, or `return timeout(…)`. Neither `all` nor `race` adds a label. A panic in a branch re-panics in the caller.
-- Policies: `schedule.Exponential(100*time.Millisecond)` waits 100ms, 200ms, 400ms…; `schedule.Recurs(3)` allows at most 3 retries; `schedule.Max(a, b)` continues while both do, with the longer delay (so `Max(Exponential(d), Recurs(3))` is "back off, 3 times"); `.Jittered()` spreads delays ±20% (all of these are `Schedule` methods, usable anywhere, including a package-level `var`); `.While(func(error) bool)` stops on errors it rejects; `.UpTo(d)` caps each delay; `.Tap((n, err, wait) => log(…))` runs before each retry (put it last); `.Delayed()` makes `repeat` wait before its first call too (last). Every retry is also an event on the current span.
+- `all(a(), b())` runs calls in parallel (up to 4, any types; more must share a type and come back as one slice) and returns all values; the first failure cancels the others, and the error joins every real failure. `race(a(), b())`: first success wins, losers are cancelled; if all fail, the error joins them all. `retry(policy, f())` with a `schedule.Schedule`. `repeat(policy, f())` calls `f` now, then after each delay of the policy, until the policy stops, `f` fails or `ctx` ends (which is not an error, even when it interrupts a call); it returns `f`'s last value and an error, so use `check repeat(…)` in a function returning only `error`: `repeat(schedule.Spaced(time.Minute).Delayed(), poll())` is a ticker loop that stops with `ctx`. `timeout(d, f())` fails with an error matching `context.DeadlineExceeded`. Arguments are calls, run lazily with their own `ctx`; they nest: `all(a(), retry(p, b()))`. They need an effect function (or a `ctx` in scope). They return `(values…, error)`: use `check` (a label goes after the closing parenthesis), `else`, or `return timeout(…)`. Neither `all` nor `race` adds a label. A panic in a branch re-panics in the caller.
+- Policies: `schedule.Exponential(100*time.Millisecond)` waits 100ms, 200ms, 400ms…; `schedule.Recurs(3)` allows at most 3 retries; `schedule.Max(a, b)` continues while both do, with the longer delay (so `Max(Exponential(d), Recurs(3))` is "back off, 3 times"); `.Jittered()` spreads delays ±20% (all of these are `Schedule` methods, usable anywhere, including a package-level `var`); `.While(func(error) bool)` stops on errors it rejects; `.UpTo(d)` caps each delay; `.Tap((n, err, wait) => log(…))` runs before each retry (put it last); `.Delayed()` makes `repeat` wait before its first call too. Every retry is also an event on the current span.
 
 ## Shorthand
 
@@ -70,20 +71,21 @@ effect (s *Shop) Checkout(id CartID) (Receipt, error) {   // instead of func
 | `u?.Address?.City` | stops at the first nil pointer, giving the zero value |
 | `a ?? b` | `b` when `a` is nil, a missing map key, a failed type assertion, or a `(v, ok)` call returning `!ok`. Never for errors |
 
-`?.` can't follow a call. These forms can't appear in `for`/`case` headers; assign them to a variable first.
+`?.` can't follow a call. `?.`, `??` and conditional values can't appear in `if`, `for` and `switch` headers or `case` lists; assign them to a variable first.
 
 ## Wiring (plain Go)
 
 ```go
-//go:build egolayers                       // injector file: never compiled
+//go:build egolayers
+// The injector file above is never compiled: ego generate writes the real BuildApp.
 func BuildApp(ctx context.Context, s *scope.Scope, cfg Config) (*App, error) {
     panic(layer.Build(AppSet))               // or layer.Build(AppSet, NewMemRepo) to swap one
 }
 var AppSet = layer.Set(layer.Close(NewDB), NewRepo, NewService, NewApp)
 ```
 
-Providers are ordinary constructors returning `T`, `(T, error)` or `(T, cleanup, error)`. `ego generate` writes `layers_ego.go`. Run the app inside `scope.Run(ctx, func(s *scope.Scope) (T, error) {…})`; finalizers run in reverse order when it returns. In `main`, `scope.Main(s => serve(s, cfg))` does that with a scope SIGINT and SIGTERM cancel, and exits with status 1 if `serve` fails.
+Providers are ordinary constructors returning `T`, `(T, error)` or `(T, cleanup, error)`. `ego generate` writes `layers_ego.go`. Run the app inside `scope.Run(ctx, func(s *scope.Scope) (T, error) {…})`; finalizers run in reverse order when it returns. In `main`, `scope.Main(s => serve(s, cfg))` does that with a scope that SIGINT and SIGTERM cancel (a second signal kills the program); it exits with status 1 if `serve` fails, and takes `scope.StopTimeout(d)` to bound shutdown.
 
 ## Runtime from plain Go
 
-`scope.All2..All4`, `scope.Each`, `scope.Race`, `scope.Timeout`, `schedule.Retry`, `scope.Run`/`Fork`/`Acquire`, `trace.Start`/`trace.End(span, &err)`: the dialect lowers to exactly these. `trace.LogHandler(h)` wraps an `slog.Handler` so records carry `trace_id` and `span_id`; in an effect function `slog.InfoContext("msg", …)` gets `ctx` like any call.
+`scope.All2..All4`, `scope.All`, `scope.Each`, `scope.Race`, `scope.Timeout`, `schedule.Retry`, `schedule.Repeat`, `scope.Run`/`Fork`/`Acquire`, `trace.Start`/`trace.End(span, &err)`: the dialect lowers to exactly these. `trace.LogHandler(h)` wraps an `slog.Handler` so records carry `trace_id` and `span_id`; in an effect function `slog.InfoContext("msg", …)` gets `ctx` like any call.
