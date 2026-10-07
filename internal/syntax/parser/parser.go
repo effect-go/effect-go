@@ -312,7 +312,7 @@ func (p *parser) errorExpected(pos token.Pos, msg string) {
 			// print 123 rather than 'INT', etc.
 			msg += ", found " + p.lit
 		default:
-			msg += ", found '" + p.tok.String() + "'"
+			msg += ", found '" + scanner.TokenString(p.tok) + "'"
 		}
 	}
 	p.error(pos, msg)
@@ -321,7 +321,7 @@ func (p *parser) errorExpected(pos token.Pos, msg string) {
 func (p *parser) expect(tok token.Token) token.Pos {
 	pos := p.pos
 	if p.tok != tok {
-		p.errorExpected(pos, "'"+tok.String()+"'")
+		p.errorExpected(pos, "'"+scanner.TokenString(tok)+"'")
 	}
 	p.next() // make progress
 	return pos

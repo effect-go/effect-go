@@ -21,6 +21,7 @@ effect   (s *S)Get( id int )(int,E){
   t := if v>1{ "big" }else{ "small" }
   h := effect(w http.ResponseWriter,r *http.Request){ fmt.Fprint(w, v) }
   task := effect ()(int,error){return v,nil}
+  done := effect(c chan struct{}){ <-c }
   e := effect(x)
   return v+w+n,nil
 }

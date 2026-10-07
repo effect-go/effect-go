@@ -3,6 +3,7 @@ package format_test
 import (
 	"bytes"
 	"flag"
+	"fmt"
 	stdformat "go/format"
 	"io/fs"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
+	"unicode"
 
 	"github.com/effect-go/effect-go/internal/syntax/format"
 )
@@ -77,6 +80,53 @@ func TestIdempotent(t *testing.T) {
 	})
 	if n < 10 {
 		t.Fatalf("only %d .ego files", n)
+	}
+}
+
+// Parsing prefixes of every .ego file ends, with a result or an error: the
+// editor parses half-typed files. The prefixes end at each line, and inside
+// each parenthesis, just after "(" and after the name that follows, where
+// a lookahead for "effect(" literals used to loop forever.
+func TestPrefixesTerminate(t *testing.T) {
+	var paths []string
+	filepath.WalkDir("../../..", func(path string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() && (d.Name() == "node_modules" || strings.HasPrefix(d.Name(), ".")) && path != "../../.." {
+			return filepath.SkipDir
+		}
+		if strings.HasSuffix(path, ".ego") {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+	var at atomic.Value
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for _, path := range paths {
+			src, _ := os.ReadFile(path)
+			for i, c := range src {
+				var cuts []int
+				switch c {
+				case '\n':
+					cuts = []int{i + 1}
+				case '(':
+					j := i + 1
+					for j < len(src) && (src[j] == '_' || unicode.IsLetter(rune(src[j])) || unicode.IsDigit(rune(src[j]))) {
+						j++
+					}
+					cuts = []int{i + 1, j}
+				}
+				for _, n := range cuts {
+					at.Store(fmt.Sprintf("%s, cut after byte %d", path, n))
+					format.Source(src[:n])
+				}
+			}
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Minute):
+		t.Fatalf("parsing hangs: %s", at.Load())
 	}
 }
 

@@ -96,6 +96,13 @@ func (p *parser) isEffectLit() bool {
 			}
 		case token.LBRACE:
 			return depth == 0 && !params
+		case token.STRUCT, token.INTERFACE:
+			// A type's body, as in chan struct{}: skip its braces.
+			if !skipBraces(s) {
+				return false
+			}
+		case token.EOF:
+			return false
 		case token.IDENT, token.PERIOD, token.MUL, token.COMMA, token.MAP, token.CHAN, token.ARROW, token.FUNC, token.INT, token.ELLIPSIS:
 		default:
 			if depth == 0 {
@@ -106,6 +113,24 @@ func (p *parser) isEffectLit() bool {
 			return false
 		}
 	}
+}
+
+// skipBraces skips "{ … }", reporting whether it found the closing brace.
+func skipBraces(s *scanner.Scanner) bool {
+	if _, tok, _ := s.ScanToken(); tok != token.LBRACE {
+		return false
+	}
+	for depth := 1; depth > 0; {
+		switch _, tok, _ := s.ScanToken(); tok {
+		case token.LBRACE:
+			depth++
+		case token.RBRACE:
+			depth--
+		case token.EOF:
+			return false
+		}
+	}
+	return true
 }
 
 // parseEffectLit parses "effect (params) results { body }".
