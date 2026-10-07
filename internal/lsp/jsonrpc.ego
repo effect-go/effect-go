@@ -33,12 +33,18 @@ type conn struct {
 	log  io.Writer // may be nil
 }
 
+// maxMessage bounds a message: a corrupt header mustn't allocate gigabytes.
+const maxMessage = 256 << 20
+
 func newConn(r io.Reader, w io.Writer) *conn { return &conn{r: bufio.NewReader(r), w: w} }
 
 func (c *conn) read() (*message, error) {
 	tp := textproto.NewReader(c.r)
 	h := check tp.ReadMIMEHeader() ""
 	n := check strconv.Atoi(strings.TrimSpace(h.Get("Content-Length"))) "bad Content-Length"
+	if n < 0 || n > maxMessage {
+		fail "bad Content-Length {n}"
+	}
 	body := make([]byte, n)
 	check io.ReadFull(c.r, body) ""
 	m := &message{}

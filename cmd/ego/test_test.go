@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -60,4 +61,27 @@ func copyPackage(t *testing.T, from string, files ...string) string {
 		}
 	}
 	return dir
+}
+
+// Flag values and what follows -args aren't packages; import paths are.
+func TestTestPackages(t *testing.T) {
+	cases := []struct {
+		args []string
+		want []string
+	}{
+		{nil, []string{"."}},
+		{[]string{"-run", "./x", "./a/...", "-v", "-count=1"}, []string{"./a/..."}},
+		{[]string{"-coverprofile", "./c.out", "."}, []string{"."}},
+		{[]string{"./b", "-args", "./c"}, []string{"./b"}},
+	}
+	for _, c := range cases {
+		got, err := testPackages(c.args)
+		if err != nil || !slices.Equal(got, c.want) {
+			t.Errorf("testPackages(%q) = %q, %v; want %q", c.args, got, err, c.want)
+		}
+	}
+	got, err := testPackages([]string{"github.com/effect-go/effect-go/scope"})
+	if err != nil || len(got) != 1 || filepath.Base(got[0]) != "scope" {
+		t.Errorf("import path: %q, %v", got, err)
+	}
 }

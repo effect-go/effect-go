@@ -44,11 +44,12 @@ func fmtCmd(args []string) error {
 	}
 	failed := false
 	for _, root := range paths {
-		if err := filepath.WalkDir(strings.TrimSuffix(root, "/..."), func(path string, d fs.DirEntry, err error) error {
+		root = strings.TrimSuffix(root, "/...")
+		if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-//line fmt.ego:35
+//line fmt.ego:36
 			if d.IsDir() {
 				if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "vendor" || d.Name() == "testdata") {
 					return filepath.SkipDir
@@ -62,7 +63,7 @@ func fmtCmd(args []string) error {
 			if err2 != nil {
 				return err2
 			}
-//line fmt.ego:45
+//line fmt.ego:46
 			out, err := format.Source(src)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s:%v\n", path, err)
@@ -86,7 +87,7 @@ func fmtCmd(args []string) error {
 			return err
 		}
 	}
-//line fmt.ego:66
+//line fmt.ego:67
 	if failed {
 		return errSilent
 	}

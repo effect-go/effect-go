@@ -3,9 +3,11 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -15,21 +17,17 @@ import (
 // testCmd regenerates the packages to test, then runs go test with the same
 // arguments, so tests never run against stale generated code.
 //
-//line test.ego:15
+//line test.ego:17
 func testCmd(args []string) error {
-	var pkgs []string
-	for _, a := range args {
-		if a == "." || a == ".." || strings.HasPrefix(a, "./") || strings.HasPrefix(a, "../") || strings.HasPrefix(a, "/") {
-			pkgs = append(pkgs, a)
-		}
+	pkgs, err := testPackages(args)
+	if err != nil {
+		return err
 	}
-	if len(pkgs) == 0 {
-		pkgs = []string{"."}
-	}
+//line test.ego:19
 	if err := generate(pkgs); err != nil {
 		return err
 	}
-//line test.ego:26
+//line test.ego:20
 	if wantsCoverage(args) {
 		restore, err := withoutLines(pkgs)
 		defer restore()
@@ -46,6 +44,49 @@ func testCmd(args []string) error {
 		return errSilent
 	}
 	return nil
+}
+
+// boolFlags are go test's and go build's flags that take no value: any
+// other flag written without = takes the next argument.
+var boolFlags = map[string]bool{
+	"a": true, "asan": true, "benchmem": true, "cover": true, "failfast": true, "fullpath": true,
+	"json": true, "linkshared": true, "modcacherw": true, "msan": true, "n": true, "race": true,
+	"short": true, "trimpath": true, "v": true, "work": true, "x": true,
+}
+
+// testPackages returns the directories of the packages go test would test
+// with args: patterns such as ./... as they are, import paths through go
+// list. Flag values and what follows -args are not packages.
+func testPackages(args []string) ([]string, error) {
+	var local, paths []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "-args" || a == "--args" {
+			break
+		}
+		if strings.HasPrefix(a, "-") {
+			if name := strings.TrimLeft(a, "-"); !strings.Contains(name, "=") && !boolFlags[name] {
+				i++ // the flag's value
+			}
+			continue
+		}
+		if a == "." || a == ".." || strings.HasPrefix(a, "./") || strings.HasPrefix(a, "../") || filepath.IsAbs(a) {
+			local = append(local, a)
+		} else {
+			paths = append(paths, a)
+		}
+	}
+	if len(paths) > 0 {
+		out, err := exec.Command("go", append([]string{"list", "-e", "-f", "{{.Dir}}"}, paths...)...).Output()
+		if err != nil {
+			return nil, fmt.Errorf("go list: %v", err)
+		}
+		local = append(local, strings.Fields(string(out))...)
+	}
+	if len(local) == 0 {
+		local = []string{"."}
+	}
+	return local, nil
 }
 
 func wantsCoverage(args []string) bool {

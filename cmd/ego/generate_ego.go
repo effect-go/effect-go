@@ -24,9 +24,9 @@ import (
 func generate(args []string) error {
 	fl := flag.NewFlagSet("generate", flag.ExitOnError)
 	lines := fl.Bool("lines", true, "add //line directives pointing at the .ego files")
-	check := fl.Bool("check", false, "write nothing; fail if a generated file is missing or stale (for CI)")
+	checkFlag := fl.Bool("check", false, "write nothing; fail if a generated file is missing or stale (for CI)")
 	fl.Parse(args)
-	checkOnly = *check
+	checkOnly = *checkFlag
 	dirs, err := egoDirs(fl.Args())
 	if err != nil {
 		return err
@@ -232,13 +232,14 @@ func egoDirs(args []string) ([]string, error) {
 	return dirs, nil
 }
 
-// dependencyOrder sorts dirs so that a package comes after the packages it
-// imports: the compiler type-checks against their generated code.
+// exists reports whether path exists.
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
 
+// dependencyOrder sorts dirs so that a package comes after the packages it
+// imports: the compiler type-checks against their generated code.
 func dependencyOrder(dirs []string) []string {
 	paths := map[string]string{} // import path -> dir
 	for _, d := range dirs {

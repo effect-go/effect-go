@@ -248,8 +248,12 @@ func (p *Proxy) schedule(dir string) {
 	})
 }
 
-// flush compiles dir now if it has edits not compiled yet.
+// flush compiles dir now if it has edits not compiled yet. It holds
+// regenMu from the start, so it also waits for a compilation in progress:
+// a request must not map positions with the source map of older text.
 func (p *Proxy) flush(dir string) error {
+	p.regenMu.Lock()
+	defer p.regenMu.Unlock()
 	p.mu.Lock()
 	t := p.dirty[dir]
 	delete(p.dirty, dir)
@@ -258,7 +262,7 @@ func (p *Proxy) flush(dir string) error {
 		return nil
 	}
 	t.Stop()
-	return p.regen(dir)
+	return p.regenLocked(dir)
 }
 
 // close forgets a .ego document: its generated buffer in gopls and its
@@ -285,6 +289,11 @@ func (p *Proxy) close(uri string) error {
 func (p *Proxy) regen(dir string) error {
 	p.regenMu.Lock()
 	defer p.regenMu.Unlock()
+	return p.regenLocked(dir)
+}
+
+// regenLocked is regen, with regenMu held.
+func (p *Proxy) regenLocked(dir string) error {
 	p.mu.Lock()
 	overlay := map[string][]byte{}
 	for _, d := range p.egos {
@@ -467,7 +476,9 @@ func (p *Proxy) handleGopls(m *message) error {
 		}
 		var ds []any
 		for _, d := range params.Diagnostics {
-			ds = append(ds, p.fromGen(d, gen, false))
+			if m := p.fromGen(d, gen, false); m != nil {
+				ds = append(ds, m) // a diagnostic in generated-only code has no .ego position
+			}
 		}
 		p.mu.Lock()
 		p.goDiags[gen.egoURI] = ds
@@ -613,7 +624,10 @@ func (p *Proxy) mapRange(v any, gen *genDoc) (any, bool) {
 		return nil, false
 	}
 	p.mu.Lock()
-	g := gen.out // the version gopls answered about may be older; the map matches it
+	// The newest output: if a compilation finished after the request was
+	// sent, gopls answered about an older version, and positions may be off
+	// until the next answer.
+	g := gen.out
 	p.mu.Unlock()
 	if g == nil {
 		return nil, false

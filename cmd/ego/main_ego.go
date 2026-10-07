@@ -2,12 +2,12 @@
 
 // Command ego compiles and formats effect-go (.ego) files.
 //
-//	ego generate [packages]   write the Go for each .ego file (default ./...)
-//	ego fmt [-l] [-w] [paths] format .ego files (default: the current directory, recursively)
+//	ego generate [-check] [packages] write the Go for each .ego file (default ./...)
+//	ego fmt [-l] [-w] [paths] format .ego files (default: stdin to stdout; ./... with -l or -w)
 //	ego test [args]           ego generate, then go test with the same arguments
 //	ego vet [packages]        go vet, then the effect-go analyzers
 //	ego eject [-w] [packages] turn the packages into plain Go, for good
-//	ego new module/path [dir] create a project
+//	ego new [-replace dir] module/path [dir] create a project
 //	ego lsp                   run the language server proxy in front of gopls
 //	ego version
 package main
@@ -33,7 +33,7 @@ func usage() {
 
 Usage:
 	ego generate [-check] [dirs]              generate x_ego.go for each x.ego, and layers_ego.go (default ./...)
-	ego fmt [-l] [-w] [paths]                 format .ego files (default ./...)
+	ego fmt [-l] [-w] [paths]                 format .ego files (default: stdin to stdout; ./... with -l or -w)
 	ego test [go test flags] [packages]       ego generate, then go test with the same arguments
 	ego vet [packages]                        go vet, then the effect-go analyzers
 	ego eject [-w] [packages]                 turn .ego files into plain .go files for good (prints the plan without -w)

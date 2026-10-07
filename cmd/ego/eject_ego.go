@@ -102,7 +102,12 @@ func ejectCmd(args []string) error {
 // keeps the generated name if the plain one is taken.
 func plainName(gen string) string {
 	dir, base := filepath.Split(gen)
-	name := strings.Replace(base, "_ego", "", 1)
+	name := base
+	if n, ok := strings.CutSuffix(base, "_ego_test.go"); ok {
+		name = n + "_test.go"
+	} else if n, ok := strings.CutSuffix(base, "_ego.go"); ok {
+		name = n + ".go"
+	}
 	if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
 		return gen
 	}

@@ -37,6 +37,9 @@ type conn struct {
 	log  io.Writer // may be nil
 }
 
+// maxMessage bounds a message: a corrupt header mustn't allocate gigabytes.
+const maxMessage = 256 << 20
+
 func newConn(r io.Reader, w io.Writer) *conn { return &conn{r: bufio.NewReader(r), w: w} }
 
 func (c *conn) read() (*message, error) {
@@ -45,22 +48,25 @@ func (c *conn) read() (*message, error) {
 	if err != nil {
 		return nil, err
 	}
-//line jsonrpc.ego:41
+//line jsonrpc.ego:44
 	n, err := strconv.Atoi(strings.TrimSpace(h.Get("Content-Length")))
 	if err != nil {
 		return nil, fmt.Errorf("bad Content-Length: %w", err)
 	}
-//line jsonrpc.ego:42
+//line jsonrpc.ego:45
+	if n < 0 || n > maxMessage {
+		return nil, fmt.Errorf("bad Content-Length %v", n)
+	}
 	body := make([]byte, n)
 	if _, err := io.ReadFull(c.r, body); err != nil {
 		return nil, err
 	}
-//line jsonrpc.ego:44
+//line jsonrpc.ego:50
 	m := &message{}
 	if err := json.Unmarshal(body, m); err != nil {
 		return nil, err
 	}
-//line jsonrpc.ego:46
+//line jsonrpc.ego:52
 	if c.log != nil {
 		fmt.Fprintf(c.log, "<- %s %s\n", c.name, truncate(body))
 	}
@@ -73,7 +79,7 @@ func (c *conn) write(m *message) error {
 	if err != nil {
 		return err
 	}
-//line jsonrpc.ego:55
+//line jsonrpc.ego:61
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.log != nil {
@@ -82,11 +88,11 @@ func (c *conn) write(m *message) error {
 	if _, err := fmt.Fprintf(c.w, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
 		return err
 	}
-//line jsonrpc.ego:61
+//line jsonrpc.ego:67
 	if _, err := c.w.Write(body); err != nil {
 		return err
 	}
-//line jsonrpc.ego:62
+//line jsonrpc.ego:68
 	return nil
 }
 
@@ -95,7 +101,7 @@ func (c *conn) notify(method string, params any) error {
 	if err != nil {
 		return err
 	}
-//line jsonrpc.ego:67
+//line jsonrpc.ego:73
 	return c.write(&message{Method: method, Params: p})
 }
 
@@ -104,7 +110,7 @@ func (c *conn) reply(id json.RawMessage, result any) error {
 	if err != nil {
 		return err
 	}
-//line jsonrpc.ego:72
+//line jsonrpc.ego:78
 	return c.write(&message{ID: id, Result: r})
 }
 

@@ -270,8 +270,12 @@ func (p *Proxy) schedule(dir string) {
 	})
 }
 
-// flush compiles dir now if it has edits not compiled yet.
+// flush compiles dir now if it has edits not compiled yet. It holds
+// regenMu from the start, so it also waits for a compilation in progress:
+// a request must not map positions with the source map of older text.
 func (p *Proxy) flush(dir string) error {
+	p.regenMu.Lock()
+	defer p.regenMu.Unlock()
 	p.mu.Lock()
 	t := p.dirty[dir]
 	delete(p.dirty, dir)
@@ -280,7 +284,7 @@ func (p *Proxy) flush(dir string) error {
 		return nil
 	}
 	t.Stop()
-	return p.regen(dir)
+	return p.regenLocked(dir)
 }
 
 // close forgets a .ego document: its generated buffer in gopls and its
@@ -301,7 +305,7 @@ func (p *Proxy) close(uri string) error {
 			return err
 		}
 	}
-//line proxy.ego:280
+//line proxy.ego:284
 	return p.editor.notify("textDocument/publishDiagnostics", map[string]any{"uri": uri, "diagnostics": []any{}})
 }
 
@@ -310,6 +314,11 @@ func (p *Proxy) close(uri string) error {
 func (p *Proxy) regen(dir string) error {
 	p.regenMu.Lock()
 	defer p.regenMu.Unlock()
+	return p.regenLocked(dir)
+}
+
+// regenLocked is regen, with regenMu held.
+func (p *Proxy) regenLocked(dir string) error {
 	p.mu.Lock()
 	overlay := map[string][]byte{}
 	for _, d := range p.egos {
@@ -322,7 +331,7 @@ func (p *Proxy) regen(dir string) error {
 	if err != nil {
 		return err
 	}
-//line proxy.ego:297
+//line proxy.ego:306
 	byFile := map[string][]any{}
 	for path := range overlay {
 		byFile[pathToURI(path)] = []any{}
@@ -378,7 +387,7 @@ func (p *Proxy) regen(dir string) error {
 			return err
 		}
 	}
-//line proxy.ego:350
+//line proxy.ego:359
 	for _, uri := range uris {
 		p.publish(uri)
 	}
@@ -391,7 +400,7 @@ func (p *Proxy) save(dir string) error {
 	if err != nil {
 		return err
 	}
-//line proxy.ego:359
+//line proxy.ego:368
 	if len(res.Diags) > 0 {
 		return nil
 	}
@@ -403,7 +412,7 @@ func (p *Proxy) save(dir string) error {
 			return err
 		}
 	}
-//line proxy.ego:368
+//line proxy.ego:377
 	return nil
 }
 
@@ -469,7 +478,7 @@ func (p *Proxy) fromGopls() error {
 		if err != nil {
 			return err
 		}
-//line proxy.ego:430
+//line proxy.ego:439
 		if err := p.handleGopls(m); err != nil {
 			p.logf("from gopls: %v", err)
 		}
@@ -493,7 +502,7 @@ func (p *Proxy) handleGopls(m *message) error {
 		if err := json.Unmarshal(m.Result, &v); err != nil {
 			return err
 		}
-//line proxy.ego:451
+//line proxy.ego:460
 		v = p.fromGen(v, pd.gen, pd.method == "textDocument/rename")
 		r, _ := json.Marshal(v)
 		m.Result = r
@@ -513,7 +522,9 @@ func (p *Proxy) handleGopls(m *message) error {
 		}
 		var ds []any
 		for _, d := range params.Diagnostics {
-			ds = append(ds, p.fromGen(d, gen, false))
+			if m := p.fromGen(d, gen, false); m != nil {
+				ds = append(ds, m) // a diagnostic in generated-only code has no .ego position
+			}
 		}
 		p.mu.Lock()
 		p.goDiags[gen.egoURI] = ds
@@ -552,7 +563,7 @@ func (p *Proxy) toGen(raw json.RawMessage, egoText []byte, genURI string, gen *l
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return nil, err
 	}
-//line proxy.ego:507
+//line proxy.ego:518
 	src := newText(egoText)
 	out := newText(gen.Raw)
 	conv := func(pos any) any {
@@ -662,7 +673,10 @@ func (p *Proxy) mapRange(v any, gen *genDoc) (any, bool) {
 		return nil, false
 	}
 	p.mu.Lock()
-	g := gen.out // the version gopls answered about may be older; the map matches it
+	// The newest output: if a compilation finished after the request was
+	// sent, gopls answered about an older version, and positions may be off
+	// until the next answer.
+	g := gen.out
 	p.mu.Unlock()
 	if g == nil {
 		return nil, false

@@ -30,7 +30,8 @@ func fmtCmd(args []string) error {
 	}
 	failed := false
 	for _, root := range paths {
-		check filepath.WalkDir(strings.TrimSuffix(root, "/..."), func(path string, d fs.DirEntry, err error) error {
+		root = strings.TrimSuffix(root, "/...")
+		check filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			check err
 			if d.IsDir() {
 				if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "vendor" || d.Name() == "testdata") {

@@ -32,7 +32,7 @@ func isVetTool(args []string) bool {
 	if len(args) < 2 {
 		return false
 	}
-	return args[1] == "-V=full" || args[1] == "-flags" || strings.HasSuffix(args[len(args)-1], ".cfg")
+	return args[1] == "-V=full" || args[1] == "-flags" || strings.HasPrefix(args[1], "-") && strings.HasSuffix(args[len(args)-1], ".cfg") || len(args) == 2 && strings.HasSuffix(args[1], ".cfg")
 }
 
 func vetTool() { unitchecker.Main(exhaustive.Analyzer, ctxcheck.Analyzer, fiberjoin.Analyzer) }
