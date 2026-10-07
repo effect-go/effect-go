@@ -15,4 +15,6 @@ func f(s *scope.Scope) {
 	println(lost != nil)
 	kept := scope.Fork(s, work)
 	kept.Join()
+	var declared = scope.Fork(s, work) // want "fiber declared is never joined"
+	println(declared != nil)
 }

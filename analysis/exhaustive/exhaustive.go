@@ -10,7 +10,9 @@ package exhaustive
 
 import (
 	"go/ast"
+	"go/constant"
 	"go/types"
+	"slices"
 	"sort"
 	"strings"
 
@@ -116,6 +118,23 @@ func sealed(iface *types.Interface, name string) bool {
 	return false
 }
 
+// consecutive reports whether integer constants take consecutive values, as
+// iota gives an enum's: durations (time.Second…) and bit flags
+// (fs.ModeDir…) are named constants too, but not enums.
+func consecutive(consts []*types.Const) bool {
+	var vals []int64
+	for _, c := range consts {
+		v, ok := constant.Int64Val(constant.ToInt(c.Val()))
+		if !ok {
+			return c.Val().Kind() == constant.String // string enums: any values
+		}
+		vals = append(vals, v)
+	}
+	slices.Sort(vals)
+	vals = slices.Compact(vals)
+	return vals[len(vals)-1]-vals[0] == int64(len(vals)-1)
+}
+
 func constSwitch(pass *analysis.Pass, s *ast.SwitchStmt) {
 	if s.Tag == nil || hasDefault(s.Body) {
 		return
@@ -134,7 +153,7 @@ func constSwitch(pass *analysis.Pass, s *ast.SwitchStmt) {
 			consts = append(consts, c)
 		}
 	}
-	if len(consts) < 2 {
+	if len(consts) < 2 || !consecutive(consts) {
 		return
 	}
 	sort.Slice(consts, func(i, j int) bool { return consts[i].Pos() < consts[j].Pos() })

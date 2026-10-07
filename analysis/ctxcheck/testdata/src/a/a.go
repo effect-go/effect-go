@@ -13,6 +13,7 @@ func group(ctx context.Context) error {
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { _, err := get(ctx); return err }) // want "this goroutine uses ctx"
 	g.Go(func() error { _, err := get(gctx); return err })
+	g.TryGo(func() error { _, err := get(ctx); return err }) // want "this goroutine uses ctx"
 	return g.Wait()
 }
 

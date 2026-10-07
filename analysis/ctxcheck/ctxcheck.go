@@ -1,7 +1,7 @@
 // Package ctxcheck finds child tasks that use their parent's context
 // instead of their own, so they aren't cancelled when a sibling fails:
 //
-//   - in a function passed to (*errgroup.Group).Go, a use of the context
+//   - in a function passed to (*errgroup.Group).Go or TryGo, a use of the context
 //     the group was derived from, rather than the one WithContext returned;
 //   - in a task passed to the effect-go scope or schedule packages, a use of
 //     an outer context.Context instead of the task's ctx parameter.
@@ -55,7 +55,7 @@ func run(pass *analysis.Pass) (any, error) {
 			}
 		case *ast.CallExpr:
 			sel, ok := n.Fun.(*ast.SelectorExpr)
-			if ok && sel.Sel.Name == "Go" {
+			if ok && (sel.Sel.Name == "Go" || sel.Sel.Name == "TryGo") {
 				if g, ok := sel.X.(*ast.Ident); ok {
 					if parent := parentOf[pass.TypesInfo.ObjectOf(g)]; parent != nil {
 						for _, a := range n.Args {

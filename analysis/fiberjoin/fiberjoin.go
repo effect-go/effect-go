@@ -24,8 +24,16 @@ const scopePath = "github.com/effect-go/effect-go/scope"
 func run(pass *analysis.Pass) (any, error) {
 	ins := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 	fibers := map[types.Object]*ast.Ident{} // variables holding a fiber
-	ins.Preorder([]ast.Node{(*ast.ExprStmt)(nil), (*ast.AssignStmt)(nil)}, func(n ast.Node) {
+	ins.Preorder([]ast.Node{(*ast.ExprStmt)(nil), (*ast.AssignStmt)(nil), (*ast.ValueSpec)(nil)}, func(n ast.Node) {
 		switch n := n.(type) {
+		case *ast.ValueSpec: // var f = scope.Fork(…)
+			if len(n.Names) == 1 && len(n.Values) == 1 && isFork(pass, n.Values[0]) {
+				if n.Names[0].Name == "_" {
+					pass.Reportf(n.Pos(), "the fiber is never joined: its error is lost")
+				} else if obj := pass.TypesInfo.Defs[n.Names[0]]; obj != nil {
+					fibers[obj] = n.Names[0]
+				}
+			}
 		case *ast.ExprStmt:
 			if isFork(pass, n.X) {
 				pass.Reportf(n.Pos(), "the fiber is never joined: its error is lost")

@@ -55,3 +55,19 @@ func color(c Color) {
 	case Red, Green, Blue:
 	}
 }
+
+// Durations and bit flags are named constants, not enums.
+type Duration int64
+
+const (
+	Nanosecond  Duration = 1
+	Microsecond          = 1000 * Nanosecond
+	Millisecond          = 1000 * Microsecond
+	Second               = 1000 * Millisecond
+)
+
+func duration(d Duration) {
+	switch d {
+	case Second, Millisecond:
+	}
+}
