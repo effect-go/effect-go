@@ -54,3 +54,14 @@ func TestGolden(t *testing.T) {
 		t.Fatalf("%s is stale (run ego generate):\n%s", res.Path, res.Code)
 	}
 }
+
+// A provider runs once, however many interfaces and types it is needed as.
+func TestProviderRunsOnce(t *testing.T) {
+	res, err := Generate("testdata/shared")
+	if err != nil || res == nil || len(res.Diags) > 0 {
+		t.Fatal(err, res)
+	}
+	if n := strings.Count(string(res.Code), "NewStore()"); n != 1 {
+		t.Fatalf("NewStore called %d times:\n%s", n, res.Code)
+	}
+}

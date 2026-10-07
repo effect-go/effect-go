@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -122,13 +123,19 @@ func Generate(dir string) (*Result, error) {
 		}
 		g := &gen{pkg: pkg, all: pkgs, imports: map[string]string{}, need: map[string]bool{}}
 		code, ok := g.generate(res)
-		if len(g.need) > 0 && len(patterns) < 10 {
-			for path := range g.need {
-				patterns = append(patterns, path)
+		more := false
+		for path := range g.need {
+			if !slices.Contains(patterns, path) {
+				patterns, more = append(patterns, path), true
 			}
+		}
+		if more {
 			continue
 		}
-		if ok {
+		for path := range g.need {
+			res.Diags = append(res.Diags, Diagnostic{Pos: pkg.Fset.Position(pkg.Syntax[0].Package), Msg: "can't load " + path + ", which declares a layer.Set used here"})
+		}
+		if ok && len(g.need) == 0 {
 			res.Code = code
 		}
 		return res, nil
@@ -441,7 +448,8 @@ func hasClose(t types.Type) bool {
 
 func closeReturnsError(t types.Type) bool {
 	obj, _, _ := types.LookupFieldOrMethod(t, true, nil, "Close")
-	return obj.(*types.Func).Signature().Results().Len() == 1
+	f, ok := obj.(*types.Func) // no Close is reported where layer.Close is used
+	return ok && f.Signature().Results().Len() == 1
 }
 
 // injector generates one injector function.
@@ -591,10 +599,20 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 			if len(direct) > 0 {
 				cands = direct
 			}
+			// The injector's inputs win, as for exact types.
+			var ins []string
 			for _, in := range b.inputs {
 				if types.Implements(in.typ, iface) && !isContext(in.typ) {
-					return in.name
+					ins = append(ins, in.name)
 				}
+			}
+			switch len(ins) {
+			case 0:
+			case 1:
+				return ins[0]
+			default:
+				b.g.errorf(b.pos, "%s: several inputs implement %s, needed by %s: %s", b.fn, b.g.typeString(t), neededBy, strings.Join(ins, ", "))
+				return "nil"
 			}
 			switch len(cands) {
 			case 1:
@@ -611,13 +629,13 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 		}
 	}
 	if p == nil {
-		pos := token.NoPos
-		if len(b.providers) > 0 {
-			pos = b.providers[0].expr.Pos()
-		}
-		_ = pos
 		b.g.errorf(b.pos, "%s: no provider for %s, needed by %s", b.fn, b.g.typeString(t), neededBy)
 		return "nil"
+	}
+	// A provider found through an interface may be built already.
+	if v, ok := b.vals[types.TypeString(p.out, nil)]; ok {
+		b.vals[key] = v
+		return v
 	}
 	if b.building[p] {
 		b.g.errorf(b.pos, "%s: dependency cycle: %s", b.fn, strings.Join(append(chain, p.name()), " → "))
@@ -671,22 +689,12 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 	}
 	delete(b.building, p)
 	b.vals[types.TypeString(p.out, nil)] = v
+	b.vals[key] = v
 	return v
 }
 
 func (b *builder) wrap(p *provider) string {
 	return b.g.pkgName("fmt") + ".Errorf(\"" + p.name() + ": %w\", err)"
-}
-
-func (g *gen) posOfInjector(name string) token.Pos {
-	for _, f := range g.pkg.Syntax {
-		for _, d := range f.Decls {
-			if fd, ok := d.(*ast.FuncDecl); ok && fd.Name.Name == name && isInjectorFile(g.pkg.Fset.File(f.Pos()).Name()) {
-				return fd.Name.Pos()
-			}
-		}
-	}
-	return token.NoPos
 }
 
 // varName names a variable after its type: *sql.DB -> db.

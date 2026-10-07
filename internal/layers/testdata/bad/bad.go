@@ -21,5 +21,6 @@ func NewB() B                        { return B{} }
 func NewLoop1(Loop2) Loop1           { return Loop1{} }
 func NewLoop2(Loop1) Loop2           { return Loop2{} }
 func Unused() *DB                    { return nil }
+func NewDB() *DB                     { return &DB{} }
 
 var Set = layer.Set(NewA, NewB)
