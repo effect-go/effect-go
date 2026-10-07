@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	stdformat "go/format"
+	"go/version"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -140,8 +141,15 @@ func TestStdlibLikeGofmt(t *testing.T) {
 	if raceEnabled {
 		t.Skip("no concurrency to check, and ten times slower with -race")
 	}
-	if !strings.HasPrefix(runtime.Version(), "go1.27") {
-		t.Skip("the printer is a copy of Go 1.27's; other versions' gofmt may differ")
+	// The printer is a copy of UPSTREAM's. An older Go's gofmt may format
+	// differently; a newer one must not, or its syntax must be merged in:
+	// that's what the weekly newest-go CI job learns from this test.
+	upstream, err := os.ReadFile("../UPSTREAM")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version.Compare(version.Lang(runtime.Version()), version.Lang(strings.TrimSpace(string(upstream)))) < 0 {
+		t.Skipf("the printer is a copy of %s's; older versions' gofmt may differ", strings.TrimSpace(string(upstream)))
 	}
 	var paths []string
 	filepath.WalkDir(filepath.Join(runtime.GOROOT(), "src"), func(path string, d fs.DirEntry, err error) error {
