@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## v0.2.2 (2026-10-07)
+
+**To update:** run `ego generate ./...`; only `layers_ego.go` files may
+change (import order, variable names).
 
 - `layer.Build` can use a `layer.Set` declared in another package, such as
   a framework's.
