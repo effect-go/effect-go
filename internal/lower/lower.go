@@ -189,7 +189,7 @@ func Generate(cfg Config) (*Result, error) {
 	if len(p.xtestFiles) > 0 {
 		v := p.variant(p.xtestFiles, p.xtestGo, p.path+"_test", p.name+"_test")
 		if ti != nil && ti.pkg != nil {
-			v.override = map[string]*types.Package{p.path: ti.pkg}
+			v.override = p.recheck(ti.pkg)
 			v.overrideSigs = map[string]map[string]*setSig{p.path: under.sigs}
 		}
 		if _, err := v.run(res, p.xtestFiles); err != nil {
@@ -198,6 +198,42 @@ func Generate(cfg Config) (*Result, error) {
 	}
 	sortDiags(res.Diags)
 	return res, nil
+}
+
+// recheck returns the package under test, and the packages its external
+// tests import that import it, type-checked again against it, as go test
+// compiles them: otherwise the tests would see two versions of the package,
+// and its types in their signatures would not match its own.
+func (p *pkgGen) recheck(under *types.Package) map[string]*types.Package {
+	over := map[string]*types.Package{p.path: under}
+	var roots []string
+	for _, f := range p.xtestFiles {
+		for _, s := range f.file.Imports {
+			roots = append(roots, strings.Trim(s.Path.Value, `"`))
+		}
+	}
+	for _, path := range p.xtestGo {
+		if gf, _ := goparser.ParseFile(token.NewFileSet(), path, nil, goparser.ImportsOnly); gf != nil {
+			for _, s := range gf.Imports {
+				roots = append(roots, strings.Trim(s.Path.Value, `"`))
+			}
+		}
+	}
+	im := p.cfg.Importer
+	for _, path := range im.dependents(p.path, roots) {
+		fset := token.NewFileSet()
+		var files []*goast.File
+		for _, name := range im.goFiles(path) {
+			if gf, _ := goparser.ParseFile(fset, name, nil, goparser.SkipObjectResolution); gf != nil {
+				files = append(files, gf)
+			}
+		}
+		conf := types.Config{Importer: overrideImporter{over, im}, FakeImportC: true, Error: func(error) {}}
+		if pkg, _ := conf.Check(path, fset, files, nil); pkg != nil {
+			over[path] = pkg
+		}
+	}
+	return over
 }
 
 // lowered are the packages generated code may import that its .ego file

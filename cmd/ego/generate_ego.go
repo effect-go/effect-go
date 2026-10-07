@@ -43,86 +43,133 @@ func generate(args []string) error {
 	if debug {
 		fmt.Fprintf(os.Stderr, "preload: %v\n", time.Since(start).Round(time.Millisecond))
 	}
-	failed := false
-	for _, dir := range dirs {
-		res, err := lower.Generate(lower.Config{Dir: dir, NoLines: !*lines, Importer: im})
-		if err != nil {
-			return fmt.Errorf("%v: %w", rel(dir), err)
+	// Packages are generated in import order, but an external test may import
+	// a package that imports its own: then the first pass can't compile it.
+	// Passes repeat while they write something new.
+	pending := dirs
+	for {
+		var failed, report []string
+		progress := false
+		for _, dir := range pending {
+			ok, changed, err := generateDir(dir, im, *lines, debug, &report)
+			if err != nil {
+				return fmt.Errorf("generateDir: %w", err)
+			}
+//line generate.ego:45
+			progress = progress || changed
+			if !ok {
+				failed = append(failed, dir)
+			}
 		}
-//line generate.ego:39
+		if len(failed) == 0 || !progress || checkOnly {
+			for _, line := range report {
+				fmt.Fprintln(os.Stderr, line)
+			}
+			if len(failed) > 0 || stale {
+				return errSilent
+			}
+			return nil
+		}
+		pending = failed
+	}
+}
+
+// generateDir writes the Go of the package in dir: all of it, or only the
+// package's own when just its tests fail, so the packages that import it
+// can compile. It reports whether the package compiled, and whether a file
+// changed; its diagnostics go to report.
+func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]string) (ok, changed bool, err error) {
+	res, err := lower.Generate(lower.Config{Dir: dir, NoLines: !lines, Importer: im})
+	if err != nil {
+		return false, false, fmt.Errorf("%v: %w", rel(dir), err)
+	}
+//line generate.ego:69
+	if debug {
+		var phases []string
+		for _, ph := range res.Phases {
+			phases = append(phases, fmt.Sprintf("%s %v", ph.Name, ph.Took.Round(time.Millisecond/10)))
+		}
+		fmt.Fprintf(os.Stderr, "%s: %s\n", rel(dir), strings.Join(phases, ", "))
+	}
+	onlyTests := true
+	for _, d := range res.Diags {
+		*report = append(*report, rel(d.Pos.String())+": "+d.Msg)
+		onlyTests = onlyTests && isTest(d.Pos.Filename)
+	}
+	// Later packages load this one's Go: they must see what was written.
+	defer func() {
+		if changed {
+			im.Forget(dir)
+		}
+	}()
+	for _, out := range res.Outputs {
+		if len(res.Diags) == 0 || onlyTests && !isTest(out.Ego) {
+			wrote, err := write(out.Go, out.Code)
+			if err != nil {
+				return false, false, err
+			}
+//line generate.ego:90
+			changed = changed || wrote
+		}
+	}
+	if len(res.Diags) > 0 {
 		if debug {
-			var phases []string
-			for _, ph := range res.Phases {
-				phases = append(phases, fmt.Sprintf("%s %v", ph.Name, ph.Took.Round(time.Millisecond/10)))
-			}
-			fmt.Fprintf(os.Stderr, "%s: %s\n", rel(dir), strings.Join(phases, ", "))
-		}
-		for _, d := range res.Diags {
-			fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
-		}
-		if len(res.Diags) > 0 {
-			if debug {
-				for _, out := range res.Outputs {
-					fmt.Fprintf(os.Stderr, "--- %s\n%s\n", out.Go, out.Raw)
-				}
-			}
-			failed = true
-			continue
-		}
-		for _, out := range res.Outputs {
-			if err := write(out.Go, out.Code); err != nil {
-				return err
+			for _, out := range res.Outputs {
+				fmt.Fprintf(os.Stderr, "--- %s\n%s\n", out.Go, out.Raw)
 			}
 		}
-		// Layers are wired after the .ego files compile: injectors may use
-		// their declarations.
-//line generate.ego:63
-		lr, err := layers.Generate(dir)
-		if err != nil {
-			return fmt.Errorf("%v: %w", rel(dir), err)
-		}
-//line generate.ego:64
-		if lr != nil {
-			for _, d := range lr.Diags {
-				fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
-			}
-			if len(lr.Diags) > 0 {
-				failed = true
-				continue
-			}
-			if err := write(lr.Path, lr.Code); err != nil {
-				return err
-			}
-		}
+		return false, changed, nil
 	}
-//line generate.ego:75
-	if failed || stale {
-		return errSilent
+	// Layers are wired after the .ego files compile: injectors may use
+	// their declarations.
+	lr, err := layers.Generate(dir)
+	if err != nil {
+		return false, false, fmt.Errorf("%v: %w", rel(dir), err)
 	}
-	return nil
+//line generate.ego:104
+	if lr == nil {
+		return true, changed, nil
+	}
+	for _, d := range lr.Diags {
+		*report = append(*report, rel(d.Pos.String())+": "+d.Msg)
+	}
+	if len(lr.Diags) > 0 {
+		return false, changed, nil
+	}
+	wrote, err := write(lr.Path, lr.Code)
+	if err != nil {
+		return false, false, err
+	}
+//line generate.ego:114
+	return true, changed || wrote, nil
+}
+
+func isTest(name string) bool {
+	return strings.HasSuffix(name, "_test.ego") || strings.HasSuffix(name, "_test.go")
 }
 
 var stale bool
 
 var checkOnly bool
 
-// write writes a generated file if it changed, and prints its name. With
-// -check it only reports the file as stale.
-func write(path string, code []byte) error {
+// write writes a generated file if it changed, prints its name, and
+// reports whether it wrote it. With -check it only reports the file as
+// stale.
+func write(path string, code []byte) (bool, error) {
 	if old, _ := os.ReadFile(path); bytes.Equal(old, code) {
-		return nil
+		return false, nil
 	}
 	if checkOnly {
 		fmt.Fprintln(os.Stderr, rel(path)+": stale; run ego generate")
 		stale = true
-		return nil
+		return false, nil
 	}
 	if err := os.WriteFile(path, code, 0o666); err != nil {
-		return err
+		return false, err
 	}
-//line generate.ego:97
+//line generate.ego:138
 	fmt.Println(rel(path))
-	return nil
+	return true, nil
 }
 
 func rel(path string) string {
@@ -153,7 +200,7 @@ func egoDirs(args []string) ([]string, error) {
 				if err != nil {
 					return err
 				}
-//line generate.ego:127
+//line generate.ego:168
 				if d.IsDir() && path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" || d.Name() == "vendor") {
 					return filepath.SkipDir
 				}
@@ -173,7 +220,7 @@ func egoDirs(args []string) ([]string, error) {
 			}); err != nil {
 				return nil, err
 			}
-//line generate.ego:144
+//line generate.ego:185
 			continue
 		}
 		if strings.HasSuffix(a, ".ego") {
@@ -203,7 +250,9 @@ func dependencyOrder(dirs []string) []string {
 	for _, d := range dirs {
 		entries, _ := os.ReadDir(d)
 		for _, e := range entries {
-			if !strings.HasSuffix(e.Name(), ".ego") && !strings.HasSuffix(e.Name(), ".go") {
+			// Tests don't order packages: an external test may import a
+			// package that imports its own.
+			if !strings.HasSuffix(e.Name(), ".ego") && !strings.HasSuffix(e.Name(), ".go") || isTest(e.Name()) {
 				continue
 			}
 			f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(d, e.Name()), nil, parser.ImportsOnly)

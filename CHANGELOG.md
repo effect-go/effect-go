@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- `layer.Build` can use a `layer.Set` declared in another package, such as
+  a framework's.
+- `ego generate ./...` finishes in one run on a module whose packages
+  import each other's `.ego` code before any of it is generated, even when
+  an external test imports a package that imports its own. It used to need
+  several runs, or never finished.
+- An external test can import a package that imports the package under test
+  and pass values between them, as `go test` allows; `ego generate` failed
+  with errors like `cannot use cfg (config.Config) as config.Config`.
+- Generated wiring (`layers_ego.go`) lists the standard library's imports
+  first, and its variables no longer hide package names.
+
 ## v0.2.1 (2026-10-04)
 
 **To update:** run `ego generate ./...` in each module; the generated code

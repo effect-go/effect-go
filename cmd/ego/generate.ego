@@ -33,69 +33,110 @@ func generate(args []string) error {
 	if debug {
 		fmt.Fprintf(os.Stderr, "preload: %v\n", time.Since(start).Round(time.Millisecond))
 	}
-	failed := false
-	for _, dir := range dirs {
-		res := check lower.Generate(lower.Config{Dir: dir, NoLines: !*lines, Importer: im}) "{rel(dir)}"
+	// Packages are generated in import order, but an external test may import
+	// a package that imports its own: then the first pass can't compile it.
+	// Passes repeat while they write something new.
+	pending := dirs
+	for {
+		var failed, report []string
+		progress := false
+		for _, dir := range pending {
+			ok, changed := check generateDir(dir, im, *lines, debug, &report)
+			progress = progress || changed
+			if !ok {
+				failed = append(failed, dir)
+			}
+		}
+		if len(failed) == 0 || !progress || checkOnly {
+			for _, line := range report {
+				fmt.Fprintln(os.Stderr, line)
+			}
+			if len(failed) > 0 || stale {
+				return errSilent
+			}
+			return nil
+		}
+		pending = failed
+	}
+}
+
+// generateDir writes the Go of the package in dir: all of it, or only the
+// package's own when just its tests fail, so the packages that import it
+// can compile. It reports whether the package compiled, and whether a file
+// changed; its diagnostics go to report.
+func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]string) (ok, changed bool, err error) {
+	res := check lower.Generate(lower.Config{Dir: dir, NoLines: !lines, Importer: im}) "{rel(dir)}"
+	if debug {
+		var phases []string
+		for _, ph := range res.Phases {
+			phases = append(phases, f"{ph.Name} {ph.Took.Round(time.Millisecond/10)}")
+		}
+		fmt.Fprintf(os.Stderr, "%s: %s\n", rel(dir), strings.Join(phases, ", "))
+	}
+	onlyTests := true
+	for _, d := range res.Diags {
+		*report = append(*report, rel(d.Pos.String())+": "+d.Msg)
+		onlyTests = onlyTests && isTest(d.Pos.Filename)
+	}
+	// Later packages load this one's Go: they must see what was written.
+	defer func() {
+		if changed {
+			im.Forget(dir)
+		}
+	}()
+	for _, out := range res.Outputs {
+		if len(res.Diags) == 0 || onlyTests && !isTest(out.Ego) {
+			wrote := check write(out.Go, out.Code) ""
+			changed = changed || wrote
+		}
+	}
+	if len(res.Diags) > 0 {
 		if debug {
-			var phases []string
-			for _, ph := range res.Phases {
-				phases = append(phases, f"{ph.Name} {ph.Took.Round(time.Millisecond/10)}")
+			for _, out := range res.Outputs {
+				fmt.Fprintf(os.Stderr, "--- %s\n%s\n", out.Go, out.Raw)
 			}
-			fmt.Fprintf(os.Stderr, "%s: %s\n", rel(dir), strings.Join(phases, ", "))
 		}
-		for _, d := range res.Diags {
-			fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
-		}
-		if len(res.Diags) > 0 {
-			if debug {
-				for _, out := range res.Outputs {
-					fmt.Fprintf(os.Stderr, "--- %s\n%s\n", out.Go, out.Raw)
-				}
-			}
-			failed = true
-			continue
-		}
-		for _, out := range res.Outputs {
-			check write(out.Go, out.Code) ""
-		}
-		// Layers are wired after the .ego files compile: injectors may use
-		// their declarations.
-		lr := check layers.Generate(dir) "{rel(dir)}"
-		if lr != nil {
-			for _, d := range lr.Diags {
-				fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
-			}
-			if len(lr.Diags) > 0 {
-				failed = true
-				continue
-			}
-			check write(lr.Path, lr.Code) ""
-		}
+		return false, changed, nil
 	}
-	if failed || stale {
-		return errSilent
+	// Layers are wired after the .ego files compile: injectors may use
+	// their declarations.
+	lr := check layers.Generate(dir) "{rel(dir)}"
+	if lr == nil {
+		return true, changed, nil
 	}
-	return nil
+	for _, d := range lr.Diags {
+		*report = append(*report, rel(d.Pos.String())+": "+d.Msg)
+	}
+	if len(lr.Diags) > 0 {
+		return false, changed, nil
+	}
+	wrote := check write(lr.Path, lr.Code) ""
+	return true, changed || wrote, nil
+}
+
+func isTest(name string) bool {
+	return strings.HasSuffix(name, "_test.ego") || strings.HasSuffix(name, "_test.go")
 }
 
 var stale bool
 
 var checkOnly bool
 
-// write writes a generated file if it changed, and prints its name. With
-// -check it only reports the file as stale.
-func write(path string, code []byte) error {
+// write writes a generated file if it changed, prints its name, and
+// reports whether it wrote it. With -check it only reports the file as
+// stale.
+func write(path string, code []byte) (bool, error) {
 	if old, _ := os.ReadFile(path); bytes.Equal(old, code) {
-		return nil
+		return false, nil
 	}
 	if checkOnly {
 		fmt.Fprintln(os.Stderr, rel(path)+": stale; run ego generate")
 		stale = true
-		return nil
+		return false, nil
 	}
 	check os.WriteFile(path, code, 0o666) ""
 	fmt.Println(rel(path))
-	return nil
+	return true, nil
 }
 
 func rel(path string) string {
@@ -170,7 +211,9 @@ func dependencyOrder(dirs []string) []string {
 	for _, d := range dirs {
 		entries, _ := os.ReadDir(d)
 		for _, e := range entries {
-			if !strings.HasSuffix(e.Name(), ".ego") && !strings.HasSuffix(e.Name(), ".go") {
+			// Tests don't order packages: an external test may import a
+			// package that imports its own.
+			if !strings.HasSuffix(e.Name(), ".ego") && !strings.HasSuffix(e.Name(), ".go") || isTest(e.Name()) {
 				continue
 			}
 			f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(d, e.Name()), nil, parser.ImportsOnly)

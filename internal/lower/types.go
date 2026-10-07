@@ -149,6 +149,64 @@ func moduleRoot(dir string) string {
 	}
 }
 
+// Forget drops the package in dir, so the next load reads it again: after
+// its generated Go was written, say, when it failed to load without it.
+func (im *Importer) Forget(dir string) {
+	path, err := ImportPath(dir)
+	if err != nil {
+		return
+	}
+	im.mu.Lock()
+	defer im.mu.Unlock()
+	delete(im.pkgs, path)
+	delete(im.errs, path)
+}
+
+// dependents returns the loaded packages reachable from roots that import
+// target, directly or not, each after the ones it imports.
+func (im *Importer) dependents(target string, roots []string) []string {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+	imports := map[string]bool{} // whether a package imports target
+	var order []string
+	var visit func(path string) bool
+	visit = func(path string) bool {
+		if path == target {
+			return true
+		}
+		if v, ok := imports[path]; ok {
+			return v
+		}
+		imports[path] = false // also ends import cycles
+		pkg := im.pkgs[path]
+		if pkg == nil {
+			return false
+		}
+		found := false
+		for _, dep := range pkg.Imports() {
+			if visit(dep.Path()) {
+				found = true
+			}
+		}
+		imports[path] = found
+		if found {
+			order = append(order, path)
+		}
+		return found
+	}
+	for _, r := range roots {
+		visit(r)
+	}
+	return order
+}
+
+// goFiles returns the Go files of a loaded package.
+func (im *Importer) goFiles(path string) []string {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+	return im.files[path]
+}
+
 // stale reports whether a loaded workspace file changed since it was loaded.
 func (im *Importer) stale() bool {
 	for f, t := range im.stamps {
