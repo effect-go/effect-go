@@ -1,11 +1,11 @@
 package regress
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"runtime/debug"
-	"errors"
 	"slices"
 	"strconv"
 	"strings"
