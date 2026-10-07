@@ -36,6 +36,8 @@ func (g *fileGen) expr(x ast.Expr) bool {
 	case *ast.FString:
 		g.w.anchor(g.off(x.Pos()))
 		g.fstring(x, "", nil)
+	case *ast.BinaryExpr:
+		return g.binary(x)
 	case *ast.CallExpr:
 		if g.builtin(x) != "" {
 			g.w.anchor(g.off(x.Pos()))
@@ -100,6 +102,47 @@ func (g *fileGen) call(x *ast.CallExpr) {
 		cur = g.off(a.End())
 	}
 	g.copy(cur, g.off(x.End()))
+}
+
+// binary renders a binary expression whose right operand is computed by
+// statements. After && or ||, they run only when Go would evaluate the
+// operand; otherwise a left operand with side effects is computed first,
+// so evaluation order holds. It reports false for the other expressions,
+// rendered child by child.
+func (g *fileGen) binary(x *ast.BinaryExpr) bool {
+	if !g.r.final || g.pre == nil || !needsHoist(x.Y) {
+		return false
+	}
+	name := g.temp("v")
+	switch {
+	case x.Op == token.LAND || x.Op == token.LOR:
+		cond := name
+		if x.Op == token.LOR {
+			cond = "!" + name
+		}
+		g.toPre(func() {
+			g.w.str(name + " := ")
+			g.node(x.X)
+			g.w.str("\nif " + cond + " {\n")
+			g.genStmt(func() {
+				g.w.str(name + " = ")
+				g.node(x.Y)
+			})
+			g.w.str("}\n")
+		})
+		g.w.str(name)
+	case hasCall(x.X):
+		g.toPre(func() {
+			g.w.str(name + " := ")
+			g.node(x.X)
+			g.w.str("\n")
+		})
+		g.w.str(name + " " + x.Op.String() + " ")
+		g.node(x.Y)
+	default:
+		return false
+	}
+	return true
 }
 
 // needsHoist reports whether x contains an expression that has to be

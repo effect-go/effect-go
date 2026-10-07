@@ -79,3 +79,30 @@ func PassThrough(slug string) ArticleError {
 	check inTx(func() error { return io.EOF }) as Unavailable
 	return nil
 }
+
+type Box struct{ N int }
+
+// ShortCircuit: an if expression after && runs only when the left is true.
+func ShortCircuit(p *Box) bool {
+	ok := p != nil && (if p.N > 0 { true } else { false })
+	return ok
+}
+
+// Order: operands run left to right, around a computed one.
+func Order() []string {
+	var calls []string
+	next := func(s string) int { calls = append(calls, s); return 1 }
+	x := next("left") + (if next("cond") > 0 { 1 } else { 2 })
+	_ = x
+	return calls
+}
+
+// Shadow: a match arm's names don't reach the later arms.
+func Shadow(err error) string {
+	ok := true
+	e := "outer"
+	return match err {
+		Duplicate(e) => e.Slug
+		_            => if ok { e } else { "shadowed" }
+	}
+}

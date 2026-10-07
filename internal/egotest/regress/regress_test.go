@@ -57,3 +57,21 @@ func TestPassThrough(t *testing.T) {
 		t.Fatalf("wrapped: %v", u)
 	}
 }
+
+func TestEvaluation(t *testing.T) {
+	if ShortCircuit(nil) || !ShortCircuit(&Box{N: 1}) {
+		t.Error("ShortCircuit")
+	}
+	if got := Order(); !slices.Equal(got, []string{"left", "cond"}) {
+		t.Errorf("order %q", got)
+	}
+}
+
+func TestShadow(t *testing.T) {
+	if got := Shadow(io.EOF); got != "outer" {
+		t.Errorf("_ arm saw %q", got)
+	}
+	if got := Shadow(Duplicate{Slug: "a"}); got != "a" {
+		t.Errorf("Duplicate arm: %q", got)
+	}
+}

@@ -324,6 +324,22 @@ func (g *fileGen) armBody(a *ast.MatchArm, target string, t types.Type) {
 	}
 }
 
+// laterUse reports whether an arm after the i-th uses name without binding
+// it itself: it then means another variable, which the i-th arm's if must
+// not hide.
+func laterUse(p *matchPlan, i int, name string) bool {
+	for k := i + 1; k < len(p.arms); k++ {
+		bound := false
+		for _, pt := range p.pats[k] {
+			bound = bound || pt.kind == patCase && pt.bind == name
+		}
+		if !bound && usesName(p.arms[k].Body, name) {
+			return true
+		}
+	}
+	return false
+}
+
 // chain renders the arms of a planned match.
 func (g *fileGen) chain(p *matchPlan, isExpr bool, body func(*ast.MatchArm)) {
 	if p.mode == modeValues {
@@ -336,6 +352,7 @@ func (g *fileGen) chain(p *matchPlan, isExpr bool, body func(*ast.MatchArm)) {
 	}
 	first := true
 	var blankArm *ast.MatchArm
+	var bind string // the arm's binding, declared in its block
 	for i, a := range p.arms {
 		for _, pt := range p.pats[i] {
 			switch pt.kind {
@@ -349,19 +366,33 @@ func (g *fileGen) chain(p *matchPlan, isExpr bool, body func(*ast.MatchArm)) {
 			} else {
 				g.w.str("} else if ")
 			}
+			bind = ""
 			// Patterns are copied, so the editor can navigate from them.
 			switch pt.kind {
 			case patNil:
 				g.w.str(p.tag + " == nil")
 			case patCase:
+				// An if's init variables stay in scope in its else
+				// branches, the later arms: fresh names there, and the
+				// arm's own name inside its block.
+				ok, v := "ok", pt.bind
+				if laterUse(p, i, "ok") {
+					ok = g.temp("ok")
+				}
+				if pt.bind != "_" && laterUse(p, i, pt.bind) {
+					v = g.temp(pt.bind)
+				}
 				if p.mode == modeErrors {
-					g.w.str(pt.bind + ", ok := " + errors + ".AsType[")
+					g.w.str(v + ", " + ok + " := " + errors + ".AsType[")
 					g.node(pt.typ)
-					g.w.str("](" + p.tag + "); ok")
+					g.w.str("](" + p.tag + "); " + ok)
 				} else {
-					g.w.str(pt.bind + ", ok := " + p.tag + ".(")
+					g.w.str(v + ", " + ok + " := " + p.tag + ".(")
 					g.node(pt.typ)
-					g.w.str("); ok")
+					g.w.str("); " + ok)
+				}
+				if v != pt.bind {
+					bind = pt.bind + " := " + v + "\n"
 				}
 			case patValue:
 				if p.mode == modeErrors {
@@ -375,7 +406,7 @@ func (g *fileGen) chain(p *matchPlan, isExpr bool, body func(*ast.MatchArm)) {
 				}
 			case patBlank: // handled above
 			}
-			g.w.str(" {\n")
+			g.w.str(" {\n" + bind)
 			body(a)
 		}
 	}

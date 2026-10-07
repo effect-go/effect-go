@@ -153,3 +153,57 @@ func PassThrough(slug string) error {
 //line regress.ego:80
 	return nil
 }
+
+type Box struct{ N int }
+
+// ShortCircuit: an if expression after && runs only when the left is true.
+func ShortCircuit(p *Box) bool {
+	v := p != nil
+	if v {
+		var v2 bool
+		if p.N > 0 {
+			v2 = true
+		} else {
+			v2 = false
+		}
+		v = (v2)
+	}
+	ok := v
+//line regress.ego:88
+	return ok
+}
+
+// Order: operands run left to right, around a computed one.
+func Order() []string {
+	var calls []string
+	next := func(s string) int { calls = append(calls, s); return 1 }
+	v := next("left")
+	var v2 int
+	if next("cond") > 0 {
+		v2 = 1
+	} else {
+		v2 = 2
+	}
+	x := v + (v2)
+//line regress.ego:96
+	_ = x
+	return calls
+}
+
+// Shadow: a match arm's names don't reach the later arms.
+func Shadow(err error) string {
+	ok := true
+	e := "outer"
+	var v string
+	if e2, ok2 := errors.AsType[Duplicate](err); ok2 {
+		e := e2
+		v = e.Slug
+	} else {
+		if ok {
+			v = e
+		} else {
+			v = "shadowed"
+		}
+	}
+	return v
+}
