@@ -42,10 +42,14 @@ func (f *fake[T]) call(ctx context.Context) (T, error) {
 		var p *User
 		_ = p.Name // a nil pointer, as in real bugs
 	}
+	start := time.Now()
 	select {
 	case <-time.After(s.after):
 		return s.val, s.err
 	case <-ctx.Done():
+		if time.Since(start) >= s.after {
+			return s.val, s.err // done at the moment of the cancellation
+		}
 		time.Sleep(s.slowStop)
 		f.canceled.Add(1)
 		var zero T
