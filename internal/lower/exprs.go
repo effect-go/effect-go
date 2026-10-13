@@ -540,13 +540,6 @@ func (g *fileGen) coalesceInto(target string, declare bool, t types.Type, x *ast
 		g.w.str("if " + target + " == nil {\n")
 		fallback()
 		g.w.str("}\n")
-	case !g.r.final:
-		// The draft hasn't typed the left side yet, as in a lambda whose
-		// parameters were unknown last round: write it, to learn its type.
-		g.genStmt(func() {
-			g.w.str(target + op)
-			g.node(left)
-		})
 	default:
 		g.errorf(x.OpPos, "?? needs a value that can be missing: a pointer, map lookup, type assertion, ?. chain or a call returning (value, ok)")
 	}
@@ -807,7 +800,7 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 			if len(resTexts) == 0 && (f.sig != nil && !f.openRes || g.r.final) {
 				ret = ""
 			}
-			if needsHoist(b) && ret != "" && len(res) == 1 {
+			if g.r.final && needsHoist(b) && ret != "" && len(res) == 1 {
 				name := g.temp("v")
 				g.lowerInto(name, true, res[0], b)
 				g.w.str("return " + name + "\n")
