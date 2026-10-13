@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.2 (2026-10-13)
 
 - `??` works in a lambda whose parameter types come from the call, as in `strings.Map(r => swap[r] ?? r, s)`.
 
