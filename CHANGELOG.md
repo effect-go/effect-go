@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.3 (2026-10-13)
 
 - An effect function's span comes from its parent span's tracer provider when
   the parent is recording, and from the global provider otherwise. Before,
