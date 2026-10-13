@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- An effect function's span comes from its parent span's tracer provider when
+  the parent is recording, and from the global provider otherwise. Before,
+  every span came from the global provider, so with two providers in one
+  process (two apps in parallel tests), spans could land in the wrong one.
+  Suggested by goncini.
+
 ## v0.3.2 (2026-10-13)
 
 - `??` works in a lambda whose parameter types come from the call, as in `strings.Map(r => swap[r] ?? r, s)`.

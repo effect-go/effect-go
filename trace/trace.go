@@ -1,6 +1,7 @@
-// Package trace gives each effect function an OpenTelemetry span. It uses the
-// global tracer provider, so it records nothing until the program installs
-// one.
+// Package trace gives each effect function an OpenTelemetry span. A span
+// under a recording span comes from that span's tracer provider, and other
+// spans from the global one, so nothing is recorded until the program
+// installs a provider.
 //
 // Generated code calls it like this:
 //
@@ -22,8 +23,12 @@ import (
 // Instrumentation is the instrumentation scope name the spans are reported under.
 const Instrumentation = "github.com/effect-go/effect-go"
 
-// Start starts a span named name, as a child of the span in ctx.
+// Start starts a span named name, as a child of the span in ctx, from that
+// span's tracer provider if it is recording, or else from the global one.
 func Start(ctx context.Context, name string) (context.Context, oteltrace.Span) {
+	if p := oteltrace.SpanFromContext(ctx); p.IsRecording() {
+		return p.TracerProvider().Tracer(Instrumentation).Start(ctx, name)
+	}
 	return otel.Tracer(Instrumentation).Start(ctx, name)
 }
 

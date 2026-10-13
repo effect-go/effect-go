@@ -72,6 +72,18 @@ func TestSpans(t *testing.T) {
 	}
 }
 
+func TestParentProvider(t *testing.T) {
+	global := record(t)
+	own := tracetest.NewSpanRecorder()
+	ctx, root := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(own)).Tracer("app").Start(t.Context(), "request")
+	load(ctx, false)
+	root.End()
+	load(t.Context(), false)
+	if len(own.Ended()) != 2 || len(global.Ended()) != 1 {
+		t.Errorf("parent's provider: %d spans, global: %d; want 2 and 1", len(own.Ended()), len(global.Ended()))
+	}
+}
+
 func TestLogHandler(t *testing.T) {
 	record(t)
 	var buf bytes.Buffer
