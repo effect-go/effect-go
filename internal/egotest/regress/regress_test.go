@@ -131,3 +131,9 @@ func TestParenReceiver(t *testing.T) {
 		t.Errorf("got %d %v", n, err)
 	}
 }
+
+func TestCoalesceInLambda(t *testing.T) {
+	if got := CoalesceInLambda("abc"); got != "bbc" {
+		t.Errorf("got %q", got)
+	}
+}

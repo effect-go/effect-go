@@ -10,20 +10,21 @@ import (
 	egofmt "fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/effect-go/effect-go/trace"
 )
 
 // CheckKeepsErr: check doesn't overwrite an err declared before it.
 //
-//line regress.ego:11
+//line regress.ego:12
 func CheckKeepsErr(a, b string) (int, error) {
 	x, err := strconv.Atoi(a)
 	y, err2 := strconv.Atoi(b)
 	if err2 != nil {
 		return 0, egofmt.Errorf("strconv.Atoi: %w", err2)
 	}
-//line regress.ego:14
+//line regress.ego:15
 	if err != nil {
 		return -1, err
 	}
@@ -37,7 +38,7 @@ func ElseKeepsErr(a, b string) (int, error) {
 	if err2 != nil {
 		y = 0
 	}
-//line regress.ego:24
+//line regress.ego:25
 	if err != nil {
 		return -1, err
 	}
@@ -50,7 +51,7 @@ func ElseKeepsNamedErr(b string) (n int, err error) {
 	if err2 != nil {
 		y = 7
 	}
-//line regress.ego:33
+//line regress.ego:34
 	n = y
 	return
 }
@@ -76,7 +77,7 @@ func Sentinel(err error) string {
 	return v
 }
 
-//line regress.ego:54
+//line regress.ego:55
 type User struct{ Name string }
 
 // OptAssign: x = u?.Name gives the zero value when u is nil.
@@ -89,7 +90,7 @@ func OptAssign(us []*User) []string {
 		} else {
 			name = ""
 		}
-//line regress.ego:62
+//line regress.ego:63
 		out = append(out, name)
 	}
 	return out
@@ -135,7 +136,7 @@ func (e Unavailable) As(target any) bool {
 
 // inTx runs fn as a transaction would: its error comes back as an error.
 //
-//line regress.ego:74
+//line regress.ego:75
 func inTx(fn func() error) error { return fn() }
 
 // PassThrough: check … as Unavailable lets a case of the set through.
@@ -146,14 +147,14 @@ func PassThrough(slug string) error {
 		}
 		return Unavailable{Cause: err}
 	}
-//line regress.ego:79
+//line regress.ego:80
 	if err := inTx(func() error { return io.EOF }); err != nil {
 		if _, ok := egoerrors.AsType[ArticleError](err); ok {
 			return err
 		}
 		return Unavailable{Cause: err}
 	}
-//line regress.ego:80
+//line regress.ego:81
 	return nil
 }
 
@@ -172,7 +173,7 @@ func ShortCircuit(p *Box) bool {
 		v = (v2)
 	}
 	ok := v
-//line regress.ego:88
+//line regress.ego:89
 	return ok
 }
 
@@ -188,7 +189,7 @@ func Order() []string {
 		v2 = 2
 	}
 	x := v + (v2)
-//line regress.ego:96
+//line regress.ego:97
 	_ = x
 	return calls
 }
@@ -213,11 +214,11 @@ func Shadow(err error) string {
 
 // DivOneLine panics on a line that a stack trace must report as this one.
 //
-//line regress.ego:111
+//line regress.ego:112
 func DivOneLine(ctx context.Context, m map[string]int) (_ int, err error) {
 	ctx, span := trace.Start(ctx, "regress.DivOneLine")
 	defer trace.End(span, &err)
-//line regress.ego:111
+//line regress.ego:112
 	return m["a"] / len(m), nil
 } // one-line
 
@@ -234,12 +235,12 @@ func OptFallback(p *Player) (float64, City) {
 	if p != nil {
 		s = p.Score
 	}
-//line regress.ego:123
+//line regress.ego:124
 	var h City = "none"
 	if p != nil {
 		h = p.Home
 	}
-//line regress.ego:124
+//line regress.ego:125
 	return s, h
 }
 
@@ -277,7 +278,7 @@ func LocalNames(s string) (int, error) {
 		}
 		return 0, Unavailable{Cause: err}
 	}
-//line regress.ego:155
+//line regress.ego:156
 	return n + fmt, nil
 }
 
@@ -292,11 +293,23 @@ func ParenReceiver(s string) (int, error) {
 	if err != nil {
 		panic(err)
 	}
-//line regress.ego:166
+//line regress.ego:167
 	b, err := (&Counter{N: s}).Value()
 	if err != nil {
 		return 0, err
 	}
-//line regress.ego:167
+//line regress.ego:168
 	return a + b, nil
+}
+
+// CoalesceInLambda: ?? in a lambda whose parameter types come from the call.
+func CoalesceInLambda(s string) string {
+	swap := map[rune]rune{'a': 'b'}
+	return strings.Map(func(r rune) rune {
+		v, ok := swap[r]
+		if !ok {
+			v = r
+		}
+		return v
+	}, s)
 }

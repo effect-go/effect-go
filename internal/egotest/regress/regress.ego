@@ -5,6 +5,7 @@ package regress
 import (
 	"io"
 	"strconv"
+	"strings"
 )
 
 // CheckKeepsErr: check doesn't overwrite an err declared before it.
@@ -165,4 +166,10 @@ func ParenReceiver(s string) (int, error) {
 	a := must (&Counter{N: "1"}).Value()
 	b := check (&Counter{N: s}).Value() ""
 	return a + b, nil
+}
+
+// CoalesceInLambda: ?? in a lambda whose parameter types come from the call.
+func CoalesceInLambda(s string) string {
+	swap := map[rune]rune{'a': 'b'}
+	return strings.Map(r => swap[r] ?? r, s)
 }

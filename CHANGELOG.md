@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `??` works in a lambda whose parameter types come from the call, as in `strings.Map(r => swap[r] ?? r, s)`.
+
 ## v0.3.1 (2026-10-07)
 
 - `must (x).M()` and `check (x).M()`, with a space, are the keywords before
