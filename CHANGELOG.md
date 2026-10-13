@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.4 (2026-10-13)
+
+- No change in behavior or generated code. The compiler's fix for `??` in
+  lambdas (v0.3.2) is replaced by a general one: a lambda's expression body
+  is lowered only in the final round, like statements, so `match`,
+  conditional values and the other forms there are typed the same way.
+
 ## v0.3.3 (2026-10-13)
 
 - An effect function's span comes from its parent span's tracer provider when
