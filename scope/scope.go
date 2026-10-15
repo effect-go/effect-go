@@ -40,7 +40,9 @@ type Option func(*Scope)
 // interrupted. Cancellation is cooperative, so a fiber that ignores its
 // context can't be stopped: after d, Run releases the resources, returns a
 // *StuckError joined to body's error, and leaves the stuck goroutines
-// running. Without this option Run waits for them indefinitely.
+// running: a panic in one of them after that is lost, unless its fiber is
+// joined. Without this option, or with d <= 0, Run waits for them
+// indefinitely.
 func StopTimeout(d time.Duration) Option { return func(s *Scope) { s.stopIn = d } }
 
 // A StuckError reports fibers that didn't stop within the StopTimeout.
@@ -263,7 +265,9 @@ func (f *Fiber[T]) unjoinedPanic() *Panic {
 // Acquire opens a resource and registers release to run when the scope
 // closes. Resources are released last-in first-out, after every fiber in the
 // scope has stopped. Once the scope has released its resources, Acquire
-// opens nothing and fails with a cancellation.
+// opens nothing and fails with a cancellation; a resource that opened as
+// they were released is released at once, and the error of releasing it is
+// joined to the cancellation.
 func Acquire[T any](s *Scope, open Task[T], release func(context.Context, T) error) (T, error) {
 	var zero T
 	s.mu.Lock()
@@ -276,29 +280,34 @@ func Acquire[T any](s *Scope, open Task[T], release func(context.Context, T) err
 	if err != nil {
 		return zero, err
 	}
-	if !s.register(func(ctx context.Context) error { return release(ctx, v) }) {
-		return zero, errClosed
+	if ok, err := s.register(func(ctx context.Context) error { return release(ctx, v) }); !ok {
+		return zero, errors.Join(errClosed, err)
 	}
 	return v, nil
 }
 
 // Defer registers release to run when the scope closes, with the resources:
 // last-in first-out, after every fiber has stopped. Once the scope has
-// released its resources, Defer runs release at once.
+// released its resources, Defer runs release at once, and drops its error.
 func (s *Scope) Defer(release func(context.Context) error) {
 	s.register(release)
 }
 
 // register adds a release, or runs it at once if the resources are
-// released already, reporting whether it was added.
-func (s *Scope) register(release func(context.Context) error) bool {
+// released already, reporting whether it was added, and the error of
+// running it. A release that panics then re-panics with a *Panic, as the
+// ones run at close come back from Run.
+func (s *Scope) register(release func(context.Context) error) (bool, error) {
 	s.mu.Lock()
 	if !s.released {
 		s.releases = append(s.releases, release)
 		s.mu.Unlock()
-		return true
+		return true, nil
 	}
 	s.mu.Unlock()
-	release(context.WithoutCancel(s.parent))
-	return false
+	err := protect(context.WithoutCancel(s.parent), release)
+	if p, ok := err.(*Panic); ok {
+		panic(p)
+	}
+	return false, err
 }

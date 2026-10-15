@@ -435,6 +435,35 @@ func TestLateRelease(t *testing.T) {
 	}
 }
 
+// A resource that opens as the scope closes is released at once: Acquire
+// returns the error of releasing it, and a panic comes back as a *Panic.
+func TestReleaseAfterClose(t *testing.T) {
+	acquire := func(release func(context.Context, int) error) error {
+		started, closed, done := make(chan struct{}), make(chan struct{}), make(chan error)
+		Run(t.Context(), func(s *Scope) (int, error) {
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						done <- fmt.Errorf("panic %T", r)
+					}
+				}()
+				_, err := Acquire(s, func(context.Context) (int, error) { close(started); <-closed; return 1, nil }, release)
+				done <- err
+			}()
+			<-started
+			return 0, nil
+		})
+		close(closed)
+		return <-done
+	}
+	if err := acquire(func(context.Context, int) error { return errA }); !errors.Is(err, errA) {
+		t.Fatalf("release error: %v", err)
+	}
+	if err := acquire(func(context.Context, int) error { panic("release failed") }); err.Error() != "panic *scope.Panic" {
+		t.Fatalf("release panic: %v", err)
+	}
+}
+
 // A scope that lives as long as the program doesn't keep the fibers that
 // finished.
 func TestFinishedFibersAreForgotten(t *testing.T) {

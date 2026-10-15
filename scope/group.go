@@ -118,8 +118,7 @@ func All[T any](ctx context.Context, tasks ...Task[T]) ([]T, error) {
 // Each calls f on every item, at most limit at a time, and returns the
 // results in the order of items. Failures work as in All: the first one
 // cancels the calls in progress and the items not yet started, and the
-// error holds every real failure. A limit below 1 means no limit, as in
-// errgroup.
+// error holds every real failure. A limit below 1 means no limit.
 func Each[T, R any](ctx context.Context, items []T, limit int, f func(context.Context, T) (R, error)) ([]R, error) {
 	res := make([]R, len(items))
 	var next atomic.Int64
