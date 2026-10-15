@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,7 +15,10 @@ import (
 	"github.com/effect-go/effect-go/internal/syntax/format"
 )
 
-//line fmt.ego:15
+// fmtCmd formats .ego files as gofmt formats Go: stdin to stdout, a file to
+// stdout, or with -l and -w, files and the trees of directories.
+//
+//line fmt.ego:18
 func fmtCmd(args []string) error {
 	fl := flag.NewFlagSet("fmt", flag.ExitOnError)
 	list := fl.Bool("l", false, "list files whose formatting differs")
@@ -23,21 +27,20 @@ func fmtCmd(args []string) error {
 	paths := fl.Args()
 	if len(paths) == 0 {
 		if !*list && !*write {
-			// Like gofmt: format stdin to stdout.
-			src, err := readAll(os.Stdin)
+			src, err := io.ReadAll(os.Stdin)
 			if err != nil {
 				return err
 			}
-//line fmt.ego:25
+//line fmt.ego:27
 			out, err := format.Source(src)
 			if err != nil {
 				return err
 			}
-//line fmt.ego:26
+//line fmt.ego:28
 			if _, err := os.Stdout.Write(out); err != nil {
 				return err
 			}
-//line fmt.ego:27
+//line fmt.ego:29
 			return nil
 		}
 		paths = []string{"."}
@@ -45,57 +48,73 @@ func fmtCmd(args []string) error {
 	failed := false
 	for _, root := range paths {
 		root = strings.TrimSuffix(root, "/...")
+		fi, err := os.Stat(root)
+		if err != nil {
+			return err
+		}
+//line fmt.ego:37
+		if fi.IsDir() && !*list && !*write {
+			return fmt.Errorf("%v is a directory: use -l to list the files to format, -w to format them", root)
+		}
 		if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-//line fmt.ego:36
+//line fmt.ego:42
 			if d.IsDir() {
 				if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "vendor" || d.Name() == "testdata") {
 					return filepath.SkipDir
 				}
 				return nil
 			}
-			if !strings.HasSuffix(path, ".ego") {
+			if path != root && !strings.HasSuffix(path, ".ego") {
 				return nil
 			}
-			src, err2 := os.ReadFile(path)
-			if err2 != nil {
-				return err2
-			}
-//line fmt.ego:46
-			out, err := format.Source(src)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s:%v\n", path, err)
+			if err := fmtFile(path, *list, *write); err != nil {
+				fmt.Fprintln(os.Stderr, err)
 				failed = true
-				return nil
-			}
-			if bytes.Equal(src, out) {
-				return nil
-			}
-			if *list {
-				fmt.Println(path)
-			}
-			if *write {
-				return os.WriteFile(path, out, 0o666)
-			}
-			if !*list {
-				os.Stdout.Write(out)
 			}
 			return nil
 		}); err != nil {
 			return err
 		}
 	}
-//line fmt.ego:67
+//line fmt.ego:58
 	if failed {
 		return errSilent
 	}
 	return nil
 }
 
-func readAll(f *os.File) ([]byte, error) {
-	var b bytes.Buffer
-	_, err := b.ReadFrom(f)
-	return b.Bytes(), err
+// fmtFile formats one file: it lists it, rewrites it, or else prints it.
+func fmtFile(path string, list, write bool) error {
+	src, err2 := os.ReadFile(path)
+	if err2 != nil {
+		return err2
+	}
+//line fmt.ego:67
+	out, err := format.Source(src)
+	if err != nil {
+		return fmt.Errorf("%s:%v", path, err) // path:line:col: message
+	}
+	if !list && !write {
+		if _, err3 := os.Stdout.Write(out); err3 != nil {
+			return err3
+		}
+//line fmt.ego:73
+		return nil
+	}
+	if bytes.Equal(src, out) {
+		return nil
+	}
+	if list {
+		fmt.Println(path)
+	}
+	if write {
+		if err4 := os.WriteFile(path, out, 0o666); err4 != nil {
+			return err4
+		}
+	}
+//line fmt.ego:84
+	return nil
 }
