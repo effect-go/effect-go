@@ -5,6 +5,7 @@ package parser
 
 import (
 	"go/token"
+	"slices"
 
 	"github.com/effect-go/effect-go/internal/syntax/ast"
 	"github.com/effect-go/effect-go/internal/syntax/scanner"
@@ -16,30 +17,26 @@ func (p *parser) peek() token.Token {
 	return tok
 }
 
-// checkFollows reports whether check or must at the current position is
-// the keyword: before a name, or before ( after a space, as in
-// must (&w).Run(). check(x) stays a call of a function named check, and
-// check * n a multiplication: gofmt never writes a space before (.
-func (p *parser) checkFollows() bool {
-	pos, tok, _ := p.scanner.Lookahead().ScanToken()
+// keywordBefore reports whether the contextual keyword at the current
+// position (check, must, fail or match) is the keyword, given the tokens
+// that start its operand. It's what makes "check x" new syntax while
+// "check := 1" and "check.x" stay ordinary Go. ( is the keyword's only
+// after a space, as in must (&w).Run(), and * only after a space and
+// before its operand, as in match *p: gofmt never writes a space before
+// the ( of a call, and spaces both sides of a binary operator alike. So
+// check(x) stays a call, and check * n a multiplication.
+func (p *parser) keywordBefore(operand ...token.Token) bool {
+	s := p.scanner.Lookahead()
+	pos, tok, _ := s.ScanToken()
+	spaced := int(pos) > int(p.pos)+len(p.lit)
 	switch tok {
-	case token.IDENT:
-		return true
 	case token.LPAREN:
-		return int(pos) > int(p.pos)+len(p.lit)
+		return spaced
+	case token.MUL:
+		next, _, _ := s.ScanToken()
+		return spaced && next == pos+1 && slices.Contains(operand, tok)
 	}
-	return false
-}
-
-// startsOperand reports whether tok can follow a contextual keyword such as
-// check, fail or match. It's what makes "check x" new syntax while
-// "check(x)", "check := 1" and "check.x" stay ordinary Go.
-func startsOperand(tok token.Token) bool {
-	switch tok {
-	case token.IDENT, token.STRING, token.INT, token.FLOAT, token.CHAR, token.AND:
-		return true
-	}
-	return false
+	return slices.Contains(operand, tok)
 }
 
 // parseEgoOperand parses an effect-go expression starting at an identifier,
@@ -47,11 +44,11 @@ func startsOperand(tok token.Token) bool {
 func (p *parser) parseEgoOperand() ast.Expr {
 	switch p.lit {
 	case "check", "must":
-		if p.checkFollows() {
+		if p.keywordBefore(token.IDENT) {
 			return p.parseCheck()
 		}
 	case "match":
-		if p.peek() == token.IDENT {
+		if p.keywordBefore(token.IDENT, token.MUL) {
 			arms, m, tag, l, r := p.parseMatch(true)
 			return &ast.MatchExpr{Match: m, Tag: tag, Lbrace: l, Arms: arms, Rbrace: r}
 		}
@@ -310,7 +307,7 @@ func (p *parser) parseArms(expr bool, context string) (lbrace token.Pos, arms []
 func (p *parser) parseEgoStmt() ast.Stmt {
 	switch p.lit {
 	case "fail":
-		if startsOperand(p.peek()) {
+		if p.keywordBefore(token.IDENT, token.STRING, token.INT, token.FLOAT, token.CHAR, token.AND) {
 			s := &ast.FailStmt{Fail: p.pos}
 			p.next()
 			s.X = p.parseRhs()
@@ -321,7 +318,7 @@ func (p *parser) parseEgoStmt() ast.Stmt {
 			return s
 		}
 	case "match":
-		if p.peek() == token.IDENT {
+		if p.keywordBefore(token.IDENT, token.MUL) {
 			arms, m, tag, l, r := p.parseMatch(false)
 			p.expectSemi()
 			return &ast.MatchStmt{Match: m, Tag: tag, Lbrace: l, Arms: arms, Rbrace: r}

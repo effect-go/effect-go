@@ -6,6 +6,7 @@ error  E{A{X int}
 effect   (s *S)Get( id int )(int,E){
   v,ok:=check   s.find(id)   as   A
       if !ok{fail B{}}
+      if v<0{fail (B{})}
   w := s.load(id)   else   0
   p := check s.port(id)   as A   else{B(_)=>3000
       A(e)  =>  e.X }
@@ -14,6 +15,8 @@ effect   (s *S)Get( id int )(int,E){
   1=>
   2=>  log(v)
   }
+  match (v){1=>log(v)}
+  k := match *pp{1=>"one"; _=>"many"}
   n := must strconv.Atoi( "1" )
   r := match v{
   1=>"one"
@@ -35,8 +38,9 @@ effect   (s *S)Get( id int )(int,E){
   return v+w+n,nil
 }
 
-func Times(check, must, n int) int {
+func Times(check, must, match, n int) int {
 	a := check * n
 	b := must & n
-	return a + b
+	c := match * n
+	return a + b + c
 }
