@@ -15,16 +15,16 @@ that compile back to the Go you'd have written by hand.
 Two calls in parallel, with errgroup:
 
 ```go
-func Load(ctx context.Context, d Deps, id string) (Page, error) {
+func (d *Dashboard) Load(ctx context.Context, id string) (Page, error) {
 	g, gctx := errgroup.WithContext(ctx)
 	var user User
 	var orders []Order
 	g.Go(func() (err error) {
-		user, err = d.Users.Get(gctx, id)
+		user, err = d.users.Get(gctx, id)
 		return err
 	})
 	g.Go(func() (err error) {
-		orders, err = d.Orders.ForUser(gctx, id)
+		orders, err = d.orders.ForUser(gctx, id)
 		return err
 	})
 	if err := g.Wait(); err != nil {
@@ -41,8 +41,8 @@ fine, but then a failure doesn't cancel the other call.
 The same in effect-go:
 
 ```go
-effect Load(d Deps, id string) (Page, error) {
-	user, orders := check all(d.Users.Get(id), d.Orders.ForUser(id))
+effect (d *Dashboard) Load(id string) (Page, error) {
+	user, orders := check all(d.users.Get(id), d.orders.ForUser(id))
 	return Page{User: user, Orders: orders}, nil
 }
 ```
