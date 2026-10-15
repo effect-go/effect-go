@@ -96,13 +96,22 @@ func (p *Panic) Unwrap() error {
 }
 
 // TimeoutError is returned by Timeout when the task runs past its deadline.
-// It matches context.DeadlineExceeded with errors.Is.
+// It matches context.DeadlineExceeded with errors.Is, and wraps the task's
+// error when that says more than the deadline.
 type TimeoutError struct {
 	After time.Duration
+	err   error
 }
 
-func (e *TimeoutError) Error() string        { return fmt.Sprintf("timed out after %v", e.After) }
+func (e *TimeoutError) Error() string {
+	if e.err != nil {
+		return fmt.Sprintf("timed out after %v: %v", e.After, e.err)
+	}
+	return fmt.Sprintf("timed out after %v", e.After)
+}
+
 func (e *TimeoutError) Is(target error) bool { return target == context.DeadlineExceeded }
+func (e *TimeoutError) Unwrap() error        { return e.err }
 
 // interrupted is a cancellation cause. It matches context.Canceled, so a
 // task that returns context.Cause(ctx) is still seen as interrupted.

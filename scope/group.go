@@ -273,8 +273,10 @@ func Race[T any](ctx context.Context, tasks ...Task[T]) (T, error) {
 }
 
 // Timeout runs task with a deadline. If the task stops because the deadline
-// passed, returning an error that matches context.DeadlineExceeded,
-// Timeout returns a *TimeoutError; other errors are returned as they are. Cancellation is cooperative: a
+// passed, returning an error that matches context.DeadlineExceeded, Timeout
+// fails with a *TimeoutError (as errors.As finds it), which keeps what the
+// task's error says beyond the deadline: a retry's last error, for one.
+// Other errors are returned as they are. Cancellation is cooperative: a
 // task that ignores its context runs to completion.
 func Timeout[T any](ctx context.Context, d time.Duration, task Task[T]) (T, error) {
 	terr := &TimeoutError{After: d}
@@ -284,7 +286,13 @@ func Timeout[T any](ctx context.Context, d time.Duration, task Task[T]) (T, erro
 	// The task's own error stays, unless it is the deadline's.
 	if err != nil && context.Cause(ctx) == terr && errors.Is(err, context.DeadlineExceeded) {
 		var zero T
-		return zero, terr
+		switch {
+		case err == context.DeadlineExceeded:
+			return zero, terr
+		case errors.Is(err, terr):
+			return zero, err // it wraps terr already, as Retry's does
+		}
+		return zero, &TimeoutError{After: d, err: err}
 	}
 	return v, err
 }

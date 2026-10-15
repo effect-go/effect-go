@@ -3,12 +3,15 @@ package scope
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/effect-go/effect-go/schedule"
 )
 
 // sleep waits for d or until ctx is cancelled, like a well-behaved call.
@@ -275,6 +278,21 @@ func TestTimeout(t *testing.T) {
 		})
 		if err != errA {
 			t.Fatalf("own error: %v", err)
+		}
+		// One that says more than the deadline keeps it too: a retry, its
+		// last attempt's error; a call, what it was doing.
+		_, err = Timeout(t.Context(), 1500*time.Millisecond, func(ctx context.Context) (int, error) {
+			return schedule.Retry(ctx, schedule.Spaced(time.Second), sleep(0, 0, errA))
+		})
+		if _, ok := errors.AsType[*TimeoutError](err); !ok || !errors.Is(err, errA) {
+			t.Fatalf("retry: %v", err)
+		}
+		_, err = Timeout(t.Context(), 10*time.Millisecond, func(ctx context.Context) (int, error) {
+			<-ctx.Done()
+			return 0, fmt.Errorf("load: %w", ctx.Err())
+		})
+		if _, ok := err.(*TimeoutError); !ok || err.Error() != "timed out after 10ms: load: context deadline exceeded" {
+			t.Fatalf("call: %v", err)
 		}
 	})
 }
