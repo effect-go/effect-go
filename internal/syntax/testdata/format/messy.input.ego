@@ -7,6 +7,14 @@ type F struct{x f`json:"x"`; f"tag"}
 error  E{A{X int}
     B{}  "b happened"
 }
+
+enum Color {
+
+  Red
+
+  Green
+
+}
 effect   (s *S)Get( id int )(int,E){
   v,ok:=check   s.find(id)   as   A
       if !ok{fail B{}}

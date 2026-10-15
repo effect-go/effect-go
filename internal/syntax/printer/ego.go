@@ -279,9 +279,15 @@ func (p *printer) sumDecl(d *ast.SumDecl) {
 	p.print(blank)
 	p.setPos(d.Lbrace)
 	p.print(token.LBRACE, indent)
+	// Like a struct's fields: no blank line after { or before }.
+	if len(d.Cases) > 0 || p.commentBefore(p.posFor(d.Rbrace)) {
+		p.print(formfeed)
+	}
 	var line int
 	for i, c := range d.Cases {
-		p.linebreak(p.lineFor(c.Pos()), 1, ignore, i == 0 || p.linesFrom(line) > 0)
+		if i > 0 {
+			p.linebreak(p.lineFor(c.Pos()), 1, ignore, p.linesFrom(line) > 0)
+		}
 		p.setComment(c.Doc)
 		p.recordLine(&line)
 		p.expr(c.Name)
@@ -297,8 +303,7 @@ func (p *printer) sumDecl(d *ast.SumDecl) {
 			p.setComment(c.Comment)
 		}
 	}
-	p.print(unindent)
-	p.linebreak(p.lineFor(d.Rbrace), 1, ignore, true)
+	p.print(unindent, formfeed)
 	p.setPos(d.Rbrace)
 	p.print(token.RBRACE)
 }

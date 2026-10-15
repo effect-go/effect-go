@@ -12,6 +12,12 @@ error E {
 	B{} "b happened"
 }
 
+enum Color {
+	Red
+
+	Green
+}
+
 effect (s *S) Get(id int) (int, E) {
 	v, ok := check s.find(id) as A
 	if !ok {
