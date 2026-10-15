@@ -1,6 +1,6 @@
 // Command ego compiles and formats effect-go (.ego) files.
 //
-//	ego generate [-check] [packages] write the Go for each .ego file (default ./...)
+//	ego generate [-check] [-tags t] [packages] write the Go of each .ego file (default ./...)
 //	ego fmt [-l] [-w] [paths] format .ego files (default: stdin to stdout; ./... with -l or -w)
 //	ego test [args]           ego generate, then go test with the same arguments
 //	ego vet [packages]        go vet, then the effect-go analyzers
@@ -11,6 +11,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -28,13 +29,13 @@ func usage() {
 	fmt.Fprint(os.Stderr, `ego compiles effect-go (.ego) files to Go.
 
 Usage:
-	ego generate [-check] [dirs]              generate x_ego.go for each x.ego, and layers_ego.go (default ./...)
-	ego fmt [-l] [-w] [paths]                 format .ego files (default: stdin to stdout; ./... with -l or -w)
-	ego test [go test flags] [packages]       ego generate, then go test with the same arguments
-	ego vet [packages]                        go vet, then the effect-go analyzers
-	ego eject [-w] [packages]                 turn .ego files into plain .go files for good (prints the plan without -w)
-	ego new [-replace dir] module/path [dir]  create a project: a small HTTP service, with AGENTS.md
-	ego lsp                                   language server: gopls with .ego support
+	ego generate [-check] [-tags t] [packages]  generate x_ego.go for each x.ego, and layers_ego.go (default ./...)
+	ego fmt [-l] [-w] [paths]                   format .ego files (default: stdin to stdout; ./... with -l or -w)
+	ego test [go test flags] [packages]         ego generate, then go test with the same arguments
+	ego vet [packages]                          go vet, then the effect-go analyzers
+	ego eject [-w] [packages]                   turn .ego files into plain .go files for good (prints the plan without -w)
+	ego new [-replace dir] module/path [dir]    create a project: a small HTTP service, with AGENTS.md
+	ego lsp                                     language server: gopls with .ego support
 	ego version
 `)
 	os.Exit(2)
@@ -81,4 +82,4 @@ func main() {
 	}
 }
 
-var errSilent = fmt.Errorf("failed")
+var errSilent = errors.New("failed")
