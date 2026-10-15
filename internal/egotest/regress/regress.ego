@@ -161,9 +161,27 @@ func Map[T, R any](xs []T, f func(T) R) []R {
 	return out
 }
 
-// GenericLambda: a typed lambda passed to Map gives Map its result type.
-func GenericLambda(us []User) []string {
-	return Map(us, (u User) => u.Name)
+// MapS maps a slice of any slice type.
+func MapS[S ~[]E, E, R any](xs S, f func(E) R) []R { return Map(xs, f) }
+
+// Pair holds two values.
+type Pair[K comparable, V any] struct {
+	K K
+	V V
+}
+
+// MapPair maps a pair's value.
+func MapPair[K comparable, V, R any](p Pair[K, V], f func(V) R) Pair[K, R] {
+	return Pair[K, R]{p.K, f(p.V)}
+}
+
+// Users is a named slice.
+type Users []User
+
+// GenericLambda: a lambda passed to Map gets its parameter types from the
+// other arguments and gives Map its result type, typed or not.
+func GenericLambda(us []User) ([]string, []string, []int, Pair[string, int]) {
+	return Map(us, (u User) => u.Name), Map(us, u => u.Name), MapS(Users(us), u => len(u.Name)), MapPair(Pair[string, User]{"k", us[0]}, u => len(u.Name))
 }
 
 // LocalNames: variables named like the packages the generated code uses.

@@ -313,9 +313,27 @@ func Map[T, R any](xs []T, f func(T) R) []R {
 	return out
 }
 
-// GenericLambda: a typed lambda passed to Map gives Map its result type.
-func GenericLambda(us []User) []string {
-	return Map(us, func(u User) string { return u.Name })
+// MapS maps a slice of any slice type.
+func MapS[S ~[]E, E, R any](xs S, f func(E) R) []R { return Map(xs, f) }
+
+// Pair holds two values.
+type Pair[K comparable, V any] struct {
+	K K
+	V V
+}
+
+// MapPair maps a pair's value.
+func MapPair[K comparable, V, R any](p Pair[K, V], f func(V) R) Pair[K, R] {
+	return Pair[K, R]{p.K, f(p.V)}
+}
+
+// Users is a named slice.
+type Users []User
+
+// GenericLambda: a lambda passed to Map gets its parameter types from the
+// other arguments and gives Map its result type, typed or not.
+func GenericLambda(us []User) ([]string, []string, []int, Pair[string, int]) {
+	return Map(us, func(u User) string { return u.Name }), Map(us, func(u User) string { return u.Name }), MapS(Users(us), func(u User) int { return len(u.Name) }), MapPair(Pair[string, User]{"k", us[0]}, func(u User) int { return len(u.Name) })
 }
 
 // LocalNames: variables named like the packages the generated code uses.
@@ -329,7 +347,7 @@ func LocalNames(s string) (int, error) {
 		}
 		return 0, Unavailable{Cause: err}
 	}
-//line regress.ego:174
+//line regress.ego:192
 	return n + fmt, nil
 }
 
@@ -344,12 +362,12 @@ func ParenReceiver(s string) (int, error) {
 	if err != nil {
 		panic(err)
 	}
-//line regress.ego:185
+//line regress.ego:203
 	b, err := (&Counter{N: s}).Value()
 	if err != nil {
 		return 0, err
 	}
-//line regress.ego:186
+//line regress.ego:204
 	return a + b, nil
 }
 
@@ -365,7 +383,7 @@ func CoalesceInLambda(s string) string {
 	}, s)
 }
 
-//line regress.ego:195
+//line regress.ego:213
 func apply(xs []int, f func(int)) {
 	for _, x := range xs {
 		f(x)
@@ -384,7 +402,7 @@ func LambdaLift(m map[int]string) []string {
 		}
 		print(&out, v)
 	})
-//line regress.ego:207
+//line regress.ego:225
 	_ = x
 	return out
 }
@@ -398,7 +416,7 @@ func failing(int) (int, error) { return 0, io.EOF }
 func BranchLift(ctx context.Context, m map[int]int, ids []int) (_ int, _ []int, err error) {
 	ctx, span := trace.Start(ctx, "regress.BranchLift")
 	defer trace.End(span, &err)
-//line regress.ego:218
+//line regress.ego:236
 	attempts := 0
 	count := func() int { attempts++; return attempts }
 	last, err := schedule.Retry(ctx, schedule.Recurs(2), func(ctx context.Context) (int, error) {
@@ -411,7 +429,7 @@ func BranchLift(ctx context.Context, m map[int]int, ids []int) (_ int, _ []int, 
 	if err != nil {
 		last = -1
 	}
-//line regress.ego:221
+//line regress.ego:239
 	_ = last
 	got, err := scope.Each(ctx, ids, 2, func(ctx context.Context, id int) (int, error) {
 		v2, ok2 := m[id]
@@ -423,7 +441,7 @@ func BranchLift(ctx context.Context, m map[int]int, ids []int) (_ int, _ []int, 
 	if err != nil {
 		return 0, nil, egofmt.Errorf("strconv.Atoi: %w", err)
 	}
-//line regress.ego:223
+//line regress.ego:241
 	return attempts, got, nil
 }
 
@@ -431,7 +449,7 @@ func BranchLift(ctx context.Context, m map[int]int, ids []int) (_ int, _ []int, 
 func NestedLift(ctx context.Context, m map[int]int) (_ int, err error) {
 	ctx, span := trace.Start(ctx, "regress.NestedLift")
 	defer trace.End(span, &err)
-//line regress.ego:228
+//line regress.ego:246
 	a, b, err := scope.All2(ctx,
 		func(ctx context.Context) (int, error) {
 			return schedule.Retry(ctx, schedule.Recurs(1), func(ctx context.Context) (int, error) {
@@ -449,7 +467,7 @@ func NestedLift(ctx context.Context, m map[int]int) (_ int, err error) {
 	if err != nil {
 		return 0, err
 	}
-//line regress.ego:229
+//line regress.ego:247
 	return a + b, nil
 }
 
@@ -463,7 +481,7 @@ func Hidden(s string) (int, int, error) {
 			v = port
 		}
 		port := v
-//line regress.ego:238
+//line regress.ego:256
 		v2, err := strconv.Atoi(s)
 		if err != nil {
 			if egoerrors.Is(err, strconv.ErrSyntax) {
@@ -473,7 +491,7 @@ func Hidden(s string) (int, int, error) {
 			}
 		}
 		n := v2
-//line regress.ego:239
+//line regress.ego:257
 		return port, n, parseHidden(s)
 	}
 }
@@ -485,7 +503,7 @@ func parseHidden(s string) error {
 			return egofmt.Errorf("parse %v: %w", s, err)
 		}
 		s := v
-//line regress.ego:246
+//line regress.ego:264
 		_ = s
 	}
 	return nil
@@ -504,7 +522,7 @@ func GeneratedNames(errs chan error, ok bool) (string, string, string) {
 		}
 		fromSelect = egofmt.Sprintf("%v %d", err, n)
 	}
-//line regress.ego:261
+//line regress.ego:279
 	var f func(error) string = func(err error) string {
 		n, err2 := strconv.Atoi("2")
 		if err2 != nil {
@@ -512,7 +530,7 @@ func GeneratedNames(errs chan error, ok bool) (string, string, string) {
 		}
 		return egofmt.Sprintf("%v %d", err, n)
 	}
-//line regress.ego:265
+//line regress.ego:283
 	var arm string
 	v := error(Duplicate{Slug: "a"})
 	if v == nil {
@@ -526,7 +544,7 @@ func GeneratedNames(errs chan error, ok bool) (string, string, string) {
 	} else {
 		arm = "other"
 	}
-//line regress.ego:270
+//line regress.ego:288
 	return fromSelect, f(io.EOF), arm
 }
 
@@ -541,7 +559,7 @@ func TargetOnce(p *int) ([]*int, int) {
 		v = &def
 	}
 	ps[next()] = v
-//line regress.ego:280
+//line regress.ego:298
 	return ps, calls
 }
 
@@ -554,7 +572,7 @@ type Span struct{ W int }
 func Clashes(ctx context.Context, span Span, s string) (_ int, err error) {
 	ctx, egoSpan := trace.Start(ctx, "regress.Clashes")
 	defer trace.End(egoSpan, &err)
-//line regress.ego:290
+//line regress.ego:308
 	n := 0
 	n, err = strconv.Atoi(s)
 	if err != nil {
@@ -566,7 +584,7 @@ func Clashes(ctx context.Context, span Span, s string) (_ int, err error) {
 		}
 		n = v
 	}
-//line regress.ego:295
+//line regress.ego:313
 	return n + span.W, nil
 }
 
@@ -580,7 +598,7 @@ func Untyped(c bool) (float64, time.Duration) {
 		v = 200
 	}
 	d := (v) * time.Millisecond
-//line regress.ego:302
+//line regress.ego:320
 	var f float64 = 0
 	var v2 float64
 	if c {
@@ -589,7 +607,7 @@ func Untyped(c bool) (float64, time.Duration) {
 		v2 = 2
 	}
 	f += v2
-//line regress.ego:304
+//line regress.ego:322
 	f = 2*f + untypedReturn(c)
 	return f, d
 }
@@ -606,7 +624,7 @@ func untypedReturn(c bool) float64 {
 
 // Labeled: what a labeled loop's header needs goes before the label.
 //
-//line regress.ego:311
+//line regress.ego:329
 func Labeled(m map[string][]int, xs []int) int {
 	n := 0
 	v, ok := m["a"]
@@ -622,7 +640,7 @@ outer:
 		}
 		n += x
 	}
-//line regress.ego:322
+//line regress.ego:340
 	return n
 }
 
@@ -642,18 +660,18 @@ func Missing(a *Address, m map[string]*int, x any) (string, int, int) {
 	if !found {
 		tag = "none"
 	}
-//line regress.ego:331
+//line regress.ego:349
 	def := -1
 	n, ok2 := m["k"]
 	if !ok2 || n == nil {
 		n = &def
 	}
-//line regress.ego:333
+//line regress.ego:351
 	p, ok3 := x.(*int)
 	if !ok3 || p == nil {
 		p = &def
 	}
-//line regress.ego:334
+//line regress.ego:352
 	return tag, *n, *p
 }
 
@@ -664,7 +682,7 @@ type Shelf struct{ removed atomic.Int64 }
 func (s *Shelf) Remove(ctx context.Context, n int) (err error) {
 	ctx, span := trace.Start(ctx, "regress.Shelf.Remove")
 	defer trace.End(span, &err)
-//line regress.ego:342
+//line regress.ego:360
 	if n < 0 {
 		return Moved{Slug: "n", Times: n}
 	}
@@ -676,11 +694,11 @@ func (s *Shelf) Remove(ctx context.Context, n int) (err error) {
 func (s *Shelf) RemoveAll(ctx context.Context, ns []int) (_ int64, err error) {
 	ctx, span := trace.Start(ctx, "regress.Shelf.RemoveAll")
 	defer trace.End(span, &err)
-//line regress.ego:351
+//line regress.ego:369
 	if _, err := scope.Each(ctx, ns, 2, func(ctx context.Context, item int) (struct{}, error) { return struct{}{}, s.Remove(ctx, item) }); err != nil {
 		return 0, err
 	}
-//line regress.ego:352
+//line regress.ego:370
 	return s.removed.Load(), nil
 }
 
@@ -725,7 +743,7 @@ func (e Gone) As(target any) bool {
 
 // Formatter: a lambda in a branch takes its types from the variable.
 //
-//line regress.ego:365
+//line regress.ego:383
 func Formatter(loud bool, k int) (string, string) {
 	var v func(n int) string
 	if loud {
@@ -734,7 +752,7 @@ func Formatter(loud bool, k int) (string, string) {
 		v = func(n int) string { return egofmt.Sprintf("%d", n) }
 	}
 	var f func(int) string = v
-//line regress.ego:367
+//line regress.ego:385
 	var g func(int) string
 	switch k {
 	case 1:
@@ -742,6 +760,6 @@ func Formatter(loud bool, k int) (string, string) {
 	default:
 		g = func(n int) string { return "other" }
 	}
-//line regress.ego:369
+//line regress.ego:387
 	return f(1), g(2)
 }

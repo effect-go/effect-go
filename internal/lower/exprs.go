@@ -704,6 +704,139 @@ func (g *fileGen) genericResults(x ast.Expr) bool {
 	return false
 }
 
+// boundParams returns the parameters of sig, the type of lambda x passed
+// to a generic function, with the type parameters the call's other
+// arguments bind: in Map(us, u => u.Name), us binds T, though nothing
+// binds R yet. It returns nil if one stays unbound.
+func (g *fileGen) boundParams(x *ast.LambdaExpr, sig *types.Signature) *types.Tuple {
+	call, ok := g.parent(x).(*ast.CallExpr)
+	if !ok {
+		return nil
+	}
+	fn, ok := g.objectOf(call.Fun).(*types.Func)
+	if !ok {
+		return nil
+	}
+	decl := fn.Origin().Signature()
+	if g.leavesCtx(call, decl) {
+		return nil // an effect function: none is generic
+	}
+	bound := map[*types.TypeParam]types.Type{}
+	for i, a := range call.Args {
+		if t := g.typeOf(a); a != x && t != nil && !isUntyped(t) && i < decl.Params().Len() && !(decl.Variadic() && i == decl.Params().Len()-1) {
+			unify(decl.Params().At(i).Type(), t, bound)
+		}
+	}
+	var vs []*types.Var
+	for v := range sig.Params().Variables() {
+		t := subst(v.Type(), bound)
+		if t == nil {
+			return nil
+		}
+		vs = append(vs, types.NewParam(v.Pos(), v.Pkg(), v.Name(), t))
+	}
+	return types.NewTuple(vs...)
+}
+
+// unify binds the type parameters of p, a parameter's declared type, to
+// match t, an argument's type.
+func unify(p, t types.Type, bound map[*types.TypeParam]types.Type) {
+	switch p := p.(type) {
+	case *types.TypeParam:
+		if bound[p] != nil {
+			return
+		}
+		bound[p] = t
+		// S ~[]E: []User binds E too.
+		if iface, ok := p.Constraint().Underlying().(*types.Interface); ok && iface.NumEmbeddeds() == 1 {
+			if u, ok := iface.EmbeddedType(0).(*types.Union); ok && u.Len() == 1 {
+				unify(u.Term(0).Type(), t.Underlying(), bound)
+			}
+		}
+	case *types.Pointer:
+		if t, ok := t.Underlying().(*types.Pointer); ok {
+			unify(p.Elem(), t.Elem(), bound)
+		}
+	case *types.Slice:
+		if t, ok := t.Underlying().(*types.Slice); ok {
+			unify(p.Elem(), t.Elem(), bound)
+		}
+	case *types.Array:
+		if t, ok := t.Underlying().(*types.Array); ok {
+			unify(p.Elem(), t.Elem(), bound)
+		}
+	case *types.Chan:
+		if t, ok := t.Underlying().(*types.Chan); ok {
+			unify(p.Elem(), t.Elem(), bound)
+		}
+	case *types.Map:
+		if t, ok := t.Underlying().(*types.Map); ok {
+			unify(p.Key(), t.Key(), bound)
+			unify(p.Elem(), t.Elem(), bound)
+		}
+	case *types.Signature:
+		if t, ok := t.Underlying().(*types.Signature); ok && p.Params().Len() == t.Params().Len() && p.Results().Len() == t.Results().Len() {
+			for i := range p.Params().Len() {
+				unify(p.Params().At(i).Type(), t.Params().At(i).Type(), bound)
+			}
+			for i := range p.Results().Len() {
+				unify(p.Results().At(i).Type(), t.Results().At(i).Type(), bound)
+			}
+		}
+	case *types.Named:
+		if t, ok := types.Unalias(t).(*types.Named); ok && t.Origin() == p.Origin() && p.TypeArgs().Len() == t.TypeArgs().Len() {
+			for i := range p.TypeArgs().Len() {
+				unify(p.TypeArgs().At(i), t.TypeArgs().At(i), bound)
+			}
+		}
+	}
+}
+
+// subst returns t with its type parameters replaced as bound gives, or nil
+// if one is unbound.
+func subst(t types.Type, bound map[*types.TypeParam]types.Type) types.Type {
+	if !generic(t) {
+		return t
+	}
+	switch t := t.(type) {
+	case *types.TypeParam:
+		return bound[t]
+	case *types.Pointer:
+		if e := subst(t.Elem(), bound); e != nil {
+			return types.NewPointer(e)
+		}
+	case *types.Slice:
+		if e := subst(t.Elem(), bound); e != nil {
+			return types.NewSlice(e)
+		}
+	case *types.Array:
+		if e := subst(t.Elem(), bound); e != nil {
+			return types.NewArray(e, t.Len())
+		}
+	case *types.Chan:
+		if e := subst(t.Elem(), bound); e != nil {
+			return types.NewChan(t.Dir(), e)
+		}
+	case *types.Map:
+		k, e := subst(t.Key(), bound), subst(t.Elem(), bound)
+		if k != nil && e != nil {
+			return types.NewMap(k, e)
+		}
+	case *types.Named:
+		var args []types.Type
+		for a := range t.TypeArgs().Types() {
+			if a = subst(a, bound); a == nil {
+				return nil
+			}
+			args = append(args, a)
+		}
+		if n, err := types.Instantiate(nil, t.Origin(), args, false); err == nil {
+			return n
+		}
+	}
+	return nil
+}
+
 // lambda renders x => body as a function literal, with types from where the
 // lambda is used.
 func (g *fileGen) lambda(x *ast.LambdaExpr) {
@@ -722,6 +855,11 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 					f.sig = sig
 				case !generic(sig.Params()):
 					f.sig, f.openRes = sig, true
+				default:
+					// Map(us, u => u.Name) before R is inferred: us gives T.
+					if ps := g.boundParams(x, sig); ps != nil {
+						f.sig, f.openRes = types.NewSignatureType(nil, nil, nil, ps, sig.Results(), sig.Variadic()), true
+					}
 				}
 			}
 		}

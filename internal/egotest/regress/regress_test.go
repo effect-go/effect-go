@@ -121,8 +121,9 @@ func TestFStringLoop(t *testing.T) {
 }
 
 func TestGenericLambda(t *testing.T) {
-	if got := GenericLambda([]User{{"a"}, {"b"}}); !slices.Equal(got, []string{"a", "b"}) {
-		t.Errorf("got %q", got)
+	typed, untyped, lens, pair := GenericLambda([]User{{"a"}, {"bb"}})
+	if !slices.Equal(typed, []string{"a", "bb"}) || !slices.Equal(untyped, typed) || !slices.Equal(lens, []int{1, 2}) || pair != (Pair[string, int]{"k", 1}) {
+		t.Errorf("got %q %q %v %v", typed, untyped, lens, pair)
 	}
 }
 
