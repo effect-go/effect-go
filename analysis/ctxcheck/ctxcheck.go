@@ -48,6 +48,11 @@ func run(pass *analysis.Pass) (any, error) {
 			if !ok {
 				return
 			}
+			// g, ctx := errgroup.WithContext(ctx) reassigns ctx: it is then
+			// the group's context.
+			if gctx, ok := n.Lhs[1].(*ast.Ident); ok && pass.TypesInfo.ObjectOf(gctx) == pass.TypesInfo.ObjectOf(parent) {
+				return
+			}
 			if g, ok := n.Lhs[0].(*ast.Ident); ok {
 				if obj := pass.TypesInfo.ObjectOf(g); obj != nil {
 					parentOf[obj] = pass.TypesInfo.ObjectOf(parent)

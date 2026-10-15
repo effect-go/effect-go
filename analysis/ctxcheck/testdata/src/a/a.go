@@ -17,6 +17,13 @@ func group(ctx context.Context) error {
 	return g.Wait()
 }
 
+// The usual idiom: ctx is the group's context from then on.
+func reassigned(ctx context.Context) error {
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error { _, err := get(ctx); return err })
+	return g.Wait()
+}
+
 func tasks(ctx context.Context) {
 	outer := ctx
 	scope.All2(ctx,
