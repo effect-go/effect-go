@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+Fixes from a review of the whole codebase.
+
+**Changes in behavior**
+- `a ?? b` also falls back when `a` is a nil map value, a nil result of a
+  type assertion or a nil `(v, ok)` result, as it does for a nil pointer.
+  `u?.Tags["k"] ?? d` falls back on a missing key behind the chain too.
+- `scope.Main` logs and exits with status 1 when the shutdown fails (a
+  resource fails to close, or fibers outlive `StopTimeout`), even after a
+  clean stop by signal.
+- `scope.KindOf` treats an error joining a cancellation and a real failure
+  as a `Fail`: a nested `all` keeps the inner failure, and `trace.End`
+  marks such a span as an error.
+- `timeout(d, retry(p, f()))` keeps the last attempt's error (`errors.Is`
+  matches it), and a task error that says more than the deadline is kept
+  in the `*TimeoutError` ("timed out after 2s: load: context deadline
+  exceeded"). `TimeoutError` has an unexported field now, so write
+  `&TimeoutError{After: d}` with the field name.
+- `fail (x)`, `match (x)` and `match *p` are the keywords, as `must (x)`
+  already was. `ego fmt` no longer turns `fail (x)` into a call or
+  `match *p` into a multiplication.
+
+**Generated code**
+- What `??`, `match` and the other forms need before a statement goes
+  inside a lambda's body, an `each` function or a branch of `all`, `race`,
+  `retry` and `timeout`. It ran once, outside, with the wrong variables and
+  `ctx`.
+- Operands are evaluated left to right when one of them needs statements
+  before its own: in composite literals, return and assignment values, and
+  a call's function, as call arguments already were. `x[f()] = a ?? b`
+  evaluates its target once.
+- Generated variables don't hide the user's: a `:=` with a check label, an
+  else fallback or arms that mention a variable it declares, and `err` or
+  `ok` from a select case, a lambda parameter or a match arm.
+- `check err as Case` lets a case of the set through, as `check f() as Case`
+  does.
+- Effect functions: `n, err :=` after `n :=` compiles, and a parameter or
+  receiver may be named `span`.
+- Untyped constants in conditional values take the type they're used as:
+  `if c { 1 } else { 0 }` returned as a `float64`, or multiplied by a
+  `Duration`, was computed as an `int`.
+- Labeled `for` and `switch` statements keep their label, so `continue`
+  and `break` with it compile.
+- `each(ids, n, s.Remove)` works when `Remove` returns only an error.
+- A case message such as `"{Slug} moved {Times + 1} times"` can use its
+  fields anywhere in an expression, and a raw message stays raw.
+- `else` arms with only `_` don't import `errors`.
+
+**Parser and formatter**
 - `ego fmt -w` could replace a file with `package` when a backquoted string
   with `{…}` had many syntax errors: the parse gave up and reported none.
   Now it fails with the errors.
@@ -9,6 +57,50 @@
   named `check` and `must`, are Go again (v0.3.1 took them for the
   keywords). Only `must (x)` with a space is the keyword.
 - `x := f() else { }` crashed `ego generate`; it is a syntax error.
+- A match arm with nothing after `=>` before the next arm is empty, instead
+  of taking the next arm as its body (`Red => Green => paint()`). In a
+  match expression it's an error. A value can still start on the line
+  after `=>`.
+- `check f() as Case` in a `for` or `switch` header no longer swallows the
+  body; the "check must start a statement" message shows instead.
+- Plain Go `import f"fmt"` and struct fields such as `X f"tag"` parse as Go
+  again.
+- Raw f-strings, raw check labels and raw fail messages work in files with
+  CRLF line endings.
+- `effect` before an embedded interface type is an error; `ego fmt` used to
+  drop it.
+- Clearer f-string errors: `f"{a)}"` points at the `)`, `f"{a b}"` names
+  the `b`, and `f"\{ {a}"` reports only the bad escape.
+- `ego fmt` keeps an if expression written over several lines on several
+  lines, so a comment beside a value stays there. It prints `v ?? w else z`
+  without parentheses, keeps `match x {}` as `{}`, and removes blank lines
+  after `{` and before `}` in error sets and enums.
+
+**Runtime**
+- `all`, `each` and `race` cancelled from outside with a cause of their own
+  report it once, not once per task.
+- `trace.End` records a task's panic (`*scope.Panic`) with its value and
+  the task's own stack.
+- `schedule.Exponential` no longer returns a negative delay at exactly
+  2^63ns on amd64.
+- `scope.Acquire` returns the error of releasing a resource that opened as
+  the scope closed, and a panic in that release comes back as a
+  `*scope.Panic`.
+
+**Wiring and analyzers**
+- `ego generate` writes layers wiring that compiles for packages named
+  differently from their path (`redis/v9`, `yaml.v3`), two imported
+  packages with the same name, `func(context.Context) error` cleanups,
+  variadic providers, and generic instances in another package's set.
+- A function literal or a call given as a provider is a clear error,
+  instead of an internal one.
+- Alias types count as the same type, a provider in two sets counts once,
+  a provider passed to `layer.Build` replaces a set's provider of an
+  interface its type implements, and a cleanup of a named func type is
+  accepted.
+- `ctxcheck` no longer reports `g, ctx := errgroup.WithContext(ctx)`.
+- `exhaustive`: an interface case in a type switch covers the cases that
+  implement it.
 
 ## v0.3.5 (2026-10-15)
 
