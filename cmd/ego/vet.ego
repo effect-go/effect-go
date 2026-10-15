@@ -3,8 +3,10 @@ package main
 import (
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 
+	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/unitchecker"
 
 	"github.com/effect-go/effect-go/analysis/ctxcheck"
@@ -13,17 +15,34 @@ import (
 )
 
 // vetCmd runs go vet's own checks, then the effect-go analyzers, with ego
-// as go vet's tool.
+// as go vet's tool. The analyzers' flags, such as -exhaustive, only go to
+// the second.
 func vetCmd(args []string) error {
 	exe := check os.Executable() ""
-	for _, vet := range [][]string{{"vet"}, {"vet", "-vettool=" + exe}} {
-		cmd := exec.Command("go", append(vet, args...)...)
+	for _, vet := range [][]string{append([]string{"vet"}, vetArgs(args)...), append([]string{"vet", "-vettool=" + exe}, args...)} {
+		cmd := exec.Command("go", vet...)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		if err := cmd.Run(); err != nil {
 			return errSilent
 		}
 	}
 	return nil
+}
+
+var analyzers = []*analysis.Analyzer{exhaustive.Analyzer, ctxcheck.Analyzer, fiberjoin.Analyzer}
+
+// vetArgs returns args without the analyzers' flags, -name and
+// -name.flag, which go vet's own run doesn't know.
+func vetArgs(args []string) []string {
+	var own []string
+	for _, a := range args {
+		name, _, _ := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		name, _, _ = strings.Cut(name, ".")
+		if !strings.HasPrefix(a, "-") || !slices.ContainsFunc(analyzers, an => an.Name == name) {
+			own = append(own, a)
+		}
+	}
+	return own
 }
 
 // isVetTool reports whether go vet is running ego as its analysis tool:
@@ -35,4 +54,4 @@ func isVetTool(args []string) bool {
 	return args[1] == "-V=full" || args[1] == "-flags" || strings.HasPrefix(args[1], "-") && strings.HasSuffix(args[len(args)-1], ".cfg") || len(args) == 2 && strings.HasSuffix(args[1], ".cfg")
 }
 
-func vetTool() { unitchecker.Main(exhaustive.Analyzer, ctxcheck.Analyzer, fiberjoin.Analyzer) }
+func vetTool() { unitchecker.Main(analyzers...) }
