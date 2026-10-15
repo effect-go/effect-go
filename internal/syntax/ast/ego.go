@@ -33,14 +33,15 @@ type (
 	// An IfExpr is "if Cond { Then } else { Else }" used as a value. Else
 	// is another *IfExpr for "else if".
 	IfExpr struct {
-		If     token.Pos
-		Cond   Expr
-		Lbrace token.Pos // of Then
-		Then   Expr
-		Rbrace token.Pos // of Then
-		Else   Expr      // *IfExpr, or the expression inside "else { … }"
-		ElseL  token.Pos // "{" of the else branch; token.NoPos for "else if"
-		ElseR  token.Pos // "}" of the else branch
+		If      token.Pos
+		Cond    Expr
+		Lbrace  token.Pos // of Then
+		Then    Expr
+		Rbrace  token.Pos // of Then
+		ElsePos token.Pos // position of "else"
+		Else    Expr      // *IfExpr, or the expression inside "else { … }"
+		ElseL   token.Pos // "{" of the else branch; token.NoPos for "else if"
+		ElseR   token.Pos // "}" of the else branch
 	}
 
 	// A LambdaExpr is "x => body" or "(a, b T) => body". Params without
@@ -154,7 +155,7 @@ func (x *ElseExpr) End() token.Pos {
 	}
 	return x.Fallback.End()
 }
-func (x *IfExpr) Pos() token.Pos   { return x.If }
+func (x *IfExpr) Pos() token.Pos { return x.If }
 func (x *IfExpr) End() token.Pos {
 	if x.ElseL.IsValid() {
 		return x.ElseR + 1

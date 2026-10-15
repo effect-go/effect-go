@@ -71,7 +71,7 @@ func (p *printer) egoExpr(expr ast.Expr, prec1, depth int) bool {
 		p.expr(x.Sel)
 
 	case *ast.IfExpr:
-		p.ifExpr(x)
+		p.ifExpr(x, p.ownLines(x))
 
 	case *ast.LambdaExpr:
 		switch {
@@ -116,22 +116,54 @@ func (p *printer) egoExpr(expr ast.Expr, prec1, depth int) bool {
 	return true
 }
 
-func (p *printer) ifExpr(x *ast.IfExpr) {
+// ifExpr prints an if expression, with its else ifs. Written on one line,
+// it stays on one line: if c { 1 } else { 2 }. If a branch puts its value
+// on a line of its own, every branch does, as in an if statement: that
+// keeps a comment beside its value.
+func (p *printer) ifExpr(x *ast.IfExpr, lines bool) {
 	p.setPos(x.If)
 	p.print(token.IF, blank)
 	p.expr(x.Cond)
 	p.print(blank)
-	p.bracedExpr(x.Lbrace, x.Then, x.Rbrace)
-	p.print(blank, token.ELSE, blank)
+	p.bracedExpr(x.Lbrace, x.Then, x.Rbrace, lines)
+	p.print(blank)
+	p.setPos(x.ElsePos)
+	p.print(token.ELSE, blank)
 	if e, ok := x.Else.(*ast.IfExpr); ok && !x.ElseL.IsValid() {
-		p.ifExpr(e)
+		p.ifExpr(e, lines)
 		return
 	}
-	p.bracedExpr(x.ElseL, x.Else, x.ElseR)
+	p.bracedExpr(x.ElseL, x.Else, x.ElseR, lines)
 }
 
-func (p *printer) bracedExpr(l token.Pos, x ast.Expr, r token.Pos) {
+// ownLines reports whether a branch of x, or of its else ifs, has its value
+// on a line of its own.
+func (p *printer) ownLines(x *ast.IfExpr) bool {
+	own := func(l token.Pos, x ast.Expr, r token.Pos) bool {
+		return p.lineFor(l) != p.lineFor(x.Pos()) || p.lineFor(x.End()) != p.lineFor(r)
+	}
+	for {
+		if own(x.Lbrace, x.Then, x.Rbrace) {
+			return true
+		}
+		e, ok := x.Else.(*ast.IfExpr)
+		if !ok || x.ElseL.IsValid() {
+			return own(x.ElseL, x.Else, x.ElseR)
+		}
+		x = e
+	}
+}
+
+func (p *printer) bracedExpr(l token.Pos, x ast.Expr, r token.Pos, lines bool) {
 	p.setPos(l)
+	if lines {
+		p.print(token.LBRACE, indent, formfeed)
+		p.expr(x)
+		p.print(unindent, formfeed)
+		p.setPos(r)
+		p.print(token.RBRACE)
+		return
+	}
 	p.print(token.LBRACE, blank)
 	p.expr(x)
 	p.print(blank, noExtraLinebreak)

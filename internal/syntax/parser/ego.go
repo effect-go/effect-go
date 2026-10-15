@@ -231,6 +231,7 @@ func (p *parser) parseIfExpr() ast.Expr {
 		x.Else = &ast.BadExpr{From: p.pos, To: p.pos}
 		return x
 	}
+	x.ElsePos = p.pos
 	p.next()
 	if p.tok == token.IF {
 		x.Else = p.parseIfExpr()
