@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/effect-go/effect-go/scope"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
@@ -115,14 +116,16 @@ func TestRetryGivesUpWithLastError(t *testing.T) {
 	})
 }
 
+// Cancelled while waiting, Retry was interrupted: its error is a
+// cancellation, which also matches the last attempt's error.
 func TestRetryStopsWhenCancelledWhileWaiting(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		time.AfterFunc(150*time.Millisecond, cancel)
 		start := time.Now()
 		_, err := Retry(ctx, Spaced(time.Hour), func(context.Context) (int, error) { return 0, errFlaky })
-		if !errors.Is(err, errFlaky) || !errors.Is(err, context.Canceled) {
-			t.Fatalf("err = %v", err)
+		if !errors.Is(err, errFlaky) || !errors.Is(err, context.Canceled) || scope.KindOf(err) != scope.Interrupt {
+			t.Fatalf("err = %v, kind %v", err, scope.KindOf(err))
 		}
 		if took := time.Since(start); took != 150*time.Millisecond {
 			t.Fatalf("took %v", took)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -33,7 +34,9 @@ func (k Kind) String() string {
 
 // KindOf classifies an error returned by a task: a *Panic is a Die, a
 // cancellation is an Interrupt, and any other error, a *TimeoutError
-// included, is a Fail. err must not be nil.
+// included, is a Fail. An error that joins several is an Interrupt only if
+// each of them is: All's error when a task failed while being cancelled is
+// a Fail. err must not be nil.
 func KindOf(err error) Kind {
 	if _, ok := errors.AsType[*Panic](err); ok {
 		return Die
@@ -41,10 +44,35 @@ func KindOf(err error) Kind {
 	if _, ok := errors.AsType[*TimeoutError](err); ok {
 		return Fail
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if cancelled(err) {
 		return Interrupt
 	}
 	return Fail
+}
+
+// cancelled reports whether err matches context.Canceled or
+// context.DeadlineExceeded, as errors.Is would, except that an error
+// joining several (with an Unwrap() []error method) must have every one
+// match.
+func cancelled(err error) bool {
+	for err != nil {
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			return true
+		}
+		if x, ok := err.(interface{ Is(error) bool }); ok && (x.Is(context.Canceled) || x.Is(context.DeadlineExceeded)) {
+			return true
+		}
+		switch x := err.(type) {
+		case interface{ Unwrap() error }:
+			err = x.Unwrap()
+		case interface{ Unwrap() []error }:
+			errs := x.Unwrap()
+			return len(errs) > 0 && !slices.ContainsFunc(errs, func(err error) bool { return !cancelled(err) })
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // Panic is a panic recovered from a task, with the stack of the goroutine

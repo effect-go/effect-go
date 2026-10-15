@@ -205,9 +205,10 @@ func Repeat[T any](ctx context.Context, s Schedule, task func(context.Context) (
 
 // Retry calls task until it succeeds or the schedule stops, and returns the
 // last error. It stops at once if ctx is cancelled, including while waiting
-// between attempts. Each retry is an event on the span in ctx, with the
-// error and the delay. Retry waits with time.Timer, so tests can run it on
-// fake time with testing/synctest.
+// between attempts: the error is then ctx's cancellation, and also matches
+// the last error with errors.Is and errors.As. Each retry is an event on the
+// span in ctx, with the error and the delay. Retry waits with time.Timer, so
+// tests can run it on fake time with testing/synctest.
 func Retry[T any](ctx context.Context, s Schedule, task func(context.Context) (T, error)) (T, error) {
 	var zero T
 	for n := 1; ; n++ {
@@ -231,8 +232,19 @@ func Retry[T any](ctx context.Context, s Schedule, task func(context.Context) (T
 		select {
 		case <-ctx.Done():
 			t.Stop()
-			return zero, fmt.Errorf("%w (retry stopped: %w)", err, context.Cause(ctx))
+			return zero, &stopped{last: err, cause: context.Cause(ctx)}
 		case <-t.C:
 		}
 	}
 }
+
+// stopped is Retry's error when ctx's end stopped it while it waited: an
+// interruption, as the last error would have been retried. It unwraps to
+// the cancellation only, so scope.KindOf sees one, and matches the last
+// error through its Is and As methods.
+type stopped struct{ last, cause error }
+
+func (e *stopped) Error() string        { return fmt.Sprintf("%v (retry stopped: %v)", e.last, e.cause) }
+func (e *stopped) Unwrap() error        { return e.cause }
+func (e *stopped) Is(target error) bool { return errors.Is(e.last, target) }
+func (e *stopped) As(target any) bool   { return errors.As(e.last, target) }

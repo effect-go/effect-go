@@ -100,16 +100,20 @@ func TestLogHandler(t *testing.T) {
 }
 
 // A span whose function was interrupted isn't an error: it gets an event.
+// One that also failed, as All's when a task fails while being cancelled,
+// is.
 func TestInterruptedSpan(t *testing.T) {
 	rec := record(t)
-	func() {
+	for _, err := range []error{fmt.Errorf("fetch: %w", context.Canceled), errors.Join(context.Canceled, errDown)} {
 		_, span := Start(t.Context(), "Race.Loser")
-		err := fmt.Errorf("fetch: %w", context.Canceled)
 		End(span, &err)
-	}()
+	}
 	s := rec.Ended()[0]
 	if s.Status().Code != codes.Unset || len(s.Events()) != 1 || s.Events()[0].Name != "interrupted" {
 		t.Fatalf("status %v, events %v", s.Status(), s.Events())
+	}
+	if s := rec.Ended()[1]; s.Status().Code != codes.Error {
+		t.Fatalf("joined failure: status %v", s.Status())
 	}
 }
 

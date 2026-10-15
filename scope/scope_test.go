@@ -133,6 +133,25 @@ func TestAllKeepsEveryRealFailure(t *testing.T) {
 	})
 }
 
+// An error that joins a cancellation and a real failure is a failure: an
+// All around another one keeps it.
+func TestNestedAllKeepsRealFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		inner := func(ctx context.Context) (int, error) {
+			_, err := All(ctx, sleep(time.Hour, 0, nil), func(ctx context.Context) (int, error) {
+				<-ctx.Done()
+				time.Sleep(time.Millisecond) // fails after its sibling is cancelled
+				return 0, errB
+			})
+			return 0, err
+		}
+		_, _, err := All2(t.Context(), sleep(10*time.Millisecond, 0, errA), inner)
+		if !errors.Is(err, errA) || !errors.Is(err, errB) {
+			t.Fatalf("err = %v, want both failures", err)
+		}
+	})
+}
+
 func TestAllRepanicsWithOriginalStack(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		defer func() {

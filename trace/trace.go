@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/effect-go/effect-go/scope"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -33,9 +34,10 @@ func Start(ctx context.Context, name string) (context.Context, oteltrace.Span) {
 }
 
 // End ends span, recording *err as the span's error if it isn't nil; a
-// cancellation is an "interrupted" event instead, as the span didn't fail. Defer it
-// directly (defer trace.End(span, &err)): it then also records a panic on the
-// span and lets the panic continue, with its original stack.
+// cancellation (context.Canceled, and in a joined error, every part an
+// interruption) is an "interrupted" event instead, as the span didn't fail.
+// Defer it directly (defer trace.End(span, &err)): it then also records a
+// panic on the span and lets the panic continue, with its original stack.
 func End(span oteltrace.Span, err *error) {
 	if r := recover(); r != nil {
 		span.RecordError(fmt.Errorf("panic: %v", r), oteltrace.WithStackTrace(true))
@@ -45,7 +47,7 @@ func End(span oteltrace.Span, err *error) {
 	}
 	switch {
 	case err == nil || *err == nil:
-	case errors.Is(*err, context.Canceled):
+	case errors.Is(*err, context.Canceled) && scope.KindOf(*err) == scope.Interrupt:
 		// Interrupted, as a race's loser or a failed task's sibling: not
 		// a failure of this span's own.
 		span.AddEvent("interrupted", oteltrace.WithAttributes(attribute.String("reason", (*err).Error())))
