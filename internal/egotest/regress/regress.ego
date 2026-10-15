@@ -293,3 +293,15 @@ effect Clashes(span Span, s string) (int, error) {
 	}
 	return n + span.W, nil
 }
+
+// Untyped: constants in conditional values get the type their context
+// expects, not int.
+func Untyped(c bool) (float64, time.Duration) {
+	d := (if c { 100 } else { 200 }) * time.Millisecond
+	var f float64 = 0
+	f += if c { 1 } else { 2 }
+	f = 2*f + untypedReturn(c)
+	return f, d
+}
+
+func untypedReturn(c bool) float64 { return if c { 1 } else { 0 } }

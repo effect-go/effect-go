@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/effect-go/effect-go/internal/egotest/regress/disk"
 )
@@ -169,5 +170,11 @@ func TestNames(t *testing.T) {
 	sel, lambda, arm := GeneratedNames(errs, false)
 	if sel != "EOF 1" || lambda != "EOF 2" || arm != "not ok" {
 		t.Errorf("GeneratedNames: %q %q %q", sel, lambda, arm)
+	}
+}
+
+func TestUntyped(t *testing.T) {
+	if f, d := Untyped(true); f != 3 || d != 100*time.Millisecond {
+		t.Errorf("Untyped: %v %v", f, d)
 	}
 }

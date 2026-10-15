@@ -568,3 +568,37 @@ func Clashes(ctx context.Context, span Span, s string) (_ int, err error) {
 //line regress.ego:294
 	return n + span.W, nil
 }
+
+// Untyped: constants in conditional values get the type their context
+// expects, not int.
+func Untyped(c bool) (float64, time.Duration) {
+	var v time.Duration
+	if c {
+		v = 100
+	} else {
+		v = 200
+	}
+	d := (v) * time.Millisecond
+//line regress.ego:301
+	var f float64 = 0
+	var v2 float64
+	if c {
+		v2 = 1
+	} else {
+		v2 = 2
+	}
+	f += v2
+//line regress.ego:303
+	f = 2*f + untypedReturn(c)
+	return f, d
+}
+
+func untypedReturn(c bool) float64 {
+	var v float64
+	if c {
+		v = 1
+	} else {
+		v = 0
+	}
+	return v
+}

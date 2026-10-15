@@ -182,9 +182,42 @@ func (g *fileGen) hoist(x ast.Expr) {
 		g.draft(x)
 		return
 	}
+	t := g.typeOf(x)
+	if g.untyped(x) {
+		// if c { 1 } else { 0 } returned as a float64: the variable has
+		// the type the constants would get there, not int.
+		if e := g.expected(x); e != nil {
+			t = e
+		}
+	}
 	name := g.temp("v")
-	g.toPre(func() { g.lowerInto(name, true, g.typeOf(x), x) })
+	g.toPre(func() { g.lowerInto(name, true, t, x) })
 	g.w.str(name)
+}
+
+// untyped reports whether every value x can give is an untyped constant,
+// as in if c { 1 } else { 0 }.
+func (g *fileGen) untyped(x ast.Expr) bool {
+	switch x := ast.Unparen(x).(type) {
+	case *ast.IfExpr:
+		return g.untyped(x.Then) && g.untyped(x.Else)
+	case *ast.MatchExpr:
+		for _, a := range x.Arms {
+			if b, ok := a.Body.(ast.Expr); !ok || !g.untyped(b) {
+				return false
+			}
+		}
+		return true
+	case *ast.Ident, *ast.SelectorExpr:
+		c, ok := g.objectOf(x).(*types.Const)
+		return ok && isUntyped(c.Type())
+	}
+	return literalType(x) != nil
+}
+
+func isUntyped(t types.Type) bool {
+	b, ok := t.(*types.Basic)
+	return ok && b.Info()&types.IsUntyped != 0
 }
 
 // lowerInto writes statements that store the value of x in target, which
@@ -1276,9 +1309,27 @@ func (g *fileGen) expected(x ast.Expr) types.Type {
 		}
 	case *ast.AssignStmt:
 		for i, r := range p.Rhs {
-			if r == x && i < len(p.Lhs) && p.Tok == token.ASSIGN {
+			if r == x && i < len(p.Lhs) && p.Tok != token.DEFINE {
 				return g.typeOf(p.Lhs[i])
 			}
+		}
+	case *ast.ParenExpr:
+		return g.expected(p)
+	case *ast.BinaryExpr:
+		// An untyped operand takes the other operand's type.
+		switch p.Op {
+		case token.SHL, token.SHR, token.LAND, token.LOR:
+			return nil
+		}
+		other := p.X
+		if other == x {
+			other = p.Y
+		}
+		if t := g.typeOf(other); t != nil && !isUntyped(t) && literalType(other) == nil {
+			return t
+		}
+		if g.untyped(other) {
+			return g.expected(p) // 2 * if c { 1 } else { 3 }: both untyped
 		}
 	case *ast.ValueSpec:
 		if p.Type != nil {
