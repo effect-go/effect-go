@@ -70,9 +70,10 @@ func (g *group) fail(err error) {
 		if g.panic == nil {
 			g.panic = p
 		}
-	} else if !g.stopped || !isInterrupt(err) {
+	} else if !g.stopped || !isInterrupt(err) && !isEach(err, context.Cause(g.ctx)) {
 		// After the group stops, cancellation errors come from the siblings
-		// it cancelled. Real failures that raced with the first one are kept.
+		// it cancelled, or report the parent's cancellation, with its cause,
+		// again. Real failures that raced with the first one are kept.
 		g.errs = append(g.errs, err)
 	}
 	if !g.stopped {
@@ -255,11 +256,16 @@ func Race[T any](ctx context.Context, tasks ...Task[T]) (T, error) {
 		return val, nil
 	}
 	var zero T
-	// Cancelled from outside, every task reports it: report it once.
-	if parent.Err() != nil && !slices.ContainsFunc(errs, func(err error) bool { return err != nil && !isInterrupt(err) }) {
-		return zero, context.Cause(parent)
-	}
 	errs = slices.DeleteFunc(errs, func(err error) bool { return err == nil })
+	// Cancelled from outside, every task reports it: report it once, after
+	// the real failures.
+	if parent.Err() != nil {
+		cause := context.Cause(parent)
+		real := slices.DeleteFunc(slices.Clone(errs), func(err error) bool { return isInterrupt(err) || isEach(err, cause) })
+		if len(real) < len(errs) {
+			errs = append(real, cause)
+		}
+	}
 	if len(errs) == 1 {
 		return zero, errs[0]
 	}

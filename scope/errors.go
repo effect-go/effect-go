@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"time"
 )
@@ -44,30 +45,31 @@ func KindOf(err error) Kind {
 	if _, ok := errors.AsType[*TimeoutError](err); ok {
 		return Fail
 	}
-	if cancelled(err) {
+	if isEach(err, context.Canceled, context.DeadlineExceeded) {
 		return Interrupt
 	}
 	return Fail
 }
 
-// cancelled reports whether err matches context.Canceled or
-// context.DeadlineExceeded, as errors.Is would, except that an error
-// joining several (with an Unwrap() []error method) must have every one
-// match.
-func cancelled(err error) bool {
+// isEach reports whether err matches one of targets, as errors.Is would,
+// except that an error joining several (with an Unwrap() []error method)
+// matches only if each of them does.
+func isEach(err error, targets ...error) bool {
 	for err != nil {
-		if err == context.Canceled || err == context.DeadlineExceeded {
-			return true
-		}
-		if x, ok := err.(interface{ Is(error) bool }); ok && (x.Is(context.Canceled) || x.Is(context.DeadlineExceeded)) {
-			return true
+		for _, t := range targets {
+			if t != nil && reflect.TypeOf(t).Comparable() && err == t {
+				return true
+			}
+			if x, ok := err.(interface{ Is(error) bool }); ok && x.Is(t) {
+				return true
+			}
 		}
 		switch x := err.(type) {
 		case interface{ Unwrap() error }:
 			err = x.Unwrap()
 		case interface{ Unwrap() []error }:
 			errs := x.Unwrap()
-			return len(errs) > 0 && !slices.ContainsFunc(errs, func(err error) bool { return !cancelled(err) })
+			return len(errs) > 0 && !slices.ContainsFunc(errs, func(err error) bool { return !isEach(err, targets...) })
 		default:
 			return false
 		}

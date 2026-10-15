@@ -236,6 +236,25 @@ func TestRaceReturnsAllFailures(t *testing.T) {
 	})
 }
 
+// Cancelled from outside with a cause of its own, Each and Race report the
+// cause once, beside any real failure.
+func TestParentCauseReportedOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		errShutdown := errors.New("shutting down")
+		ctx, cancel := context.WithCancelCause(t.Context())
+		cancel(errShutdown)
+		wait := sleep(time.Hour, 0, nil)
+		_, err := Each(ctx, []int{1, 2, 3, 4}, 4, func(ctx context.Context, _ int) (int, error) { return wait(ctx) })
+		if err != errShutdown {
+			t.Fatalf("Each: %v", err)
+		}
+		_, err = Race(ctx, wait, func(context.Context) (int, error) { return 0, errA }, wait)
+		if !errors.Is(err, errA) || strings.Count(err.Error(), "shutting down") != 1 {
+			t.Fatalf("Race: %v", err)
+		}
+	})
+}
+
 func TestTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		_, err := Timeout(t.Context(), 100*time.Millisecond, sleep(time.Second, 1, nil))
