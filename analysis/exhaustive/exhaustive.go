@@ -89,9 +89,10 @@ func typeSwitch(pass *analysis.Pass, s *ast.TypeSwitchStmt) {
 			if !types.Implements(ct, iface) {
 				continue
 			}
+			// An interface case covers the case types that implement it.
 			found := false
 			for c := range covered {
-				if types.Identical(c, ct) {
+				if ci, ok := c.Underlying().(*types.Interface); types.Identical(c, ct) || ok && types.Implements(ct, ci) {
 					found = true
 				}
 			}

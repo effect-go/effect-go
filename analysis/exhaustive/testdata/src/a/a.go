@@ -11,9 +11,16 @@ func (Rect) isShape()   {}
 
 type Open interface{ Area() float64 }
 
+func (Circle) Area() float64 { return 0 }
+func (Rect) Area() float64   { return 0 }
+
 func area(s Shape) {
 	switch s.(type) { // want "type switch on Shape doesn't handle Rect"
 	case Circle:
+	}
+	// An interface case handles the cases that implement it.
+	switch s.(type) {
+	case Open:
 	}
 	switch s.(type) {
 	case Circle, Rect:
