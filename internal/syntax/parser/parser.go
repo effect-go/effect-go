@@ -742,6 +742,7 @@ func (p *parser) parseStructType() *ast.StructType {
 	}
 
 	pos := p.expect(token.STRUCT)
+	fstrings := p.scanner.FStrings(false) // effect-go: X f"tag" is a field of type f
 	lbrace := p.expect(token.LBRACE)
 	var list []*ast.Field
 	for p.tok == token.IDENT || p.tok == token.MUL || p.tok == token.LPAREN {
@@ -750,6 +751,7 @@ func (p *parser) parseStructType() *ast.StructType {
 		// (parseFieldDecl will check and complain if necessary)
 		list = append(list, p.parseFieldDecl())
 	}
+	p.scanner.FStrings(fstrings)
 	rbrace := p.expect(token.RBRACE)
 
 	return &ast.StructType{
@@ -2957,9 +2959,11 @@ func (p *parser) parseFile() *ast.File {
 	var decls []ast.Decl
 	if p.mode&PackageClauseOnly == 0 {
 		// import decls
+		fstrings := p.scanner.FStrings(false) // effect-go: import f"fmt" names the package f
 		for p.tok == token.IMPORT {
 			decls = append(decls, p.parseGenDecl(token.IMPORT, p.parseImportSpec))
 		}
+		p.scanner.FStrings(fstrings)
 
 		if p.mode&ImportsOnly == 0 {
 			// rest of package body

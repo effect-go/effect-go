@@ -45,6 +45,8 @@ type Scanner struct {
 	endPosValid bool
 	endPos      token.Pos // overrides the offset as the default end position
 
+	noFStrings bool // effect-go: f"x" is the name f and the string "x"
+
 	// public state - ok to modify
 	ErrorCount int // number of errors encountered
 }
@@ -842,7 +844,7 @@ scanAgain:
 	switch ch := s.ch; {
 	case isLetter(ch):
 		lit = s.scanIdentifier()
-		if lit == "f" && (s.ch == '"' || s.ch == '`') {
+		if lit == "f" && (s.ch == '"' || s.ch == '`') && !s.noFStrings {
 			// effect-go: an f-string is a STRING whose literal starts with f.
 			insertSemi = true
 			tok = token.STRING
@@ -1088,6 +1090,16 @@ func (s *Scanner) InitRange(file *token.File, src []byte, start, end int, err Er
 
 // Source returns the source being scanned.
 func (s *Scanner) Source() []byte { return s.src }
+
+// FStrings sets whether f"…" scans as an f-string, and returns the previous
+// setting. The parser turns f-strings off where there can't be one, but Go
+// may have a name f before a string without a space: import f"fmt", and
+// X f"tag" in a struct.
+func (s *Scanner) FStrings(on bool) (was bool) {
+	was = !s.noFStrings
+	s.noFStrings = !on
+	return was
+}
 
 // scanFString scans an f"…" string. Unlike a plain string, its {…}
 // interpolations may contain string and rune literals:

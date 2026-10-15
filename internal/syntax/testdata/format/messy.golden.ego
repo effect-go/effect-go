@@ -1,5 +1,12 @@
 package messy
 
+import f "fmt"
+
+type F struct {
+	x f `json:"x"`
+	f "tag"
+}
+
 error E {
 	A{ X int }
 	B{} "b happened"
