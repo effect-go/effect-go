@@ -47,13 +47,21 @@ func (c *conn) read() (*message, error) {
 	}
 	body := make([]byte, n)
 	check io.ReadFull(c.r, body) ""
-	m := &message{}
-	check json.Unmarshal(body, m) ""
 	if c.log != nil {
 		fmt.Fprintf(c.log, "<- %s %s\n", c.name, truncate(body))
 	}
+	m := &message{}
+	if err := json.Unmarshal(body, m); err != nil {
+		return nil, badMessage{err}
+	}
 	return m, nil
 }
+
+// badMessage is a message whose body isn't JSON-RPC: the connection can
+// go on to the next.
+type badMessage struct{ err error }
+
+func (b badMessage) Error() string { return "bad message: " + b.err.Error() }
 
 func (c *conn) write(m *message) error {
 	m.JSONRPC = "2.0"

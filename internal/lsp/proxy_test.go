@@ -1,16 +1,20 @@
 package lsp
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/effect-go/effect-go/internal/lower"
 )
 
 // client is a minimal LSP client, playing the editor.
@@ -21,6 +25,8 @@ type client struct {
 	nextID int
 	waits  map[string]chan *message
 	diags  chan *message
+	bad    chan *message // error replies to no request
+	done   chan struct{} // closed when the proxy ends
 }
 
 func gopls(t *testing.T) string {
@@ -34,33 +40,46 @@ func gopls(t *testing.T) string {
 	return p
 }
 
-func start(t *testing.T) (*client, string) {
+// start starts the proxy, and gopls, on the workspace root, the
+// repository's if "".
+func start(t *testing.T, root string) (*client, string) {
 	if testing.Short() {
 		t.Skip("starts gopls")
 	}
-	root, _ := filepath.Abs("../..")
+	if root == "" {
+		root, _ = filepath.Abs("../..")
+	}
 	cfg := Config{Gopls: gopls(t), Log: io.Discard} // here: Skip must run on the test goroutine
 	if f := os.Getenv("EGO_LSP_LOG"); f != "" {
 		cfg.Log, _ = os.Create(f)
 	}
 	cin, sout := io.Pipe()
 	sin, cout := io.Pipe()
+	cl := &client{t: t, c: newConn(cin, cout), waits: map[string]chan *message{}, diags: make(chan *message, 100), bad: make(chan *message, 1), done: make(chan struct{})}
 	go func() {
 		if err := Run(cfg, sin, sout); err != nil {
 			t.Log("proxy:", err)
 		}
+		// So that the client doesn't wait for it: the cleanup waits for
+		// this.
+		sin.Close()
+		sout.Close()
 	}()
-	cl := &client{t: t, c: newConn(cin, cout), waits: map[string]chan *message{}, diags: make(chan *message, 100)}
 	go cl.loop()
 	t.Cleanup(func() {
-		cl.call("shutdown", nil)
+		cl.callErr("shutdown", nil)
 		cl.c.notify("exit", nil)
 		cout.Close()
+		<-cl.done
 	})
 	cl.call("initialize", map[string]any{
-		"processId":        nil,
-		"rootUri":          pathToURI(root),
-		"capabilities":     map[string]any{},
+		"processId": nil,
+		"rootUri":   pathToURI(root),
+		"capabilities": map[string]any{
+			"workspace": map[string]any{"workspaceEdit": map[string]any{"documentChanges": true}},
+			// The proxy counts in UTF-16: gopls mustn't pick UTF-8.
+			"general": map[string]any{"positionEncodings": []string{"utf-8", "utf-16"}},
+		},
 		"workspaceFolders": []any{map[string]any{"uri": pathToURI(root), "name": "effect-go"}},
 	})
 	cl.c.notify("initialized", map[string]any{})
@@ -68,12 +87,15 @@ func start(t *testing.T) (*client, string) {
 }
 
 func (cl *client) loop() {
+	defer close(cl.done)
 	for {
 		m, err := cl.c.read()
 		if err != nil {
 			return
 		}
 		switch {
+		case string(m.ID) == "null":
+			cl.bad <- m
 		case m.isResponse():
 			cl.mu.Lock()
 			ch := cl.waits[string(m.ID)]
@@ -96,6 +118,15 @@ func (cl *client) loop() {
 }
 
 func (cl *client) call(method string, params any) json.RawMessage {
+	res, err := cl.callErr(method, params)
+	if err != nil {
+		cl.t.Fatalf("%s: %s", method, err)
+	}
+	return res
+}
+
+// callErr is call, for a request that may fail: it returns the error.
+func (cl *client) callErr(method string, params any) (json.RawMessage, json.RawMessage) {
 	cl.mu.Lock()
 	cl.nextID++
 	id := json.RawMessage(fmt.Sprint(cl.nextID))
@@ -106,14 +137,13 @@ func (cl *client) call(method string, params any) json.RawMessage {
 	cl.c.write(&message{ID: id, Method: method, Params: p})
 	select {
 	case m := <-ch:
-		if len(m.Error) > 0 {
-			cl.t.Fatalf("%s: %s", method, m.Error)
-		}
-		return m.Result
+		return m.Result, m.Error
+	case <-cl.done:
+		cl.t.Fatalf("%s: the proxy ended", method)
 	case <-time.After(60 * time.Second):
 		cl.t.Fatalf("%s: no response", method)
 	}
-	return nil
+	return nil, nil
 }
 
 // waitDiags waits for diagnostics of uri that satisfy ok.
@@ -130,6 +160,8 @@ func (cl *client) waitDiags(uri string, ok func([]map[string]any) bool) []map[st
 			if p.URI == uri && ok(p.Diagnostics) {
 				return p.Diagnostics
 			}
+		case <-cl.done:
+			cl.t.Fatal("the proxy ended")
 		case <-deadline:
 			cl.t.Fatalf("no matching diagnostics for %s", uri)
 		}
@@ -146,15 +178,76 @@ func at(src, needle string, delta int) Position {
 	return newText([]byte(src)).position(i + delta)
 }
 
+// writeFiles writes files, by their paths in dir.
+func writeFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for name, src := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o777); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(src), 0o666); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// generate writes the generated Go of the package in dir.
+func generate(t *testing.T, dir string) {
+	t.Helper()
+	res, err := lower.Generate(lower.Config{Dir: dir})
+	if err == nil {
+		err = res.Err()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, out := range res.Outputs {
+		if err := os.WriteFile(out.Go, out.Code, 0o666); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// editorModule writes a module for TestEditor, in a directory whose name
+// editors escape in URIs: the users package, with a .go file using it, a
+// file left from a renamed .ego file, and a .ego package using it.
+func editorModule(t *testing.T) (root, users string) {
+	repo, _ := filepath.Abs("../..")
+	src, err := os.ReadFile(filepath.Join(repo, "internal/egotest/users/users.ego"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Characters that take more UTF-16 code units than UTF-8 bytes, on a
+	// line the test hovers on.
+	ego := strings.Replace(string(src), `"try again later"`, `"🎉🎉🎉 later"`, 1)
+	root = filepath.Join(t.TempDir(), "at@dir")
+	writeFiles(t, root, map[string]string{
+		"go.mod":          "module example.com/tmp\n\ngo 1.26.0\n",
+		"go.work":         "go 1.26.0\n\nuse (\n\t.\n\t" + repo + "\n)\n",
+		"users/users.ego": ego,
+		"users/later.go":  "package users\n\nimport \"time\"\n\n// Later is plain Go next to the .ego file.\nfunc (s *Service) Later() time.Time { return s.Now().Add(time.Hour) }\n",
+		"app/app.ego":     "package app\n\nimport \"example.com/tmp/users\"\n\neffect All(s *users.Service, ids []users.UserID) ([]users.User, error) {\n\treturn s.GetAll(ids)\n}\n",
+	})
+	users = filepath.Join(root, "users")
+	generate(t, users)
+	generate(t, filepath.Join(root, "app"))
+	writeFiles(t, users, map[string]string{
+		"old_ego.go": "// Code generated by ego generate from old.ego. DO NOT EDIT.\n\npackage users\n\ntype UserID string\n",
+	})
+	return root, users
+}
+
 func TestEditor(t *testing.T) {
-	cl, root := start(t)
-	path := filepath.Join(root, "internal/egotest/users/users.ego")
+	root, dir := editorModule(t)
+	cl, _ := start(t, root)
+	path := filepath.Join(dir, "users.ego")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	src := string(data)
-	uri := pathToURI(path)
+	uri := strings.Replace(pathToURI(path), "@", "%40", 1) // as VS Code writes it
 	cl.c.notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "ego", "version": 1, "text": src}})
 
 	t.Run("no diagnostics", func(t *testing.T) {
@@ -162,8 +255,41 @@ func TestEditor(t *testing.T) {
 	})
 
 	t.Run("hover", func(t *testing.T) {
+		for _, c := range []struct {
+			at    string
+			delta int
+			want  string
+		}{
+			{"Repo.Find(id)", 6, "Find(ctx context.Context, id UserID)"},
+			{"http.StatusServiceUnavailable", 5, "StatusServiceUnavailable"},
+		} {
+			res := cl.call("textDocument/hover", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": at(src, c.at, c.delta)})
+			if !strings.Contains(string(res), c.want) {
+				t.Errorf("hover at %s: %s", c.at, res)
+			}
+		}
+	})
+
+	t.Run("bad requests", func(t *testing.T) {
+		// A position off the document gets an answer, and the session
+		// goes on.
+		if _, err := cl.callErr("textDocument/hover", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": Position{Line: -1, Character: -1}}); err != nil {
+			t.Logf("line -1: %s", err)
+		}
+		// So does a message that isn't JSON.
+		cl.c.mu.Lock()
+		io.WriteString(cl.c.w, "Content-Length: 5\r\n\r\n{bad}")
+		cl.c.mu.Unlock()
+		select {
+		case m := <-cl.bad:
+			if !strings.Contains(string(m.Error), "-32700") {
+				t.Errorf("reply: %s", m.Error)
+			}
+		case <-time.After(10 * time.Second):
+			t.Error("no reply to a message that isn't JSON")
+		}
 		res := cl.call("textDocument/hover", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": at(src, "Repo.Find(id)", 6)})
-		if !strings.Contains(string(res), "Find(ctx context.Context, id UserID)") {
+		if !strings.Contains(string(res), "Find(ctx") {
 			t.Fatalf("hover: %s", res)
 		}
 	})
@@ -196,15 +322,16 @@ func TestEditor(t *testing.T) {
 		bad := strings.Replace(src, "u.Name)", "u.Nam)", 1)
 		cl.c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": uri, "version": 2}, "contentChanges": []any{map[string]any{"text": bad}}})
 		ds := cl.waitDiags(uri, func(ds []map[string]any) bool { return len(ds) > 0 })
-		b, _ := json.Marshal(ds[0])
+		b, _ := json.Marshal(ds)
 		want := at(bad, "u.Nam)", 0)
-		if !strings.Contains(string(b), "Nam") || !strings.Contains(string(b), fmt.Sprintf(`"line":%d`, want.Line)) {
-			t.Fatalf("diagnostic %s, want line %d", b, want.Line)
+		// Only this one: none from old_ego.go, which declares UserID again.
+		if len(ds) != 1 || !strings.Contains(string(b), "Nam") || !strings.Contains(string(b), fmt.Sprintf(`"line":%d`, want.Line)) {
+			t.Fatalf("diagnostics %s, want one on line %d", b, want.Line)
 		}
 	})
 
 	t.Run("compiler diagnostics", func(t *testing.T) {
-		bad := strings.Replace(src, "		Storage(_)   => http.Error(w, \"try again later\", http.StatusServiceUnavailable)\n", "", 1)
+		bad := strings.Replace(src, "		Storage(_)   => http.Error(w, \"🎉🎉🎉 later\", http.StatusServiceUnavailable)\n", "", 1)
 		cl.c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": uri, "version": 3}, "contentChanges": []any{map[string]any{"text": bad}}})
 		ds := cl.waitDiags(uri, func(ds []map[string]any) bool {
 			b, _ := json.Marshal(ds)
@@ -234,6 +361,36 @@ func TestEditor(t *testing.T) {
 		}
 	})
 
+	t.Run("completion with an import", func(t *testing.T) {
+		// The generated Go imports more than users.ego: the import goes in
+		// users.ego's own block.
+		typed := strings.Replace(src, "\treturn u.Name, nil", "\t_ = strings.ToU\n\treturn u.Name, nil", 1)
+		cl.c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": uri, "version": 7}, "contentChanges": []any{map[string]any{"text": typed}}})
+		res := cl.call("textDocument/completion", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": at(typed, "strings.ToU", len("strings.ToU"))})
+		var list struct {
+			Items []struct {
+				Label               string
+				AdditionalTextEdits []any
+			}
+		}
+		json.Unmarshal(res, &list)
+		found := false
+		for _, it := range list.Items {
+			if it.Label != "ToUpper" {
+				continue
+			}
+			found = true
+			got := string(applyEdits([]byte(typed), it.AdditionalTextEdits))
+			if want := strings.Replace(typed, "\t\"time\"\n)", "\t\"time\"\n\t\"strings\"\n)", 1); got != want {
+				t.Errorf("edits %v give\n%.200s", it.AdditionalTextEdits, got)
+			}
+		}
+		if !found {
+			t.Errorf("no ToUpper: %.300s", res)
+		}
+		cl.c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": uri, "version": 8}, "contentChanges": []any{map[string]any{"text": src}}})
+	})
+
 	t.Run("save", func(t *testing.T) {
 		gen := filepath.Join(filepath.Dir(path), "users_ego.go")
 		before, _ := os.ReadFile(gen)
@@ -247,7 +404,6 @@ func TestEditor(t *testing.T) {
 	t.Run("rename", func(t *testing.T) {
 		res := cl.call("textDocument/rename", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": at(src, "Now  func", 0), "newName": "Clock"})
 		var we struct {
-			Changes         map[string][]struct{ Range Range }
 			DocumentChanges []struct {
 				TextDocument struct{ URI string }
 				Edits        []struct {
@@ -257,19 +413,37 @@ func TestEditor(t *testing.T) {
 			}
 		}
 		json.Unmarshal(res, &we)
-		n := 0
+		later := filepath.Join(dir, "later.go")
+		laterSrc, _ := os.ReadFile(later)
+		want := map[string][]Range{
+			uri: {{at(src, "Now  func", 0), at(src, "Now  func", 3)}, {at(src, "s.Now()", 2), at(src, "s.Now()", 5)}},
+			// Go files' edits stay as gopls gives them.
+			pathToURI(later): {{at(string(laterSrc), "s.Now()", 2), at(string(laterSrc), "s.Now()", 5)}},
+		}
+		got := map[string][]Range{}
 		for _, dc := range we.DocumentChanges {
-			if dc.TextDocument.URI == uri {
-				for _, e := range dc.Edits {
-					if e.NewText == "Clock" {
-						n++
-					}
+			for _, e := range dc.Edits {
+				if e.NewText == "Clock" {
+					got[dc.TextDocument.URI] = append(got[dc.TextDocument.URI], e.Range)
 				}
 			}
 		}
-		n += len(we.Changes[uri])
-		if n != 2 { // the field and s.Now()
-			t.Fatalf("rename: %d edits in users.ego: %s", n, res)
+		for _, rs := range got {
+			sort.Slice(rs, func(i, j int) bool { return rs[i].Start.Line < rs[j].Start.Line })
+		}
+		for u, rs := range want {
+			if fmt.Sprint(got[u]) != fmt.Sprint(rs) {
+				t.Errorf("rename: edits in %s: %v, want %v\n%s", filepath.Base(u), got[u], rs, res)
+			}
+		}
+	})
+
+	t.Run("rename in a .ego file not open", func(t *testing.T) {
+		// app.ego calls GetAll: its edits can't be translated without its
+		// source map.
+		_, err := cl.callErr("textDocument/rename", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": at(src, "GetAll(ids", 0), "newName": "All"})
+		if !strings.Contains(string(err), "app/app.ego") {
+			t.Fatalf("rename: %s", err)
 		}
 	})
 
@@ -283,9 +457,113 @@ func TestEditor(t *testing.T) {
 	})
 }
 
+// The buffers that a directory's files have in gopls are closed with the
+// directory's last .ego file, those of .ego files the editor doesn't have
+// open too, and follow these files on disk until then. A file left from a
+// renamed .ego file has an empty buffer, so that gopls doesn't see its
+// declarations twice.
+func TestCloseDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"go.mod":     "module example.com/c\n\ngo 1.26\n",
+		"a.ego":      "package c\n\nfunc A() int { return 1 }\n",
+		"b.ego":      "package c\n\nfunc B() int { return 2 }\n",
+		"old_ego.go": "// Code generated by ego generate from old.ego. DO NOT EDIT.\n\npackage c\n\nfunc A() int { return 1 }\n",
+	})
+	var sent bytes.Buffer // to gopls
+	p := newProxy(Config{}, newConn(strings.NewReader(""), io.Discard), newConn(strings.NewReader(""), &sent))
+	notify := func(method string, params any) {
+		t.Helper()
+		b, _ := json.Marshal(params)
+		if err := p.handleEditor(&message{Method: method, Params: b}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	doc := func(name string) any {
+		path := filepath.Join(dir, name)
+		text, _ := os.ReadFile(path)
+		return map[string]any{"textDocument": map[string]any{"uri": pathToURI(path), "text": string(text)}}
+	}
+	// expect checks the methods and files of what gopls received since
+	// the last call, and returns the files' new texts.
+	expect := func(want string) map[string]string {
+		t.Helper()
+		c := newConn(bytes.NewReader(sent.Bytes()), nil)
+		sent.Reset()
+		var got []string
+		texts := map[string]string{}
+		for m, err := c.read(); err == nil; m, err = c.read() {
+			var dp docParams
+			json.Unmarshal(m.Params, &dp)
+			if dp.TextDocument.URI == "" {
+				got = append(got, m.Method)
+				continue
+			}
+			name := filepath.Base(uriToPath(dp.TextDocument.URI))
+			got = append(got, strings.TrimPrefix(m.Method, "textDocument/")+" "+name)
+			texts[name] = dp.TextDocument.Text
+			for _, c := range dp.ContentChanges {
+				texts[name] = c.Text
+			}
+		}
+		sort.Strings(got)
+		if strings.Join(got, ", ") != want {
+			t.Errorf("gopls received %q, want %q", strings.Join(got, ", "), want)
+		}
+		return texts
+	}
+	const closed = "didClose a_ego.go, didClose b_ego.go, didClose old_ego.go"
+
+	notify("textDocument/didOpen", doc("a.ego"))
+	if texts := expect("didOpen a_ego.go, didOpen b_ego.go, didOpen old_ego.go"); texts["old_ego.go"] != "package c\n" {
+		t.Errorf("old_ego.go: %q", texts["old_ego.go"])
+	}
+	notify("textDocument/didClose", doc("a.ego"))
+	expect(closed)
+
+	notify("textDocument/didOpen", doc("a.ego"))
+	notify("textDocument/didOpen", doc("b.ego"))
+	expect("didOpen a_ego.go, didOpen b_ego.go, didOpen old_ego.go")
+	notify("textDocument/didClose", doc("a.ego"))
+	expect("")
+
+	writeFiles(t, dir, map[string]string{"a.ego": "package c\n\nfunc A() int { return 3 }\n"})
+	notify("workspace/didChangeWatchedFiles", map[string]any{"changes": []any{map[string]any{"uri": pathToURI(filepath.Join(dir, "a.ego")), "type": 2}}})
+	if err := p.flush(dir); err != nil {
+		t.Fatal(err)
+	}
+	if texts := expect("didChange a_ego.go, workspace/didChangeWatchedFiles"); !strings.Contains(texts["a_ego.go"], "return 3") {
+		t.Errorf("a_ego.go: %q", texts["a_ego.go"])
+	}
+
+	notify("textDocument/didClose", doc("b.ego"))
+	expect(closed)
+}
+
+// The proxy counts in UTF-16, LSP's default: neither gopls nor the editor
+// may pick another encoding.
+func TestPositionEncoding(t *testing.T) {
+	var sent bytes.Buffer // to gopls
+	p := newProxy(Config{}, newConn(strings.NewReader(""), io.Discard), newConn(strings.NewReader(""), &sent))
+	params := `{"capabilities":{"general":{"positionEncodings":["utf-8","utf-16"]}}}`
+	if err := p.handleEditor(&message{ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(params)}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := newConn(&sent, nil).read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(m.Params), "positionEncodings") {
+		t.Errorf("to gopls: %s", m.Params)
+	}
+	if res := adjustCapabilities(json.RawMessage(`{"capabilities":{"positionEncoding":"utf-8"}}`)); strings.Contains(string(res), "positionEncoding") {
+		t.Errorf("to the editor: %s", res)
+	}
+}
+
 // The shorthand maps too: hover inside a lambda and inside an f-string.
 func TestEditorShorthand(t *testing.T) {
-	cl, root := start(t)
+	cl, root := start(t, "")
 	path := filepath.Join(root, "internal/egotest/report/report.ego")
 	data, err := os.ReadFile(path)
 	if err != nil {

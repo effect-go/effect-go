@@ -62,16 +62,21 @@ func (c *conn) read() (*message, error) {
 		return nil, err
 	}
 //line jsonrpc.ego:50
-	m := &message{}
-	if err := json.Unmarshal(body, m); err != nil {
-		return nil, err
-	}
-//line jsonrpc.ego:52
 	if c.log != nil {
 		fmt.Fprintf(c.log, "<- %s %s\n", c.name, truncate(body))
 	}
+	m := &message{}
+	if err := json.Unmarshal(body, m); err != nil {
+		return nil, badMessage{err}
+	}
 	return m, nil
 }
+
+// badMessage is a message whose body isn't JSON-RPC: the connection can
+// go on to the next.
+type badMessage struct{ err error }
+
+func (b badMessage) Error() string { return "bad message: " + b.err.Error() }
 
 func (c *conn) write(m *message) error {
 	m.JSONRPC = "2.0"
@@ -79,7 +84,7 @@ func (c *conn) write(m *message) error {
 	if err != nil {
 		return err
 	}
-//line jsonrpc.ego:61
+//line jsonrpc.ego:69
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.log != nil {
@@ -88,11 +93,11 @@ func (c *conn) write(m *message) error {
 	if _, err := fmt.Fprintf(c.w, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
 		return err
 	}
-//line jsonrpc.ego:67
+//line jsonrpc.ego:75
 	if _, err := c.w.Write(body); err != nil {
 		return err
 	}
-//line jsonrpc.ego:68
+//line jsonrpc.ego:76
 	return nil
 }
 
@@ -101,7 +106,7 @@ func (c *conn) notify(method string, params any) error {
 	if err != nil {
 		return err
 	}
-//line jsonrpc.ego:73
+//line jsonrpc.ego:81
 	return c.write(&message{Method: method, Params: p})
 }
 
@@ -110,7 +115,7 @@ func (c *conn) reply(id json.RawMessage, result any) error {
 	if err != nil {
 		return err
 	}
-//line jsonrpc.ego:78
+//line jsonrpc.ego:86
 	return c.write(&message{ID: id, Result: r})
 }
 

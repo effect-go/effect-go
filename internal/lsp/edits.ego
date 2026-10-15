@@ -1,0 +1,161 @@
+package lsp
+
+import (
+	"bytes"
+	"encoding/json"
+	goast "go/ast"
+	goparser "go/parser"
+	"go/token"
+	"slices"
+	"strings"
+)
+
+// additionalEdits translates a completion's additional edits. Those to the
+// imports of the generated Go can't be translated: the generated imports
+// aren't the .ego file's, lowering adds some. The imports they add are
+// added to the .ego file's own instead. The other edits translate as edits
+// do.
+func (p *Proxy) additionalEdits(v any, req, doc *genDoc) any {
+	edits, ok := v.([]any)
+	if !ok || doc == nil {
+		return p.fromGen(v, req, doc)
+	}
+	p.mu.Lock()
+	out := doc.out
+	p.mu.Unlock()
+	if out == nil {
+		return []any{}
+	}
+	end := importsEnd(out.Raw)
+	raw := newText(out.Raw)
+	var imports, others []any
+	for _, e := range edits {
+		var te struct{ Range Range }
+		b, _ := json.Marshal(e)
+		json.Unmarshal(b, &te)
+		if raw.offset(te.Range.Start) <= end {
+			imports = append(imports, e)
+		} else {
+			others = append(others, e)
+		}
+	}
+	mapped := p.fromGen(others, req, doc).([]any)
+	if len(imports) == 0 {
+		return mapped
+	}
+	added := slices.DeleteFunc(importSpecs(applyEdits(out.Raw, imports)), func(s string) bool {
+		return slices.Contains(importSpecs(out.Raw), s)
+	})
+	return append(addImports(out.Src, added), mapped...)
+}
+
+// importsEnd returns the offset where the imports of Go source end: after
+// the last import declaration, or the package clause.
+func importsEnd(src []byte) int {
+	fset := token.NewFileSet()
+	f, _ := goparser.ParseFile(fset, "", src, goparser.ImportsOnly)
+	if f == nil || f.Name == nil {
+		return 0
+	}
+	end := f.Name.End()
+	for _, d := range f.Decls {
+		if gd, ok := d.(*goast.GenDecl); ok && gd.Tok == token.IMPORT {
+			end = gd.End()
+		}
+	}
+	return fset.Position(end).Offset
+}
+
+// importSpecs returns the import specs of Go source, as name "path".
+func importSpecs(src []byte) []string {
+	f, _ := goparser.ParseFile(token.NewFileSet(), "", src, goparser.ImportsOnly)
+	if f == nil {
+		return nil
+	}
+	var specs []string
+	for _, s := range f.Imports {
+		spec := s.Path.Value
+		if s.Name != nil {
+			spec = s.Name.Name + " " + spec
+		}
+		specs = append(specs, spec)
+	}
+	return specs
+}
+
+// applyEdits applies LSP text edits to src.
+func applyEdits(src []byte, edits []any) []byte {
+	type edit struct {
+		a, z int
+		text string
+	}
+	t := newText(src)
+	var es []edit
+	for _, e := range edits {
+		var te struct {
+			Range   Range
+			NewText string
+		}
+		b, _ := json.Marshal(e)
+		json.Unmarshal(b, &te)
+		a, z := t.offset(te.Range.Start), t.offset(te.Range.End)
+		es = append(es, edit{a, max(a, z), te.NewText})
+	}
+	// Last first, so that the offsets of the others hold.
+	slices.SortStableFunc(es, (x, y) => y.a - x.a)
+	out := slices.Clone(src)
+	for _, e := range es {
+		out = slices.Concat(out[:e.a], []byte(e.text), out[e.z:])
+	}
+	return out
+}
+
+// addImports returns the edit that adds import specs to a .ego file: to
+// its last import declaration, or after its package clause.
+func addImports(src []byte, specs []string) []any {
+	if len(specs) == 0 {
+		return nil
+	}
+	fset := token.NewFileSet()
+	f, _ := goparser.ParseFile(fset, "", src, goparser.ImportsOnly)
+	if f == nil || f.Name == nil {
+		return nil
+	}
+	off := func(pos token.Pos) int { return fset.Position(pos).Offset }
+	var last *goast.GenDecl
+	for _, d := range f.Decls {
+		if gd, ok := d.(*goast.GenDecl); ok && gd.Tok == token.IMPORT {
+			last = gd
+		}
+	}
+	var at int
+	var b strings.Builder
+	switch {
+	case last != nil && last.Lparen.IsValid():
+		at = off(last.Rparen)
+		if start := bytes.LastIndexByte(src[:at], '\n') + 1; len(bytes.TrimSpace(src[start:at])) == 0 {
+			at = start
+			for _, s := range specs {
+				b.WriteString("\t" + s + "\n")
+			}
+		} else {
+			for _, s := range specs {
+				b.WriteString("\n\t" + s)
+			}
+			b.WriteString("\n")
+		}
+	case last != nil:
+		at = off(last.End())
+		for _, s := range specs {
+			b.WriteString("\nimport " + s)
+		}
+	default:
+		at = off(f.Name.End())
+		b.WriteString("\n")
+		for _, s := range specs {
+			b.WriteString("\nimport " + s)
+		}
+	}
+	pos := newText(src).position(at)
+	return []any{map[string]any{"range": Range{Start: pos, End: pos}, "newText": b.String()}}
+}
