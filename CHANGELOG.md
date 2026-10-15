@@ -48,6 +48,26 @@ Fixes from a review of the whole codebase.
 - A case message such as `"{Slug} moved {Times + 1} times"` can use its
   fields anywhere in an expression, and a raw message stays raw.
 - `else` arms with only `_` don't import `errors`.
+- A lambda passed to a generic function gets its parameter types from the
+  other arguments: `Map(us, u => u.Name)` said it couldn't tell them.
+- A lambda in an if or match branch takes its types from the variable it's
+  assigned to.
+- An effect literal called at once, `effect() (T, error) { … }()`, gets
+  `ctx`.
+- Stack traces name the line of a call in an if or match branch, not the
+  closing brace's, and the right lines in a block-bodied lambda.
+
+**Error messages**
+- An undefined name that leaves a type unknown is reported, instead of
+  only "can't tell the type of this expression" further down.
+- `check` or `else` in a `for`, `switch` or type switch header, a lifted
+  expression after an if's init statement, and one in a select case each
+  get a message saying so, instead of unrelated errors such as
+  `undefined: u`.
+- A function declared to return another package's error set is an error
+  saying so; it said check needs a function that returns an error.
+- `return check … as Case` only says that check is misplaced.
+- "must must start a statement" reads "must can only start a statement".
 
 **Parser and formatter**
 - `ego fmt -w` could replace a file with `package` when a backquoted string
