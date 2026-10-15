@@ -260,9 +260,9 @@ func Race[T any](ctx context.Context, tasks ...Task[T]) (T, error) {
 	// the real failures.
 	if parent.Err() != nil {
 		cause := context.Cause(parent)
-		real := slices.DeleteFunc(slices.Clone(errs), func(err error) bool { return isInterrupt(err) || isEach(err, cause) })
-		if len(real) < len(errs) {
-			errs = append(real, cause)
+		failed := slices.DeleteFunc(slices.Clone(errs), func(err error) bool { return isInterrupt(err) || isEach(err, cause) })
+		if len(failed) < len(errs) {
+			errs = append(failed, cause)
 		}
 	}
 	if len(errs) == 1 {

@@ -323,10 +323,12 @@ func (p *parser) armFollows() bool {
 			if depth == 0 {
 				return true
 			}
-		case token.SEMICOLON, token.EOF:
-			if depth <= 0 {
+		case token.SEMICOLON:
+			if depth == 0 {
 				return false
 			}
+		case token.EOF:
+			return false
 		}
 	}
 }
