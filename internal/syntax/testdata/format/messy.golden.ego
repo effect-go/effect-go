@@ -21,6 +21,8 @@ effect (s *S) Get(id int) (int, E) {
 		fail (B{})
 	}
 	w := s.load(id) else 0
+	w2 := s.cache ?? s.db else 0
+	match w {}
 	p := check s.port(id) as A else {
 		B(_) => 3000
 		A(e) => e.X

@@ -40,14 +40,15 @@ func (p *printer) egoExpr(expr ast.Expr, prec1, depth int) bool {
 		}
 
 	case *ast.ElseExpr:
-		p.expr1(x.X, token.LowestPrec+1, depth)
+		// else binds loosest, ?? included: v ?? w else z needs no parentheses.
+		p.expr1(x.X, token.LowestPrec, depth)
 		p.print(blank)
 		p.setPos(x.Else)
 		p.print(token.ELSE, blank)
 		if x.Fallback == nil {
 			p.arms(x.Lbrace, x.Arms, x.Rbrace)
 		} else {
-			p.expr1(x.Fallback, token.LowestPrec+1, depth)
+			p.expr1(x.Fallback, token.LowestPrec, depth)
 		}
 
 	case *ast.CoalesceExpr:
@@ -185,20 +186,24 @@ func (p *printer) match(pos token.Pos, tag ast.Expr, lbrace token.Pos, arms []*a
 // a composite literal.
 func (p *printer) arms(lbrace token.Pos, arms []*ast.MatchArm, rbrace token.Pos) {
 	if p.oneLine(lbrace, arms, rbrace) {
-		// { A => 1; _ => 0 } written on one line stays on one line.
+		// { A => 1; _ => 0 } written on one line stays on one line, and
+		// {} stays {}.
 		p.setPos(lbrace)
-		p.print(token.LBRACE, blank)
+		p.print(token.LBRACE)
 		for i, a := range arms {
 			if i > 0 {
-				p.print(token.SEMICOLON, blank)
+				p.print(token.SEMICOLON)
 			}
+			p.print(blank)
 			p.exprList(token.NoPos, a.Patterns, 1, 0, a.Arrow, false)
 			p.print(blank)
 			p.setPos(a.Arrow)
 			p.print(scanner.FATARROW, blank)
 			p.expr(a.Body.(ast.Expr))
 		}
-		p.print(blank)
+		if len(arms) > 0 {
+			p.print(blank)
+		}
 		p.setPos(rbrace)
 		p.print(token.RBRACE)
 		return
