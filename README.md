@@ -1,6 +1,6 @@
 # effect-go
 
-**Reliable Go, without the boilerplate.**
+**Reliable Go for the AI era.**
 
 Typed errors, structured concurrency, retries, tracing and dependency wiring,
 built in, in code that reads like what it does: no `if err != nil`, no `ctx`
