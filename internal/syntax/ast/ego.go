@@ -162,12 +162,7 @@ func (x *IfExpr) End() token.Pos {
 	}
 	return x.Else.End()
 }
-func (x *LambdaExpr) Pos() token.Pos {
-	if x.Params.Opening.IsValid() {
-		return x.Params.Opening
-	}
-	return x.Params.Pos()
-}
+func (x *LambdaExpr) Pos() token.Pos      { return x.Params.Pos() }
 func (x *LambdaExpr) End() token.Pos      { return x.Body.End() }
 func (x *CoalesceExpr) Pos() token.Pos    { return x.X.Pos() }
 func (x *CoalesceExpr) End() token.Pos    { return x.Y.End() }
@@ -235,6 +230,9 @@ func walkEgo(v Visitor, n Node) bool {
 			Walk(v, p)
 		}
 		Walk(v, n.Body)
+		if n.Comment != nil {
+			Walk(v, n.Comment)
+		}
 	case *FailStmt:
 		Walk(v, n.X)
 	case *FString:
@@ -261,6 +259,9 @@ func walkEgo(v Visitor, n Node) bool {
 		}
 		if n.Message != nil {
 			Walk(v, n.Message)
+		}
+		if n.Comment != nil {
+			Walk(v, n.Comment)
 		}
 	default:
 		return false
