@@ -22,6 +22,10 @@ func (g *fileGen) stmt(s ast.Stmt) {
 }
 
 func (g *fileGen) lowerStmt(s ast.Stmt) {
+	if c, ok := g.parent(s).(*ast.CommClause); ok && c.Comm == s && needsHoist(s) {
+		g.errorf(s.Pos(), "this expression can't be used in a select case: assign it to a variable before the select")
+		return
+	}
 	switch s := s.(type) {
 	case *ast.LabeledStmt:
 		g.copy(g.off(s.Pos()), g.off(s.Stmt.Pos()))
@@ -73,21 +77,24 @@ func (g *fileGen) lowerStmt(s ast.Stmt) {
 		g.matchStmt(s)
 		return
 	case *ast.IfStmt:
-		if s.Init != nil && hasDirectCheck(s.Init) {
-			g.errorf(s.Init.Pos(), "check can't be used in an if header (nor else or must): write it on its own line before the if")
-		} else if needsHoist(s.Init) {
-			g.errorf(s.Init.Pos(), "this expression can't be used in an if header: write it on its own line before the if")
+		if g.headerErr("if", s.Init) {
+			return
+		}
+		if s.Init != nil && needsHoist(s.Cond) {
+			g.errorf(s.Cond.Pos(), "this expression can't follow a statement in an if header: write the statement on its own line before the if")
 			return
 		}
 		g.ifStmt(s)
 		return
 	case *ast.ForStmt:
+		if g.headerErr("for", s.Init) {
+			return
+		}
 		if needsHoist(s.Cond) || needsHoist(s.Post) {
 			g.errorf(s.Pos(), "this expression can't be used in a for header: assign it to a variable in the loop")
 		}
 	case *ast.SwitchStmt:
-		if needsHoist(s.Init) {
-			g.errorf(s.Init.Pos(), "this expression can't be used in a switch header: write it on its own line before the switch")
+		if g.headerErr("switch", s.Init) {
 			return
 		}
 		for _, c := range s.Body.List {
@@ -96,6 +103,10 @@ func (g *fileGen) lowerStmt(s ast.Stmt) {
 					g.errorf(e.Pos(), "this expression can't be used in a case: assign it to a variable first")
 				}
 			}
+		}
+	case *ast.TypeSwitchStmt:
+		if g.headerErr("switch", s.Init) || g.headerErr("switch", s.Assign) {
+			return
 		}
 	}
 	g.children(s)
@@ -125,7 +136,29 @@ func (g *fileGen) ifStmt(s *ast.IfStmt) {
 	g.w.str("\n}")
 }
 
+// headerErr reports a check, else or must in a statement of kw's header,
+// which can't return from there, or an expression that needs statements
+// before its own, which can't go there.
+func (g *fileGen) headerErr(kw string, s ast.Stmt) bool {
+	a := "a"
+	if kw == "if" {
+		a = "an"
+	}
+	switch {
+	case hasDirectCheck(s):
+		g.errorf(s.Pos(), "check can't be used in %s %s header (nor else or must): write it on its own line before the %s", a, kw, kw)
+	case needsHoist(s):
+		g.errorf(s.Pos(), "this expression can't be used in %s %s header: write it on its own line before the %s", a, kw, kw)
+	default:
+		return false
+	}
+	return true
+}
+
 func hasDirectCheck(s ast.Stmt) bool {
+	if s == nil {
+		return false
+	}
 	found := false
 	ast.Inspect(s, func(n ast.Node) bool {
 		switch n.(type) {

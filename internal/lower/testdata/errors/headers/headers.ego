@@ -1,5 +1,7 @@
 package headers
 
+import "strconv"
+
 func If(m map[string]int) {
 	if v := m["k"] ?? 0; v > 1 { // ERROR "can't be used in an if header"
 	}
@@ -7,6 +9,34 @@ func If(m map[string]int) {
 
 func Switch(m map[string]int) {
 	switch v := m["k"] ?? 0; v { // ERROR "can't be used in a switch header"
+	}
+}
+
+func Cond(m map[string]int, ok bool) {
+	if ok {
+	} else if k := "k"; m[k] ?? 0 > 1 { // ERROR "can't follow a statement in an if header"
+	}
+}
+
+func For(s string) (int, error) {
+	for n := check strconv.Atoi(s); n > 0; n-- { // ERROR "check can't be used in a for header"
+	}
+	for n := strconv.Atoi(s) else 0; n > 0; n-- { // ERROR "check can't be used in a for header"
+	}
+	switch n := check strconv.Atoi(s); n { // ERROR "check can't be used in a switch header"
+	}
+	return 0, nil
+}
+
+func TypeSwitch(m map[string]any, d any) {
+	switch (m["a"] ?? d).(type) { // ERROR "can't be used in a switch header"
+	}
+}
+
+func Select(ch chan int, m map[string]int) {
+	select {
+	case ch <- m["a"] ?? 1: // ERROR "can't be used in a select case"
+	default:
 	}
 }
 
