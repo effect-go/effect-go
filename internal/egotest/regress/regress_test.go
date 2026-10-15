@@ -66,7 +66,7 @@ func TestEvaluation(t *testing.T) {
 	if ShortCircuit(nil) || !ShortCircuit(&Box{N: 1}) {
 		t.Error("ShortCircuit")
 	}
-	if got := Order(); !slices.Equal(got, []string{"left", "cond"}) {
+	if got := Order(); !slices.Equal(got, []string{"left", "cond", "lit", "lit2", "as", "as2", "fun", "arg", "ret", "ret2"}) {
 		t.Errorf("order %q", got)
 	}
 }

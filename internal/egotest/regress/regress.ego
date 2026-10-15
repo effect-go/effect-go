@@ -90,13 +90,24 @@ func ShortCircuit(p *Box) bool {
 	return ok
 }
 
-// Order: operands run left to right, around a computed one.
+// Order: operands run left to right, around a computed one: in a binary
+// expression, a literal, an assignment, a return, and a method's receiver.
 func Order() []string {
 	var calls []string
 	next := func(s string) int { calls = append(calls, s); return 1 }
+	var m map[string]int
 	x := next("left") + (if next("cond") > 0 { 1 } else { 2 })
-	_ = x
+	xs := []int{next("lit"), m["k"] ?? next("lit2")}
+	a, b := next("as"), m["k"] ?? next("as2")
+	pick := func(s string) func(int) int { next(s); return func(n int) int { return n } }
+	pick("fun")(m["k"] ?? next("arg"))
+	orderReturn(next, m)
+	_, _, _, _ = x, xs, a, b
 	return calls
+}
+
+func orderReturn(next func(string) int, m map[string]int) (int, int) {
+	return next("ret"), m["k"] ?? next("ret2")
 }
 
 // Shadow: a match arm's names don't reach the later arms.

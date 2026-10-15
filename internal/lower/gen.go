@@ -260,6 +260,7 @@ type fileGen struct {
 	edits   []edit
 	needs   map[ast.Node]bool
 	lowered map[ast.Stmt]bool // statements rendered by lowerStmt
+	early   map[ast.Node]bool // operands computed before the statement: see order
 	names   map[string]string // import path -> name, from the file's imports
 	added   map[string]string // import path -> name, added by lowering
 	taken   map[string]bool   // names of imports
@@ -298,6 +299,7 @@ func (g *fileGen) text(n ast.Node) string { return string(g.src[g.off(n.Pos()):g
 func (g *fileGen) render(r *round) *writer {
 	g.r = r
 	g.diags = nil
+	g.early = map[ast.Node]bool{}
 	g.added = map[string]string{}
 	g.names = map[string]string{}
 	g.taken = map[string]bool{}
@@ -527,6 +529,11 @@ func (g *fileGen) mark(pos token.Pos) {
 
 // node renders n: verbatim where possible, rewriting what needs it.
 func (g *fileGen) node(n ast.Node) {
+	if g.early[n] {
+		delete(g.early, n)
+		g.computeEarly(n)
+		return
+	}
 	if !g.needs[n] {
 		g.copy(g.off(n.Pos()), g.off(n.End()))
 		return
@@ -560,6 +567,7 @@ func (g *fileGen) node(n ast.Node) {
 
 // children renders n's source with its children rendered by node.
 func (g *fileGen) children(n ast.Node) {
+	g.order(n)
 	cur := g.off(n.Pos())
 	_, isBlock := n.(*ast.BlockStmt)
 	_, isClause := n.(*ast.CaseClause)
@@ -572,6 +580,60 @@ func (g *fileGen) children(n ast.Node) {
 		cur = g.off(c.End())
 	}
 	g.copy(cur, g.off(n.End()))
+}
+
+// order marks the operands of n to compute before the statement. Go
+// evaluates a call's function and arguments, a composite literal's
+// elements, and the values of a return or an assignment from left to
+// right: when one of them needs statements before the statement, those
+// before it that call functions must run first.
+func (g *fileGen) order(n ast.Node) {
+	if !g.r.final || g.pre == nil {
+		return
+	}
+	var xs []ast.Expr
+	switch n := n.(type) {
+	case *ast.CallExpr:
+		xs = append([]ast.Expr{n.Fun}, n.Args...)
+	case *ast.CompositeLit:
+		xs = n.Elts
+	case *ast.ReturnStmt:
+		xs = n.Results
+	case *ast.AssignStmt:
+		xs = n.Rhs
+	}
+	last := -1
+	for i, x := range xs {
+		if needsHoist(x) {
+			last = i
+		}
+	}
+	for _, x := range xs[:max(last, 0)] {
+		v := x
+		if kv, ok := x.(*ast.KeyValueExpr); ok {
+			v = kv.Value
+		}
+		if hasCall(v) {
+			g.early[x] = true
+		}
+	}
+}
+
+// computeEarly computes x into a new variable before the statement, and
+// renders the variable; a key: value element keeps its key.
+func (g *fileGen) computeEarly(x ast.Node) {
+	if kv, ok := x.(*ast.KeyValueExpr); ok {
+		g.node(kv.Key)
+		g.copy(g.off(kv.Key.End()), g.off(kv.Value.Pos()))
+		x = kv.Value
+	}
+	name := g.temp("v")
+	g.toPre(func() {
+		g.w.str(name + " := ")
+		g.node(x)
+		g.w.str("\n")
+	})
+	g.w.str(name)
 }
 
 // childNodes returns n's children that lie within it, in source order.

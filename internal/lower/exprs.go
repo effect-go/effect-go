@@ -45,7 +45,7 @@ func (g *fileGen) expr(x ast.Expr) bool {
 			g.combinator(x)
 			return true
 		}
-		g.call(x)
+		return false
 	case *ast.Ident:
 		if c := g.matchBinding(x); c != nil && !g.r.final {
 			g.w.rec(x, func() { g.w.str("_egoAs[" + g.text(c.Fun) + "](" + g.matchTag(c) + ")") })
@@ -67,42 +67,6 @@ func (g *fileGen) matchTag(pat *ast.CallExpr) string {
 		return g.renderStr(m.Tag)
 	}
 	return ""
-}
-
-// call renders a call. If an argument must be hoisted, the arguments before
-// it that have side effects are hoisted first, so evaluation order holds.
-func (g *fileGen) call(x *ast.CallExpr) {
-	last := -1
-	if g.r.final && g.pre != nil {
-		for i, a := range x.Args {
-			if needsHoist(a) {
-				last = i
-			}
-		}
-	}
-	if last < 0 {
-		g.children(x)
-		return
-	}
-	g.copy(g.off(x.Pos()), g.off(x.Fun.Pos()))
-	g.node(x.Fun)
-	cur := g.off(x.Fun.End())
-	for i, a := range x.Args {
-		g.copy(cur, g.off(a.Pos()))
-		if i < last && hasCall(a) {
-			name := g.temp("arg")
-			g.toPre(func() {
-				g.w.str(name + " := ")
-				g.node(a)
-				g.w.str("\n")
-			})
-			g.w.str(name)
-		} else {
-			g.node(a)
-		}
-		cur = g.off(a.End())
-	}
-	g.copy(cur, g.off(x.End()))
 }
 
 // binary renders a binary expression whose right operand is computed by

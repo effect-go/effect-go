@@ -180,10 +180,12 @@ func ShortCircuit(p *Box) bool {
 	return ok
 }
 
-// Order: operands run left to right, around a computed one.
+// Order: operands run left to right, around a computed one: in a binary
+// expression, a literal, an assignment, a return, and a method's receiver.
 func Order() []string {
 	var calls []string
 	next := func(s string) int { calls = append(calls, s); return 1 }
+	var m map[string]int
 	v := next("left")
 	var v2 int
 	if next("cond") > 0 {
@@ -192,12 +194,46 @@ func Order() []string {
 		v2 = 2
 	}
 	x := v + (v2)
-//line regress.ego:98
-	_ = x
+//line regress.ego:100
+	v3 := next("lit")
+	v4, ok := m["k"]
+	if !ok {
+		v4 = next("lit2")
+	}
+	xs := []int{v3, v4}
+//line regress.ego:101
+	v5 := next("as")
+	v6, ok2 := m["k"]
+	if !ok2 {
+		v6 = next("as2")
+	}
+	a, b := v5, v6
+//line regress.ego:102
+	pick := func(s string) func(int) int { next(s); return func(n int) int { return n } }
+	v7 := pick("fun")
+	v8, ok3 := m["k"]
+	if !ok3 {
+		v8 = next("arg")
+	}
+	v7(v8)
+//line regress.ego:104
+	orderReturn(next, m)
+	_, _, _, _ = x, xs, a, b
 	return calls
 }
 
+func orderReturn(next func(string) int, m map[string]int) (int, int) {
+	v := next("ret")
+	v2, ok := m["k"]
+	if !ok {
+		v2 = next("ret2")
+	}
+	return v, v2
+}
+
 // Shadow: a match arm's names don't reach the later arms.
+//
+//line regress.ego:114
 func Shadow(err error) string {
 	ok := true
 	e := "outer"
@@ -217,11 +253,11 @@ func Shadow(err error) string {
 
 // DivOneLine panics on a line that a stack trace must report as this one.
 //
-//line regress.ego:113
+//line regress.ego:124
 func DivOneLine(ctx context.Context, m map[string]int) (_ int, err error) {
 	ctx, span := trace.Start(ctx, "regress.DivOneLine")
 	defer trace.End(span, &err)
-//line regress.ego:113
+//line regress.ego:124
 	return m["a"] / len(m), nil
 } // one-line
 
@@ -238,12 +274,12 @@ func OptFallback(p *Player) (float64, City) {
 	if p != nil {
 		s = p.Score
 	}
-//line regress.ego:125
+//line regress.ego:136
 	var h City = "none"
 	if p != nil {
 		h = p.Home
 	}
-//line regress.ego:126
+//line regress.ego:137
 	return s, h
 }
 
@@ -281,7 +317,7 @@ func LocalNames(s string) (int, error) {
 		}
 		return 0, Unavailable{Cause: err}
 	}
-//line regress.ego:157
+//line regress.ego:168
 	return n + fmt, nil
 }
 
@@ -296,12 +332,12 @@ func ParenReceiver(s string) (int, error) {
 	if err != nil {
 		panic(err)
 	}
-//line regress.ego:168
+//line regress.ego:179
 	b, err := (&Counter{N: s}).Value()
 	if err != nil {
 		return 0, err
 	}
-//line regress.ego:169
+//line regress.ego:180
 	return a + b, nil
 }
 
@@ -317,7 +353,7 @@ func CoalesceInLambda(s string) string {
 	}, s)
 }
 
-//line regress.ego:178
+//line regress.ego:189
 func apply(xs []int, f func(int)) {
 	for _, x := range xs {
 		f(x)
@@ -336,7 +372,7 @@ func LambdaLift(m map[int]string) []string {
 		}
 		print(&out, v)
 	})
-//line regress.ego:190
+//line regress.ego:201
 	_ = x
 	return out
 }
@@ -350,7 +386,7 @@ func failing(int) (int, error) { return 0, io.EOF }
 func BranchLift(ctx context.Context, m map[int]int, ids []int) (_ int, _ []int, err error) {
 	ctx, span := trace.Start(ctx, "regress.BranchLift")
 	defer trace.End(span, &err)
-//line regress.ego:201
+//line regress.ego:212
 	attempts := 0
 	count := func() int { attempts++; return attempts }
 	last, err := schedule.Retry(ctx, schedule.Recurs(2), func(ctx context.Context) (int, error) {
@@ -363,7 +399,7 @@ func BranchLift(ctx context.Context, m map[int]int, ids []int) (_ int, _ []int, 
 	if err != nil {
 		last = -1
 	}
-//line regress.ego:204
+//line regress.ego:215
 	_ = last
 	got, err := scope.Each(ctx, ids, 2, func(ctx context.Context, id int) (int, error) {
 		v2, ok2 := m[id]
@@ -375,7 +411,7 @@ func BranchLift(ctx context.Context, m map[int]int, ids []int) (_ int, _ []int, 
 	if err != nil {
 		return 0, nil, egofmt.Errorf("strconv.Atoi: %w", err)
 	}
-//line regress.ego:206
+//line regress.ego:217
 	return attempts, got, nil
 }
 
@@ -383,7 +419,7 @@ func BranchLift(ctx context.Context, m map[int]int, ids []int) (_ int, _ []int, 
 func NestedLift(ctx context.Context, m map[int]int) (_ int, err error) {
 	ctx, span := trace.Start(ctx, "regress.NestedLift")
 	defer trace.End(span, &err)
-//line regress.ego:211
+//line regress.ego:222
 	a, b, err := scope.All2(ctx,
 		func(ctx context.Context) (int, error) {
 			return schedule.Retry(ctx, schedule.Recurs(1), func(ctx context.Context) (int, error) {
@@ -401,6 +437,6 @@ func NestedLift(ctx context.Context, m map[int]int) (_ int, err error) {
 	if err != nil {
 		return 0, err
 	}
-//line regress.ego:212
+//line regress.ego:223
 	return a + b, nil
 }
