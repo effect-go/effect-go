@@ -18,13 +18,13 @@ func (p *parser) peek() token.Token {
 }
 
 // keywordBefore reports whether the contextual keyword at the current
-// position (check, must, fail or match) is the keyword, given the tokens
-// that start its operand. It's what makes "check x" new syntax while
-// "check := 1" and "check.x" stay ordinary Go. ( is the keyword's only
-// after a space, as in must (&w).Run(), and * only after a space and
-// before its operand, as in match *p: gofmt never writes a space before
-// the ( of a call, and spaces both sides of a binary operator alike. So
-// check(x) stays a call, and check * n a multiplication.
+// position (check, must, fail or match) is the keyword: the next token is
+// one of operand, the tokens that start its operand. It's what makes
+// "check x" new syntax while "check := 1" and "check.x" stay ordinary Go.
+// ( counts only after a space, as in must (&w).Run(), and * only after a
+// space and right before its operand, as in match *p: gofmt never puts a
+// space before the ( of a call, and spaces both sides of a binary operator
+// alike. So check(x) stays a call, and check * n a multiplication.
 func (p *parser) keywordBefore(operand ...token.Token) bool {
 	s := p.scanner.Lookahead()
 	pos, tok, _ := s.ScanToken()
