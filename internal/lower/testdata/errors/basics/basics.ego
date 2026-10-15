@@ -191,3 +191,7 @@ func typo(m map[string]int) int {
 	z := if x > 0 { 1 } else { 3 } // ERROR "can't tell the type"
 	return x + z
 }
+
+func misplaced() (int, E) {
+	return check load() as A // ERROR "check must start a statement"
+}

@@ -107,6 +107,12 @@ func sameSet(a, b *types.Named) bool {
 	return a != nil && b != nil && a.Obj().Name() == b.Obj().Name() && a.Obj().Pkg().Path() == b.Obj().Pkg().Path()
 }
 
+// isCheck reports whether x is a check, misplaced if it is a result.
+func isCheck(x ast.Expr) bool {
+	_, ok := x.(*ast.CheckExpr)
+	return ok
+}
+
 // passesSet reports whether x is a call whose errors are all of set, so
 // they can be passed on as they are.
 func (g *fileGen) passesSet(x ast.Expr, set *ast.SumDecl) bool { return g.isErrorSet(g.argSet(x), set) }
@@ -157,7 +163,7 @@ func (g *fileGen) checkSets() {
 			case *ast.ReturnStmt:
 				if len(n.Results) == results {
 					g.returnsCase(n.Results[results-1], set)
-				} else if len(n.Results) == 1 && !g.passesSet(n.Results[0], set) {
+				} else if len(n.Results) == 1 && !isCheck(n.Results[0]) && !g.passesSet(n.Results[0], set) {
 					g.errorf(n.Results[0].Pos(), "%s may fail with errors that aren't cases of %s: use check … as <case>", g.text(n.Results[0]), set.Name.Name)
 				}
 			}
