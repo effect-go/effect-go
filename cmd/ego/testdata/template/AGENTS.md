@@ -84,7 +84,7 @@ func BuildApp(ctx context.Context, s *scope.Scope, cfg Config) (*App, error) {
 var AppSet = layer.Set(layer.Close(NewDB), NewRepo, NewService, NewApp)
 ```
 
-Providers are ordinary constructors returning `T`, `(T, error)` or `(T, cleanup, error)`. `ego generate` writes `layers_ego.go`. Run the app inside `scope.Run(ctx, func(s *scope.Scope) (T, error) {…})`; finalizers run in reverse order when it returns. In `main`, `scope.Main(s => serve(s, cfg))` does that with a scope that SIGINT and SIGTERM cancel (a second signal kills the program); it exits with status 1 if `serve` fails, and takes `scope.StopTimeout(d)` to bound shutdown.
+Providers are ordinary constructors, given by name, returning `T`, `(T, error)` or `(T, cleanup, error)`. `ego generate` writes `layers_ego.go`. Run the app inside `scope.Run(ctx, func(s *scope.Scope) (T, error) {…})`; finalizers run in reverse order when it returns. In `main`, `scope.Main(s => serve(s, cfg))` does that with a scope that SIGINT and SIGTERM cancel (a second signal kills the program); it exits with status 1 if `serve` or the shutdown fails, and takes `scope.StopTimeout(d)` to bound shutdown.
 
 ## Runtime from plain Go
 
