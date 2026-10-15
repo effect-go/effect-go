@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/effect-go/effect-go/scope"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -96,6 +97,30 @@ func TestLogHandler(t *testing.T) {
 	want := `"trace_id":"` + span.SpanContext().TraceID().String() + `","span_id":"` + span.SpanContext().SpanID().String() + `"`
 	if len(lines) != 2 || !strings.Contains(lines[0], want) || !strings.Contains(lines[0], `"app":"shop"`) || strings.Contains(lines[1], "trace_id") {
 		t.Fatalf("logged:\n%s\nwant %s on the first line only", buf.String(), want)
+	}
+}
+
+func panicsInTask(context.Context) (int, error) { panic("boom") }
+
+// A task's panic comes back as a *scope.Panic: the span records its value
+// and the task's stack.
+func TestTaskPanic(t *testing.T) {
+	rec := record(t)
+	func() {
+		defer func() { recover() }()
+		var err error
+		ctx, span := Start(t.Context(), "Load")
+		defer End(span, &err)
+		_, err = scope.All(ctx, panicsInTask)
+	}()
+	s, stack := rec.Ended()[0], ""
+	for _, a := range s.Events()[0].Attributes {
+		if a.Key == "exception.stacktrace" {
+			stack = a.Value.AsString()
+		}
+	}
+	if s.Status().Description != "panic: boom" || !strings.Contains(stack, "panicsInTask") {
+		t.Fatalf("status %q, stack:\n%s", s.Status().Description, stack)
 	}
 }
 

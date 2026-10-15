@@ -40,8 +40,14 @@ func Start(ctx context.Context, name string) (context.Context, oteltrace.Span) {
 // panic on the span and lets the panic continue, with its original stack.
 func End(span oteltrace.Span, err *error) {
 	if r := recover(); r != nil {
-		span.RecordError(fmt.Errorf("panic: %v", r), oteltrace.WithStackTrace(true))
-		span.SetStatus(codes.Error, fmt.Sprint("panic: ", r))
+		// A task's panic comes back as a *scope.Panic, with the stack of
+		// the task's goroutine rather than this one.
+		val, stack := r, oteltrace.EventOption(oteltrace.WithStackTrace(true))
+		if p, ok := r.(*scope.Panic); ok {
+			val, stack = p.Value, oteltrace.WithAttributes(attribute.String("exception.stacktrace", string(p.Stack)))
+		}
+		span.RecordError(fmt.Errorf("panic: %v", val), stack)
+		span.SetStatus(codes.Error, fmt.Sprint("panic: ", val))
 		span.End()
 		panic(r)
 	}
