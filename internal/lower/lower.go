@@ -236,9 +236,9 @@ func (p *pkgGen) recheck(under *types.Package) map[string]*types.Package {
 	return over
 }
 
-// lowered are the packages generated code may import that its .ego file
+// addedImports are the packages generated code may import that its .ego file
 // doesn't.
-var lowered = []string{"context", "errors", "fmt", "strconv", "time", scopePath, schedulePath, tracePath}
+var addedImports = []string{"context", "errors", "fmt", "strconv", "time", scopePath, schedulePath, tracePath}
 
 // imports returns every package the package and its tests import, and
 // those that lowering may add, except the package itself.
@@ -262,7 +262,7 @@ func (p *pkgGen) imports() ([]string, error) {
 			set[strings.Trim(s.Path.Value, `"`)] = true
 		}
 	}
-	for _, path := range lowered {
+	for _, path := range addedImports {
 		set[path] = true
 	}
 	delete(set, p.path)
@@ -353,7 +353,8 @@ func (p *pkgGen) run(res *Result, only []*fileGen) (*typeInfo, error) {
 		// Often because of a typo elsewhere, which only the draft saw.
 		diags = append(diags, p.undefinedInDraft(ti, keep)...)
 	}
-	if len(diags) == 0 && !cfg.NoTypeCheck {
+	lowering := len(diags) > 0
+	if !lowering && !cfg.NoTypeCheck {
 		// Type-check the result, and report its errors at .ego positions.
 		final, err := p.check(ws, false)
 		if err != nil {
@@ -372,7 +373,8 @@ func (p *pkgGen) run(res *Result, only []*fileGen) (*typeInfo, error) {
 		since(&p.times.format, t)
 		if err == nil {
 			code = formatted
-		} else if len(diags) == 0 {
+		} else if !lowering {
+			// A bug of ours, whatever the type errors it causes say.
 			diags = append(diags, Diagnostic{Pos: token.Position{Filename: out.Ego}, Msg: "internal error: generated code doesn't parse: " + err.Error()})
 		}
 		out.Code = code

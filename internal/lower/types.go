@@ -124,7 +124,7 @@ func (im *Importer) Preload(dirs []string) error {
 			}
 		}
 	}
-	for _, path := range lowered {
+	for _, path := range addedImports {
 		set[path] = true
 	}
 	delete(set, "C")

@@ -19,7 +19,7 @@ func (g *fileGen) expr(x ast.Expr) bool {
 		if x.Must {
 			kw = "must"
 		}
-		g.errorf(x.Pos(), "%s must start a statement or the right side of an assignment", kw)
+		g.errorf(x.Pos(), "%s can only start a statement or the right side of an assignment", kw)
 		g.node(x.X)
 	case *ast.ElseExpr:
 		g.errorf(x.Else, "else must follow the right side of an assignment: x := f() else fallback")
@@ -36,7 +36,7 @@ func (g *fileGen) expr(x ast.Expr) bool {
 		g.lambda(x)
 	case *ast.FString:
 		g.w.anchor(g.off(x.Pos()))
-		g.fstring(x, "", nil)
+		g.fstring(x, false, "")
 	case *ast.BinaryExpr:
 		return g.binary(x)
 	case *ast.CallExpr:
@@ -615,9 +615,11 @@ func nillable(t types.Type) bool {
 	return false
 }
 
-// fstring renders an interpolated string as fmt.Sprintf, or fmt.Errorf when
-// wrap is set ("%w" appended). Without interpolation it's a plain string.
-func (g *fileGen) fstring(x *ast.FString, wrap string, extra []string) {
+// fstring renders an interpolated string as fmt.Sprintf, and without
+// interpolation as a plain string. As an error, it's fmt.Errorf, or
+// errors.New for a plain string; wrap, if set, is an error it wraps with
+// ": %w".
+func (g *fileGen) fstring(x *ast.FString, asError bool, wrap string) {
 	raw := x.Raw()
 	var format, plain strings.Builder // with % escaped for Sprintf, and as written
 	var args []ast.Expr
@@ -648,21 +650,22 @@ func (g *fileGen) fstring(x *ast.FString, wrap string, extra []string) {
 		}
 		format.WriteString("%w")
 	}
-	if len(args) == 0 && wrap == "" {
+	switch {
+	case len(args) == 0 && wrap == "" && asError:
+		g.w.str(g.pkgRef("errors") + ".New(" + quote(plain.String()) + ")")
+		return
+	case len(args) == 0 && wrap == "":
 		g.w.str(quote(plain.String()))
 		return
 	}
 	fn := g.pkgRef("fmt") + ".Sprintf("
-	if wrap != "" {
+	if asError {
 		fn = g.pkgRef("fmt") + ".Errorf("
 	}
 	g.w.str(fn + quote(format.String()))
 	for _, a := range args {
 		g.w.str(", ")
 		g.node(a)
-	}
-	for _, e := range extra {
-		g.w.str(", " + e)
 	}
 	if wrap != "" {
 		g.w.str(", " + wrap)

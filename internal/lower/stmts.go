@@ -530,7 +530,7 @@ func (g *fileGen) wrap(c *ast.CheckExpr, err string) string {
 	if c.Label != nil {
 		saved := g.w
 		g.w = &writer{}
-		g.fstring(c.Label, err, nil)
+		g.fstring(c.Label, true, err)
 		s := string(g.w.buf)
 		g.w = saved
 		return s
@@ -719,19 +719,8 @@ func (g *fileGen) fail(s *ast.FailStmt) {
 	case *ast.FString:
 		saved := g.w
 		g.w = &writer{}
-		hasArgs := false
-		for _, p := range x.Parts {
-			if p.X != nil {
-				hasArgs = true
-			}
-		}
-		if hasArgs {
-			g.fstring(x, "", nil)
-			errText = strings.Replace(string(g.w.buf), ".Sprintf(", ".Errorf(", 1)
-		} else {
-			g.fstring(x, "", nil)
-			errText = g.pkgRef("errors") + ".New(" + string(g.w.buf) + ")"
-		}
+		g.fstring(x, true, "")
+		errText = string(g.w.buf)
 		g.w = saved
 		if g.fn != nil && g.fn.set != nil {
 			g.errorf(s.X.Pos(), "this function returns %s: fail with one of its cases", g.fn.set.Name.Name)

@@ -41,7 +41,7 @@ func positional() (int, E) {
 }
 
 func inner() (int, error) {
-	return check load() + 1, nil // ERROR "check must start a statement"
+	return check load() + 1, nil // ERROR "check can only start a statement"
 }
 
 func handle(err error) {
@@ -193,5 +193,5 @@ func typo(m map[string]int) int {
 }
 
 func misplaced() (int, E) {
-	return check load() as A // ERROR "check must start a statement"
+	return check load() as A // ERROR "check can only start a statement"
 }

@@ -62,7 +62,7 @@ Fixes from a review of the whole codebase.
   match expression it's an error. A value can still start on the line
   after `=>`.
 - `check f() as Case` in a `for` or `switch` header no longer swallows the
-  body; the "check must start a statement" message shows instead.
+  body; the "check can only start a statement" message shows instead.
 - Plain Go `import f"fmt"` and struct fields such as `X f"tag"` parse as Go
   again.
 - Raw f-strings, raw check labels and raw fail messages work in files with
