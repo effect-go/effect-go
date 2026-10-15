@@ -722,3 +722,26 @@ func (e Gone) As(target any) bool {
 	}
 	return false
 }
+
+// Formatter: a lambda in a branch takes its types from the variable.
+//
+//line regress.ego:365
+func Formatter(loud bool, k int) (string, string) {
+	var v func(n int) string
+	if loud {
+		v = func(n int) string { return egofmt.Sprintf("%d!", n) }
+	} else {
+		v = func(n int) string { return egofmt.Sprintf("%d", n) }
+	}
+	var f func(int) string = v
+//line regress.ego:367
+	var g func(int) string
+	switch k {
+	case 1:
+		g = func(n int) string { return egofmt.Sprintf("one %d", n) }
+	default:
+		g = func(n int) string { return "other" }
+	}
+//line regress.ego:369
+	return f(1), g(2)
+}

@@ -207,3 +207,9 @@ func TestEachErrOnly(t *testing.T) {
 		t.Errorf("Gone: %s", got)
 	}
 }
+
+func TestFormatter(t *testing.T) {
+	if a, b := Formatter(true, 1); a != "1!" || b != "one 2" {
+		t.Errorf("Formatter: %q %q", a, b)
+	}
+}

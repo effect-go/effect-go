@@ -1364,6 +1364,15 @@ func (g *fileGen) expected(x ast.Expr) types.Type {
 		}
 	case *ast.ParenExpr:
 		return g.expected(p)
+	case *ast.IfExpr:
+		// A branch's value has the type of the whole.
+		if x != p.Cond {
+			return g.expected(p)
+		}
+	case *ast.MatchArm:
+		if m, ok := g.parent(p).(*ast.MatchExpr); ok && x == p.Body {
+			return g.expected(m)
+		}
 	case *ast.BinaryExpr:
 		// An untyped operand takes the other operand's type.
 		switch p.Op {

@@ -360,3 +360,11 @@ error MoveError {
 	} "{Slug} moved {Times + 1} times"
 	Gone{ Slug string } `"{Slug}" is gone`
 }
+
+// Formatter: a lambda in a branch takes its types from the variable.
+func Formatter(loud bool, k int) (string, string) {
+	var f func(int) string = if loud { n => f"{n}!" } else { n => f"{n}" }
+	var g func(int) string
+	g = match k { 1 => n => f"one {n}"; _ => n => "other" }
+	return f(1), g(2)
+}
