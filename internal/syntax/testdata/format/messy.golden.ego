@@ -33,3 +33,9 @@ effect (s *S) Get(id int) (int, E) {
 	e := effect(x)
 	return v + w + n, nil
 }
+
+func Times(check, must, n int) int {
+	a := check * n
+	b := must & n
+	return a + b
+}

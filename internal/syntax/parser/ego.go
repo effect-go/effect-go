@@ -17,14 +17,15 @@ func (p *parser) peek() token.Token {
 }
 
 // checkFollows reports whether check or must at the current position is
-// the keyword: before a name, or before ( & * [ after a space, as in
-// must (&w).Run(). check(x) stays a call of a function named check.
+// the keyword: before a name, or before ( after a space, as in
+// must (&w).Run(). check(x) stays a call of a function named check, and
+// check * n a multiplication: gofmt never writes a space before (.
 func (p *parser) checkFollows() bool {
 	pos, tok, _ := p.scanner.Lookahead().ScanToken()
 	switch tok {
 	case token.IDENT:
 		return true
-	case token.LPAREN, token.AND, token.MUL, token.LBRACK:
+	case token.LPAREN:
 		return int(pos) > int(p.pos)+len(p.lit)
 	}
 	return false
@@ -466,6 +467,9 @@ func matchBrace(v string, i, end int) (int, int) {
 func (p *parser) subExpr(start, end int) ast.Expr {
 	q := &parser{file: p.file, mode: p.mode &^ ParseComments}
 	eh := func(pos token.Position, msg string) { p.errors.Add(pos, msg) }
+	// q gives up with a panic after too many errors: they must reach p
+	// first, or ParseFile returns an empty file and no error.
+	defer func() { p.errors = append(p.errors, q.errors...) }()
 	q.scanner.InitRange(p.file, p.scanner.Source(), start, end, eh, 0)
 	q.next()
 	if q.tok == token.EOF {
@@ -479,6 +483,5 @@ func (p *parser) subExpr(start, end int) ast.Expr {
 	if q.tok != token.EOF {
 		p.error(q.pos, "unexpected "+scanner.TokenString(q.tok)+" in {…}")
 	}
-	p.errors = append(p.errors, q.errors...)
 	return x
 }

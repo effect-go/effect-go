@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- `ego fmt -w` could replace a file with `package` when a backquoted string
+  with `{…}` had many syntax errors: the parse gave up and reported none.
+  Now it fails with the errors.
+- `check * n` and `must & n`, multiplications and bitwise ands on variables
+  named `check` and `must`, are Go again (v0.3.1 took them for the
+  keywords). Only `must (x)` with a space is the keyword.
+- `x := f() else { }` crashed `ego generate`; it is a syntax error.
+
 ## v0.3.5 (2026-10-15)
 
 - `ego generate` removes the Go it generated from a `.ego` file that was

@@ -131,6 +131,15 @@ func TestPrefixesTerminate(t *testing.T) {
 	}
 }
 
+// Too many errors in a string's {…} fail the parse, instead of giving an
+// empty file that ego fmt -w would write.
+func TestErrorsInStringFail(t *testing.T) {
+	src := "package p\n\nvar x = f`{func() int {\n" + strings.Repeat("\tif {}\n", 12) + "\treturn 1\n}()}`\n"
+	if out, err := format.Source([]byte(src)); err == nil {
+		t.Fatalf("no error; formatted to %q", out)
+	}
+}
+
 // ego fmt formats every Go file in the standard library exactly as gofmt.
 // The files are independent, so they're formatted on every core. The race
 // detector would only slow it tenfold: CI runs it without.

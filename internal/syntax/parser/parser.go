@@ -1983,6 +1983,9 @@ func (p *parser) parseSimpleStmt(mode int) (ast.Stmt, bool) {
 				if p.tok == token.LBRACE {
 					// x := check f() else { Case(e) => value }
 					e.Lbrace, e.Arms, e.Rbrace = p.parseArms(true, "else")
+					if len(e.Arms) == 0 {
+						p.error(e.Lbrace, "else { } needs arms, as in else { NotFound(_) => 0 }")
+					}
 				} else {
 					e.Fallback = p.parseRhs()
 				}

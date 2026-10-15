@@ -2,5 +2,6 @@ package syntax
 
 func f() {
 	x := f"unterminated {x" // ERROR "string literal not terminated"
+	z := g() else { } // ERROR "else { } needs arms"
 	y := 1 +
 } // ERROR "expected operand"
