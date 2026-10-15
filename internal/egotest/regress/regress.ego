@@ -320,3 +320,15 @@ outer:
 	}
 	return n
 }
+
+// Address has tags, behind a pointer.
+type Address struct{ Tags map[string]string }
+
+// Missing: ?? falls back on a nil or a miss, through a ?. chain too.
+func Missing(a *Address, m map[string]*int, x any) (string, int, int) {
+	tag := a?.Tags["k"] ?? "none"
+	def := -1
+	n := m["k"] ?? &def
+	p := x.(*int) ?? &def
+	return tag, *n, *p
+}

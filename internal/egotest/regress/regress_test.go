@@ -181,3 +181,16 @@ func TestUntyped(t *testing.T) {
 		t.Errorf("Labeled: %d", n)
 	}
 }
+
+func TestMissing(t *testing.T) {
+	var nilInt *int
+	for _, a := range []*Address{nil, {}, {Tags: map[string]string{"k": ""}}} {
+		want := "none"
+		if a != nil && a.Tags != nil {
+			want = ""
+		}
+		if tag, n, p := Missing(a, map[string]*int{"k": nil}, nilInt); tag != want || n != -1 || p != -1 {
+			t.Errorf("Missing(%v): %q %d %d", a, tag, n, p)
+		}
+	}
+}

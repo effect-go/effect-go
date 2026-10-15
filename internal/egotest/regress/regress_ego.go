@@ -609,7 +609,7 @@ func untypedReturn(c bool) float64 {
 func Labeled(m map[string][]int, xs []int) int {
 	n := 0
 	v, ok := m["a"]
-	if !ok {
+	if !ok || v == nil {
 		v = xs
 	}
 outer:
@@ -623,4 +623,35 @@ outer:
 	}
 //line regress.ego:321
 	return n
+}
+
+// Address has tags, behind a pointer.
+type Address struct{ Tags map[string]string }
+
+// Missing: ?? falls back on a nil or a miss, through a ?. chain too.
+func Missing(a *Address, m map[string]*int, x any) (string, int, int) {
+	var tag string
+	found := false
+	if a != nil {
+		if v, ok := a.Tags["k"]; ok {
+			tag = v
+			found = true
+		}
+	}
+	if !found {
+		tag = "none"
+	}
+//line regress.ego:330
+	def := -1
+	n, ok2 := m["k"]
+	if !ok2 || n == nil {
+		n = &def
+	}
+//line regress.ego:332
+	p, ok3 := x.(*int)
+	if !ok3 || p == nil {
+		p = &def
+	}
+//line regress.ego:333
+	return tag, *n, *p
 }

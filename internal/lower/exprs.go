@@ -462,7 +462,10 @@ func (g *fileGen) coalesceInto(target string, declare bool, t types.Type, x *ast
 		op = " := "
 	}
 	fallback := func() { g.branchInto(target, t, x.Y) }
+	// A lookup, an assertion or a (v, ok) call misses with !ok, and its
+	// value may also be nil: a nil is missing too.
 	commaOK := false
+	value := g.typeOf(left)
 	switch l := left.(type) {
 	case *ast.IndexExpr:
 		if lt := g.typeOf(l.X); lt != nil {
@@ -474,11 +477,34 @@ func (g *fileGen) coalesceInto(target string, declare bool, t types.Type, x *ast
 		rs := results(g.typeOf(l))
 		if len(rs) == 2 {
 			if b, ok := rs[1].Underlying().(*types.Basic); ok && b.Kind() == types.Bool {
-				commaOK = true
+				commaOK, value = true, rs[0]
 			}
 		}
 	}
+	found := func(v, ok string) string {
+		if nillable(value) {
+			return ok + " && " + v + " != nil"
+		}
+		return ok
+	}
 	switch {
+	case isOptChain(left) && commaOK:
+		// u?.Tags["k"] ?? "none": the lookup's ok, behind the guards.
+		if declare {
+			if t == nil {
+				g.errorf(x.Pos(), "can't tell the type of this expression")
+				return
+			}
+			g.w.str("var " + target + " " + g.typeString(t) + "\n")
+		}
+		hit, v, ok := g.temp("found"), g.temp("v"), g.temp("ok")
+		g.w.str(hit + " := false\n")
+		g.w.str("if " + strings.Join(g.guards(left), " && ") + " {\n")
+		g.w.str("if " + v + ", " + ok + " := " + g.plain(left) + "; " + found(v, ok) + " {\n")
+		g.w.str(target + " = " + v + "\n" + hit + " = true\n}\n}\n")
+		g.w.str("if !" + hit + " {\n")
+		fallback()
+		g.w.str("}\n")
 	case isOptChain(left) && declare && isCheap(x.Y) && !nillable(g.typeOf(left)):
 		// city := "unknown"; if u != nil { city = u.City }. A constant
 		// fallback, such as 0 for a float64 or "none" for a named string
@@ -520,14 +546,18 @@ func (g *fileGen) coalesceInto(target string, declare bool, t types.Type, x *ast
 			g.w.str(target + ", " + ok + " := ")
 			g.node(left)
 		})
-		g.w.str("if !" + ok + " {\n")
+		missing := "!" + ok
+		if nillable(value) {
+			missing += " || " + target + " == nil"
+		}
+		g.w.str("if " + missing + " {\n")
 		fallback()
 		g.w.str("}\n")
 	case commaOK:
 		v, ok := g.temp("v"), g.temp("ok")
 		g.w.str("if " + v + ", " + ok + " := ")
 		g.node(left)
-		g.w.str("; " + ok + " {\n" + target + " = " + v + "\n} else {\n")
+		g.w.str("; " + found(v, ok) + " {\n" + target + " = " + v + "\n} else {\n")
 		fallback()
 		g.w.str("}\n")
 	case nillable(g.typeOf(left)):
