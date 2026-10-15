@@ -96,6 +96,39 @@ Fixes from a review of the whole codebase.
   without parentheses, keeps `match x {}` as `{}`, and removes blank lines
   after `{` and before `}` in error sets and enums.
 
+**Commands**
+- `ego generate` never overwrites a hand-written `x_ego.go` or
+  `layers_ego.go`: it reports it and goes on with other directories. A
+  `layers.ego` next to injectors is reported too.
+- `.ego` files follow Go's build rules: `x_linux.ego` and `//go:build`
+  lines, with `-tags` for `ego generate` and `ego test`. The Go of a file
+  excluded on this platform is checked for staleness.
+- Go left from renamed `.ego` files, case-only renames included, is
+  removed by `ego generate` and ignored by the language server.
+- `ego generate` takes import paths, rejects missing directories and
+  files, and skips `_dirs` in `./...`, as `go` does.
+- `ego test` handles go test's flags without values (`-c`, `-artifacts`),
+  `-C` and `-tags`, and restores the generated files on SIGTERM and SIGHUP
+  during coverage runs.
+- `ego eject -w` regenerates first, and ejects files excluded on this
+  platform from their committed Go.
+- `ego fmt` on a directory needs `-l` or `-w`, and keeps going after a
+  failed write.
+- `ego vet` passes the analyzers' flags, such as `-exhaustive`, only to the
+  analyzers.
+- `ego new` gets the runtime at ego's own version, not `@latest`.
+- A UTF-8 byte order mark in a `.ego` file is ignored, and a file outside a
+  module gets a clear error.
+
+**Language server**
+- Renames no longer corrupt `.go` files, and a rename that would change a
+  `.ego` file that isn't open fails, naming it.
+- Imports that completion adds go in the `.ego` file's imports.
+- Paths with characters such as `@` work.
+- Closing a directory's last `.ego` file releases all its buffers, and
+  files changed on disk are followed.
+- A bad request, or a crash in one, no longer ends the session.
+
 **Runtime**
 - `all`, `each` and `race` cancelled from outside with a cause of their own
   report it once, not once per task.
