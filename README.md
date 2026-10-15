@@ -74,6 +74,8 @@ cd hello && ego test ./... && go run .
 **Structured concurrency**
 - `all`, `race`, `each` and `timeout` instead of goroutines, WaitGroups and
   errgroups, with limits: `each(ids, 8, users.Get)`.
+- `all(a(), b(), c())` takes calls returning different types and gives each
+  value back with its own type, which a Go function can't do.
 - Nothing outlives the call: a failure cancels the rest, a panic reaches the
   caller, and resources close in reverse order ([`scope`](scope)).
 
