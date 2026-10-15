@@ -170,9 +170,10 @@ func TestCRLF(t *testing.T) {
 	}
 }
 
-// ego fmt formats every Go file in the standard library exactly as gofmt.
-// The files are independent, so they're formatted on every core. The race
-// detector would only slow it tenfold: CI runs it without.
+// ego fmt formats every Go file in the standard library exactly as gofmt,
+// and the inputs of gofmt's and go/printer's own tests, Go written to test
+// the formatter. The files are independent, so they're formatted on every
+// core. The race detector would only slow it tenfold: CI runs it without.
 func TestStdlibLikeGofmt(t *testing.T) {
 	if testing.Short() {
 		t.Skip("formats the whole standard library")
@@ -192,7 +193,7 @@ func TestStdlibLikeGofmt(t *testing.T) {
 	}
 	var paths []string
 	filepath.WalkDir(filepath.Join(runtime.GOROOT(), "src"), func(path string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && strings.HasSuffix(path, ".go") {
+		if err == nil && !d.IsDir() && (strings.HasSuffix(path, ".go") || strings.HasSuffix(path, ".input")) {
 			paths = append(paths, path)
 		}
 		return nil
