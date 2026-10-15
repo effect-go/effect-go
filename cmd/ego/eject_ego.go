@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -25,11 +26,21 @@ func ejectCmd(args []string) error {
 	fl := flag.NewFlagSet("eject", flag.ExitOnError)
 	write := fl.Bool("w", false, "eject: without -w, only print what would change")
 	fl.Parse(args)
+	// Packages are compiled against the generated Go of those they import:
+	// it must be current. Ejecting writes it; the plan only checks it.
+	if *write {
+		if err := generate(fl.Args()); err != nil {
+			return err
+		}
+	} else if generate(append([]string{"-check"}, fl.Args()...)) != nil {
+//line eject.ego:29
+		return errors.New("the generated Go is stale: run ego generate first (ego eject -w does)")
+	}
 	dirs, err := egoDirs(fl.Args())
 	if err != nil {
 		return err
 	}
-//line eject.ego:25
+//line eject.ego:32
 	type step struct {
 		path   string // file to write
 		code   []byte
@@ -42,7 +53,7 @@ func ejectCmd(args []string) error {
 		if err != nil {
 			return fmt.Errorf("%v: %w", rel(dir), err)
 		}
-//line eject.ego:34
+//line eject.ego:41
 		for _, d := range res.Diags {
 			fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
 		}
@@ -57,11 +68,28 @@ func ejectCmd(args []string) error {
 			}
 			steps = append(steps, s)
 		}
+		// Files that build constraints exclude here can't be compiled here:
+		// their committed Go is what they compile to where they build.
+		for _, ex := range res.Excluded {
+			if ex.Missing || ex.Stale {
+				return fmt.Errorf("%v is excluded here by its build constraints, and its Go is missing or stale: run ego generate where they hold, then eject", rel(ex.Ego))
+			}
+			code, err := os.ReadFile(ex.Go)
+			if err != nil {
+				return err
+			}
+//line eject.ego:62
+			s := step{path: plainName(ex.Go), code: dropLineDirectives(dropHeader(code)), remove: []string{ex.Ego}}
+			if s.path != ex.Go {
+				s.remove = append(s.remove, ex.Go)
+			}
+			steps = append(steps, s)
+		}
 		lr, err := layers.Generate(dir)
 		if err != nil {
 			return fmt.Errorf("%v: %w", rel(dir), err)
 		}
-//line eject.ego:49
+//line eject.ego:69
 		if lr != nil {
 			if len(lr.Diags) > 0 {
 				return fmt.Errorf("%s: the wiring doesn't compile: run ego generate", rel(dir))
@@ -87,7 +115,7 @@ func ejectCmd(args []string) error {
 		if err := os.WriteFile(s.path, s.code, 0o666); err != nil {
 			return err
 		}
-//line eject.ego:72
+//line eject.ego:92
 		for _, r := range s.remove {
 			if err := os.Remove(r); err != nil && !os.IsNotExist(err) {
 				return err
@@ -122,6 +150,18 @@ func dropHeader(code []byte) []byte {
 		return code
 	}
 	return bytes.TrimLeft(rest, "\n")
+}
+
+// dropLineDirectives removes the //line directives that point the
+// generated Go at its .ego file.
+func dropLineDirectives(code []byte) []byte {
+	var b bytes.Buffer
+	for _, line := range bytes.SplitAfter(code, []byte("\n")) {
+		if !bytes.HasPrefix(line, []byte("//line ")) {
+			b.Write(line)
+		}
+	}
+	return b.Bytes()
 }
 
 func relAll(paths []string) []string {
