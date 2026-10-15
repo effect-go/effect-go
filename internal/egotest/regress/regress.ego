@@ -75,8 +75,13 @@ error ArticleError {
 // inTx runs fn as a transaction would: its error comes back as an error.
 func inTx(fn func() error) error { return fn() }
 
-// PassThrough: check … as Unavailable lets a case of the set through.
-func PassThrough(slug string) ArticleError {
+// PassThrough: check … as Unavailable lets a case of the set through, from
+// a call or a variable.
+func PassThrough(slug string, variable bool) ArticleError {
+	if variable {
+		err := inTx(func() error { return Duplicate{Slug: slug} })
+		check err as Unavailable
+	}
 	check inTx(func() error { return Duplicate{Slug: slug} }) as Unavailable
 	check inTx(func() error { return io.EOF }) as Unavailable
 	return nil
@@ -262,4 +267,29 @@ func GeneratedNames(errs chan error, ok bool) (string, string, string) {
 		_            => "other"
 	}
 	return fromSelect, f(io.EOF), arm
+}
+
+// TargetOnce: the target of x = a ?? b is evaluated once.
+func TargetOnce(p *int) ([]*int, int) {
+	ps := make([]*int, 3)
+	calls := 0
+	next := func() int { calls++; return calls }
+	def := 7
+	ps[next()] = p ?? &def
+	return ps, calls
+}
+
+// Span is a type named like the variable an effect function's span goes in.
+type Span struct{ W int }
+
+// Clashes: code that once clashed with what the compiler generates: an err
+// declared again with a variable declared before, a parameter named span,
+// and arms that need no errors package.
+effect Clashes(span Span, s string) (int, error) {
+	n := 0
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		n = strconv.Atoi(s) else { _ => -1 }
+	}
+	return n + span.W, nil
 }

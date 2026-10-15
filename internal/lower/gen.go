@@ -801,7 +801,7 @@ func (g *fileGen) computeEdits() {
 	ast.Inspect(g.file, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.FuncDecl:
-			g.funcHeaderEdits(n.Type, n.Body, g.pkg.name+"."+funcKey(n))
+			g.funcHeaderEdits(n.Recv, n.Type, n.Body, g.pkg.name+"."+funcKey(n))
 			if n.Type.Effect.IsValid() && n.Body != nil {
 				g.ctxEdits(n.Body)
 			}
@@ -810,7 +810,7 @@ func (g *fileGen) computeEdits() {
 			if name == "" {
 				name = g.pkg.name + ".func" // in a package-level variable
 			}
-			g.funcHeaderEdits(n.Type, n.Body, name)
+			g.funcHeaderEdits(nil, n.Type, n.Body, name)
 			if n.Type.Effect.IsValid() {
 				g.ctxEdits(n.Body)
 			}
@@ -934,7 +934,7 @@ func (g *fileGen) ctxParamEdit(ft *ast.FuncType) string {
 
 // funcHeaderEdits rewrites an effect function's header, and error set
 // results and parameters to error.
-func (g *fileGen) funcHeaderEdits(ft *ast.FuncType, body *ast.BlockStmt, spanName string) {
+func (g *fileGen) funcHeaderEdits(recv *ast.FieldList, ft *ast.FuncType, body *ast.BlockStmt, spanName string) {
 	g.setParamEdits(ft)
 	set := g.pkg.resultSet(ft)
 	if !ft.Effect.IsValid() {
@@ -968,7 +968,7 @@ func (g *fileGen) funcHeaderEdits(ft *ast.FuncType, body *ast.BlockStmt, spanNam
 				if isErr {
 					name = "err "
 					if body != nil {
-						g.errResultEdits(body)
+						g.errResultEdits(ft, body)
 					}
 				}
 				g.edits = append(g.edits, edit{g.off(f.Type.Pos()), g.off(f.Type.Pos()), name})
@@ -997,7 +997,7 @@ func (g *fileGen) funcHeaderEdits(ft *ast.FuncType, body *ast.BlockStmt, spanNam
 	}
 	tr := g.pkgRef(tracePath)
 	span := "span"
-	if usesName(body, "span") {
+	if usesName(body, "span") || hasField(recv, "span") || hasField(ft.Params, "span") || hasField(ft.Results, "span") {
 		span = "egoSpan"
 	}
 	end := "nil"
@@ -1033,7 +1033,19 @@ func (g *fileGen) setParamEdits(ft *ast.FuncType) {
 // errResultEdits adjusts statements that clash with the err result the
 // compiler gives an effect function: at the top of its body, _, err := f()
 // would declare nothing new, so it becomes _, err = f().
-func (g *fileGen) errResultEdits(body *ast.BlockStmt) {
+func (g *fileGen) errResultEdits(ft *ast.FuncType, body *ast.BlockStmt) {
+	// The names declared in the function's scope so far: a := declaring
+	// only err and these declares nothing new once err is the result.
+	declared := map[string]bool{"_": true, "err": true}
+	for _, l := range []*ast.FieldList{ft.Params, ft.Results} {
+		if l != nil {
+			for _, f := range l.List {
+				for _, n := range f.Names {
+					declared[n.Name] = true
+				}
+			}
+		}
+	}
 	for _, st := range body.List {
 		switch st := st.(type) {
 		case *ast.AssignStmt:
@@ -1042,12 +1054,17 @@ func (g *fileGen) errResultEdits(body *ast.BlockStmt) {
 			}
 			onlyErr := true
 			for _, l := range st.Lhs {
-				if id, ok := l.(*ast.Ident); !ok || id.Name != "_" && id.Name != "err" {
+				if id, ok := l.(*ast.Ident); !ok || !declared[id.Name] {
 					onlyErr = false
 				}
 			}
 			if onlyErr {
 				g.edits = append(g.edits, edit{g.off(st.TokPos), g.off(st.TokPos) + 2, "="})
+			}
+			for _, l := range st.Lhs {
+				if id, ok := l.(*ast.Ident); ok {
+					declared[id.Name] = true
+				}
 			}
 		case *ast.DeclStmt:
 			if gd, ok := st.Decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
@@ -1056,6 +1073,7 @@ func (g *fileGen) errResultEdits(body *ast.BlockStmt) {
 						if n.Name == "err" {
 							g.errorf(n.Pos(), "err is already this effect function's error result: use it without declaring it")
 						}
+						declared[n.Name] = true
 					}
 				}
 			}

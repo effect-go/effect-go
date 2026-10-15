@@ -1,7 +1,6 @@
 package regress
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -54,11 +53,20 @@ func TestOptAssign(t *testing.T) {
 }
 
 func TestPassThrough(t *testing.T) {
-	if _, ok := errors.AsType[Duplicate](PassThrough("a")); !ok {
-		t.Fatalf("got %v, want the Duplicate itself", PassThrough("a"))
+	for _, variable := range []bool{false, true} {
+		err := PassThrough("a", variable)
+		if _, ok := err.(Duplicate); !ok {
+			t.Errorf("variable %v: got %#v, want the Duplicate itself", variable, err)
+		}
 	}
-	if u, ok := PassThrough("a").(Unavailable); ok {
-		t.Fatalf("wrapped: %v", u)
+}
+
+func TestOnce(t *testing.T) {
+	if ps, calls := TargetOnce(nil); calls != 1 || ps[1] == nil || *ps[1] != 7 {
+		t.Errorf("TargetOnce: %d calls, %v", calls, ps)
+	}
+	if n, err := Clashes(t.Context(), Span{W: 1}, "x"); n != 0 || err != nil {
+		t.Errorf("Clashes: %d, %v", n, err)
 	}
 }
 

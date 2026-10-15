@@ -346,10 +346,6 @@ func (g *fileGen) chain(p *matchPlan, isExpr bool, body func(*ast.MatchArm)) {
 		g.switchArms(p, isExpr, body)
 		return
 	}
-	errors := ""
-	if p.mode == modeErrors {
-		errors = g.pkgRef("errors")
-	}
 	first := true
 	var blankArm *ast.MatchArm
 	var bind string // the arm's binding, declared in its block
@@ -385,7 +381,7 @@ func (g *fileGen) chain(p *matchPlan, isExpr bool, body func(*ast.MatchArm)) {
 					v = g.temp(pt.bind)
 				}
 				if p.mode == modeErrors {
-					g.w.str(v + ", " + ok + " := " + errors + ".AsType[")
+					g.w.str(v + ", " + ok + " := " + g.pkgRef("errors") + ".AsType[")
 					g.node(pt.typ)
 					g.w.str("](" + p.tag + "); " + ok)
 				} else {
@@ -399,7 +395,7 @@ func (g *fileGen) chain(p *matchPlan, isExpr bool, body func(*ast.MatchArm)) {
 			case patValue:
 				if p.mode == modeErrors {
 					// A sentinel error such as io.EOF, wrapped or not.
-					g.w.str(errors + ".Is(" + p.tag + ", ")
+					g.w.str(g.pkgRef("errors") + ".Is(" + p.tag + ", ")
 					g.node(pt.expr)
 					g.w.str(")")
 				} else {

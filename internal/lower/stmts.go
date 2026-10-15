@@ -38,6 +38,19 @@ func (g *fileGen) lowerStmt(s ast.Stmt) {
 				return
 			case *ast.IfExpr, *ast.MatchExpr, *ast.CoalesceExpr, *ast.OptSelectorExpr:
 				if g.r.final && len(s.Lhs) == 1 && (s.Tok == token.DEFINE || s.Tok == token.ASSIGN) {
+					if s.Tok == token.ASSIGN && hasCall(s.Lhs[0]) {
+						// The lowering reads and writes its target several
+						// times: ps[next()] must be evaluated once.
+						v := g.temp("v")
+						t := g.typeOf(s.Lhs[0])
+						if t == nil {
+							t = g.typeOf(x)
+						}
+						g.lowerInto(v, true, t, x)
+						g.node(s.Lhs[0])
+						g.w.str(" = " + v)
+						return
+					}
 					g.lowerInto(g.renderStr(s.Lhs[0]), s.Tok == token.DEFINE, g.typeOf(x), x)
 					g.trimNewline()
 					return
@@ -717,7 +730,7 @@ func (g *fileGen) checkValue(c *ast.CheckExpr) {
 	case c.Must:
 		handle = "panic(" + v + ")"
 	default:
-		handle = g.ret(g.wrap(c, v))
+		handle = g.returnErr(c, v)
 	}
 	g.w.str(handle + "\n}")
 }
