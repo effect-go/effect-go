@@ -22,5 +22,9 @@ func NewLoop1(Loop2) Loop1           { return Loop1{} }
 func NewLoop2(Loop1) Loop2           { return Loop2{} }
 func Unused() *DB                    { return nil }
 func NewDB() *DB                     { return &DB{} }
+func NewPrimary() Primary            { return &DB{} }
+func Provide() func() A              { return NewA }
+
+type Primary = *DB
 
 var Set = layer.Set(NewA, NewB)

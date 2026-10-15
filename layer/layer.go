@@ -15,19 +15,23 @@
 // ego generate writes the real BuildApp into layers_ego.go (built without
 // the tag): plain Go that calls each provider in dependency order.
 //
-// A provider is an ordinary function. Its parameters are what it needs: the
-// injector's parameters, other providers' results, context.Context and
-// *scope.Scope. It returns T, (T, error), or (T, cleanup, error) where
-// cleanup is func(), func() error or func(context.Context) error. Wrap it
-// in Close to have T's Close method called when the scope closes.
+// A provider is an ordinary function, given by its name: NewDB, sql.Open
+// or NewCache[Item], not a function literal or a call. Its parameters are
+// what it needs: the injector's parameters, other providers' results,
+// context.Context and *scope.Scope; a variadic one gets the provided slice,
+// if any. It returns T, (T, error), or (T, cleanup, error) where cleanup is
+// func(), func() error or func(context.Context) error. Wrap it in Close to
+// have T's Close method called when the scope closes.
 //
 // A Set may be declared in another package, such as a framework's: its
-// providers must then be exported.
+// providers must then be exported. A provider in several sets is one
+// provider.
 //
 // Providers passed to Build directly take precedence over those in a Set,
-// so a test graph swaps one provider: layer.Build(AppSet, NewMemoryRepo).
-// An interface parameter is satisfied by the one provided type that
-// implements it.
+// so a test graph swaps one provider: layer.Build(AppSet, NewMemoryRepo),
+// even if AppSet's provides the Repo interface that NewMemoryRepo's result
+// implements. An interface parameter is satisfied by the one provided type
+// that implements it.
 package layer
 
 // A Provider is a constructor function, or a ProviderSet.

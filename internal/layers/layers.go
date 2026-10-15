@@ -121,7 +121,7 @@ func Generate(dir string) (*Result, error) {
 			}
 			return res, nil
 		}
-		g := &gen{pkg: pkg, all: pkgs, imports: map[string]string{}, need: map[string]bool{}}
+		g := &gen{pkg: pkg, all: pkgs, imports: map[string]string{}, locals: map[string]bool{}, need: map[string]bool{}}
 		code, ok := g.generate(res)
 		more := false
 		for path := range g.need {
@@ -230,6 +230,7 @@ type gen struct {
 	all     []*packages.Package // pkg, and those declaring the sets it uses
 	file    *ast.File
 	imports map[string]string // path -> name
+	locals  map[string]bool   // the injectors' parameters and variables
 	diags   []Diagnostic
 	need    map[string]bool // packages declaring sets, to load
 }
@@ -290,7 +291,8 @@ func (g *gen) isLayerFunc(x ast.Expr, name string) bool {
 
 // A provider is a constructor in the graph.
 type provider struct {
-	expr    ast.Expr // as written
+	expr    ast.Expr     // as written
+	obj     types.Object // the function, or nil for a method value
 	sig     *types.Signature
 	out     types.Type
 	hasErr  bool
@@ -339,6 +341,10 @@ func (g *gen) providers(args []ast.Expr, direct bool, seen map[types.Object]bool
 			out = append(out, g.providers([]ast.Expr{init}, false, seen)...)
 			continue
 		}
+		if !isName(a) {
+			g.errorf(a.Pos(), "%s: a provider is a function's name, such as NewDB or sql.Open", types.ExprString(a))
+			continue
+		}
 		t := g.info(a).TypeOf(a)
 		sig, ok := t.(*types.Signature)
 		if !ok {
@@ -346,6 +352,9 @@ func (g *gen) providers(args []ast.Expr, direct bool, seen map[types.Object]bool
 			continue
 		}
 		p := &provider{expr: a, sig: sig, direct: direct}
+		if f, ok := obj.(*types.Func); !ok || f.Signature().Recv() == nil {
+			p.obj = obj
+		}
 		rs := sig.Results()
 		switch {
 		case rs.Len() == 1:
@@ -369,8 +378,31 @@ func (g *gen) objectOf(x ast.Expr) types.Object {
 		return g.info(x).Uses[x]
 	case *ast.SelectorExpr:
 		return g.info(x).Uses[x.Sel]
+	case *ast.IndexExpr:
+		return g.objectOf(x.X)
+	case *ast.IndexListExpr:
+		return g.objectOf(x.X)
 	}
 	return nil
+}
+
+// isName reports whether x names a function, as a provider must: NewDB,
+// db.Open, or an instance of a generic function, NewCache[Item].
+func isName(x ast.Expr) bool {
+	switch e := x.(type) {
+	case *ast.IndexExpr:
+		x = e.X
+	case *ast.IndexListExpr:
+		x = e.X
+	}
+	switch x := x.(type) {
+	case *ast.Ident:
+		return true
+	case *ast.SelectorExpr:
+		_, ok := x.X.(*ast.Ident)
+		return ok
+	}
+	return false
 }
 
 // loaded reports whether p's syntax is loaded.
@@ -421,7 +453,7 @@ func isScope(t types.Type) bool {
 }
 
 func cleanupKind(t types.Type) string {
-	sig, ok := t.(*types.Signature)
+	sig, ok := t.Underlying().(*types.Signature)
 	if !ok || sig.Variadic() {
 		return ""
 	}
@@ -463,9 +495,24 @@ func (g *gen) injector(fd *ast.FuncDecl, args []ast.Expr) (string, bool) {
 		return "", false
 	}
 	want := sig.Results().At(0).Type()
-	ps := g.providers(args, true, map[types.Object]bool{})
+	// The same function in several sets is one provider.
+	var ps []*provider
+	for _, p := range g.providers(args, true, map[types.Object]bool{}) {
+		i := slices.IndexFunc(ps, func(q *provider) bool { return p.obj != nil && q.obj == p.obj && types.Identical(q.sig, p.sig) })
+		if i < 0 {
+			ps = append(ps, p)
+			continue
+		}
+		if p.direct {
+			ps[i].expr, ps[i].direct = p.expr, true
+		}
+		ps[i].close = ps[i].close || p.close
+	}
+	if len(g.diags) > before {
+		return "", false // the graph would only add errors, about providers it lacks
+	}
 
-	b := &builder{g: g, fn: name, pos: fd.Body.List[0].Pos(), vals: map[string]string{}, names: map[string]bool{}, building: map[*provider]bool{}, zero: g.zero(want)}
+	b := &builder{g: g, fn: name, pos: fd.Body.List[0].Pos(), names: map[string]bool{}, building: map[*provider]bool{}}
 	// The injector's parameters are inputs.
 	for i := 0; i < sig.Params().Len(); i++ {
 		v := sig.Params().At(i)
@@ -474,7 +521,7 @@ func (g *gen) injector(fd *ast.FuncDecl, args []ast.Expr) (string, bool) {
 			g.errorf(fd.Pos(), "%s: name every parameter", name)
 			return "", false
 		}
-		b.names[pname] = true
+		b.declare(pname)
 		b.inputs = append(b.inputs, input{pname, v.Type()})
 		if isContext(v.Type()) {
 			b.ctx = pname
@@ -483,13 +530,18 @@ func (g *gen) injector(fd *ast.FuncDecl, args []ast.Expr) (string, bool) {
 			b.scope = pname
 		}
 	}
-	// Direct providers take precedence over those from sets.
-	byType := map[string][]*provider{}
+	b.zero = g.zero(want) // after the parameters, so it names packages they don't hide
+	// Direct providers take precedence over those from sets. Types are
+	// compared with Identical, which sees through aliases.
+	var byType [][]*provider
 	for _, p := range ps {
-		key := types.TypeString(p.out, nil)
-		byType[key] = append(byType[key], p)
+		if i := slices.IndexFunc(byType, func(list []*provider) bool { return types.Identical(list[0].out, p.out) }); i >= 0 {
+			byType[i] = append(byType[i], p)
+		} else {
+			byType = append(byType, []*provider{p})
+		}
 	}
-	for key, list := range byType {
+	for _, list := range byType {
 		var direct []*provider
 		for _, p := range list {
 			if p.direct {
@@ -504,7 +556,7 @@ func (g *gen) injector(fd *ast.FuncDecl, args []ast.Expr) (string, bool) {
 			for _, p := range list {
 				names = append(names, p.name())
 			}
-			g.errorf(fd.Pos(), "%s: several providers for %s: %s", name, key, strings.Join(names, ", "))
+			g.errorf(fd.Pos(), "%s: several providers for %s: %s", name, g.typeString(types.Unalias(list[0].out)), strings.Join(names, ", "))
 			return "", false
 		}
 		b.providers = append(b.providers, list[0])
@@ -557,17 +609,38 @@ type builder struct {
 	ctx       string
 	scope     string
 	providers []*provider
-	vals      map[string]string // type string -> variable
+	vals      []value // built already
 	names     map[string]bool
 	building  map[*provider]bool
 	body      strings.Builder
 	zero      string
 }
 
+// A value is the variable holding a type built already.
+type value struct {
+	typ  types.Type
+	name string
+}
+
+// built returns the variable holding a value of type t, if it is built.
+func (b *builder) built(t types.Type) (string, bool) {
+	for _, v := range b.vals {
+		if types.Identical(v.typ, t) {
+			return v.name, true
+		}
+	}
+	return "", false
+}
+
+// provides reports whether an input or a provider has type t itself.
+func (b *builder) provides(t types.Type) bool {
+	return slices.ContainsFunc(b.inputs, func(in input) bool { return types.Identical(in.typ, t) }) ||
+		slices.ContainsFunc(b.providers, func(q *provider) bool { return types.Identical(q.out, t) })
+}
+
 // resolve returns the variable holding a value of type t, building it.
 func (b *builder) resolve(t types.Type, neededBy string, chain []string) string {
-	key := types.TypeString(t, nil)
-	if v, ok := b.vals[key]; ok {
+	if v, ok := b.built(t); ok {
 		return v
 	}
 	for _, in := range b.inputs {
@@ -581,24 +654,20 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 			p = q
 		}
 	}
-	if p == nil {
-		if iface, ok := t.Underlying().(*types.Interface); ok {
-			var cands []*provider
-			for _, q := range b.providers {
-				if types.Implements(q.out, iface) {
-					cands = append(cands, q)
-				}
-			}
-			// Direct providers win, as for exact types.
-			var direct []*provider
-			for _, q := range cands {
+	// A provider of a type implementing an interface provides it too. A
+	// direct one wins even over a set's provider of the interface itself,
+	// so that layer.Build(AppSet, NewMemRepo) swaps it.
+	if iface, ok := t.Underlying().(*types.Interface); ok && (p == nil || !p.direct) {
+		var cands, direct []*provider
+		for _, q := range b.providers {
+			if types.Implements(q.out, iface) {
+				cands = append(cands, q)
 				if q.direct {
 					direct = append(direct, q)
 				}
 			}
-			if len(direct) > 0 {
-				cands = direct
-			}
+		}
+		if p == nil {
 			// The injector's inputs win, as for exact types.
 			var ins []string
 			for _, in := range b.inputs {
@@ -614,18 +683,25 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 				b.g.errorf(b.pos, "%s: several inputs implement %s, needed by %s: %s", b.fn, b.g.typeString(t), neededBy, strings.Join(ins, ", "))
 				return "nil"
 			}
-			switch len(cands) {
-			case 1:
-				p = cands[0]
-			case 0:
-			default:
-				var names []string
-				for _, q := range cands {
-					names = append(names, q.name())
-				}
-				b.g.errorf(b.pos, "%s: several providers implement %s, needed by %s: %s", b.fn, b.g.typeString(t), neededBy, strings.Join(names, ", "))
-				return "nil"
+		}
+		// Direct providers win, as for exact types.
+		switch {
+		case len(direct) > 0:
+			cands = direct
+		case p != nil:
+			cands = []*provider{p}
+		}
+		switch len(cands) {
+		case 1:
+			p = cands[0]
+		case 0:
+		default:
+			var names []string
+			for _, q := range cands {
+				names = append(names, q.name())
 			}
+			b.g.errorf(b.pos, "%s: several providers implement %s, needed by %s: %s", b.fn, b.g.typeString(t), neededBy, strings.Join(names, ", "))
+			return "nil"
 		}
 	}
 	if p == nil {
@@ -633,8 +709,8 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 		return "nil"
 	}
 	// A provider found through an interface may be built already.
-	if v, ok := b.vals[types.TypeString(p.out, nil)]; ok {
-		b.vals[key] = v
+	if v, ok := b.built(p.out); ok {
+		b.vals = append(b.vals, value{t, v})
 		return v
 	}
 	if b.building[p] {
@@ -651,12 +727,25 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 			args = append(args, b.ctx)
 		case isScope(pt) && b.scope != "":
 			args = append(args, b.scope)
+		case p.sig.Variadic() && i == p.sig.Params().Len()-1:
+			// ...T takes the []T provided, if any, and else nothing.
+			if b.provides(pt) {
+				args = append(args, b.resolve(pt, p.name(), append(chain, p.name()))+"...")
+			}
 		default:
 			args = append(args, b.resolve(pt, p.name(), append(chain, p.name())))
 		}
 	}
-	v := b.varName(p.out)
+	// The packages before the variable, which then doesn't take their names.
 	call := b.g.exprString(p.expr) + "(" + strings.Join(args, ", ") + ")"
+	var wrap, ctx string
+	if p.hasErr {
+		wrap = b.g.pkgName("fmt", "fmt") + ".Errorf(\"" + p.name() + ": %w\", err)"
+	}
+	if p.close || p.cleanup == "func()" || p.cleanup == "func() error" {
+		ctx = b.g.pkgName("context", "context")
+	}
+	v := b.varName(p.out)
 	needsScope := p.close || p.cleanup != ""
 	if needsScope && b.scope == "" {
 		b.g.errorf(p.expr.Pos(), "%s: %s has a finalizer, so the injector needs a *scope.Scope parameter", b.fn, p.name())
@@ -664,8 +753,7 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 	switch {
 	case p.cleanup != "":
 		c := b.fresh("cleanup")
-		fmt.Fprintf(&b.body, "%s, %s, err := %s\nif err != nil {\nreturn %s, %s\n}\n", v, c, call, b.zero, b.wrap(p))
-		ctx := b.g.pkgName("context")
+		fmt.Fprintf(&b.body, "%s, %s, err := %s\nif err != nil {\nreturn %s, %s\n}\n", v, c, call, b.zero, wrap)
 		switch p.cleanup {
 		case "func()":
 			fmt.Fprintf(&b.body, "%s.Defer(func(%s.Context) error { %s(); return nil })\n", b.scope, ctx, c)
@@ -675,12 +763,11 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 			fmt.Fprintf(&b.body, "%s.Defer(%s)\n", b.scope, c)
 		}
 	case p.hasErr:
-		fmt.Fprintf(&b.body, "%s, err := %s\nif err != nil {\nreturn %s, %s\n}\n", v, call, b.zero, b.wrap(p))
+		fmt.Fprintf(&b.body, "%s, err := %s\nif err != nil {\nreturn %s, %s\n}\n", v, call, b.zero, wrap)
 	default:
 		fmt.Fprintf(&b.body, "%s := %s\n", v, call)
 	}
 	if p.close {
-		ctx := b.g.pkgName("context")
 		if closeReturnsError(p.out) {
 			fmt.Fprintf(&b.body, "%s.Defer(func(%s.Context) error { return %s.Close() })\n", b.scope, ctx, v)
 		} else {
@@ -688,13 +775,8 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 		}
 	}
 	delete(b.building, p)
-	b.vals[types.TypeString(p.out, nil)] = v
-	b.vals[key] = v
+	b.vals = append(b.vals, value{p.out, v}, value{t, v})
 	return v
-}
-
-func (b *builder) wrap(p *provider) string {
-	return b.g.pkgName("fmt") + ".Errorf(\"" + p.name() + ": %w\", err)"
 }
 
 // varName names a variable after its type: *sql.DB -> db.
@@ -721,27 +803,42 @@ func (b *builder) fresh(base string) string {
 	for i := 2; b.names[n] || token.IsKeyword(n) || n == "err" || types.Universe.Lookup(n) != nil || b.g.pkg.Types.Scope().Lookup(n) != nil || b.g.isPkgName(n); i++ {
 		n = base + strconv.Itoa(i)
 	}
-	b.names[n] = true
+	b.declare(n)
 	return n
 }
 
-// exprString renders a provider expression, keeping its package qualifier
-// imported.
+// declare reserves a parameter's or a variable's name.
+func (b *builder) declare(n string) {
+	b.names[n] = true
+	b.g.locals[n] = true
+}
+
+// exprString renders a provider expression (a name, as isName checks),
+// keeping its package qualifiers imported.
 func (g *gen) exprString(x ast.Expr) string {
-	if sel, ok := x.(*ast.SelectorExpr); ok {
-		if id, ok := sel.X.(*ast.Ident); ok {
+	switch x := x.(type) {
+	case *ast.IndexExpr:
+		return g.exprString(x.X) + "[" + g.typeString(g.info(x).TypeOf(x.Index)) + "]"
+	case *ast.IndexListExpr:
+		var args []string
+		for _, a := range x.Indices {
+			args = append(args, g.typeString(g.info(a).TypeOf(a)))
+		}
+		return g.exprString(x.X) + "[" + strings.Join(args, ", ") + "]"
+	case *ast.SelectorExpr:
+		if id, ok := x.X.(*ast.Ident); ok {
 			if pn, ok := g.info(id).Uses[id].(*types.PkgName); ok {
-				return g.pkgName(pn.Imported().Path()) + "." + sel.Sel.Name
+				return g.pkgName(pn.Imported().Path(), pn.Imported().Name()) + "." + x.Sel.Name
 			}
 		}
-	}
-	// A name from a set declared in another package is qualified with it.
-	if id, ok := x.(*ast.Ident); ok {
-		if obj := g.info(id).Uses[id]; obj != nil && obj.Pkg() != nil && obj.Pkg() != g.pkg.Types {
+		return g.exprString(x.X) + "." + x.Sel.Name
+	case *ast.Ident:
+		// A name from a set declared in another package is qualified with it.
+		if obj := g.info(x).Uses[x]; obj != nil && obj.Pkg() != nil && obj.Pkg() != g.pkg.Types {
 			if !obj.Exported() {
-				g.errorf(id.Pos(), "%s is unexported in package %s, so another package's injector can't call it", id.Name, obj.Pkg().Name())
+				g.errorf(x.Pos(), "%s is unexported in package %s, so another package's injector can't call it", x.Name, obj.Pkg().Name())
 			}
-			return g.pkgName(obj.Pkg().Path()) + "." + id.Name
+			return g.pkgName(obj.Pkg().Path(), obj.Pkg().Name()) + "." + x.Name
 		}
 	}
 	return types.ExprString(x)
@@ -763,26 +860,46 @@ func (g *gen) isPkgName(n string) bool {
 	return false
 }
 
-// pkgName returns the name to refer to a package by, importing it.
-func (g *gen) pkgName(p string) string {
+// pkgName returns the name to refer to the package at path p, named name,
+// importing it: the name the injector file, or else another file of the
+// package, imports it as, or else its own, made unique in the file.
+func (g *gen) pkgName(p, name string) string {
 	if n, ok := g.imports[p]; ok {
 		return n
 	}
-	name := path.Base(p)
-	for _, f := range g.pkg.Syntax {
-		for _, s := range f.Imports {
-			if strings.Trim(s.Path.Value, `"`) == p && s.Name != nil {
-				name = s.Name.Name
-			}
+	for _, f := range append([]*ast.File{g.file}, g.pkg.Syntax...) {
+		if a := alias(f, p); a != "" {
+			name = a
+			break
 		}
 	}
-	for _, imp := range g.pkg.Types.Imports() {
-		if imp.Path() == p {
-			name = imp.Name()
+	taken := func(n string) bool {
+		for _, m := range g.imports {
+			if m == n {
+				return true
+			}
 		}
+		return g.locals[n] || g.pkg.Types.Scope().Lookup(n) != nil
+	}
+	base := name
+	for i := 2; taken(name); i++ {
+		name = base + strconv.Itoa(i)
 	}
 	g.imports[p] = name
 	return name
+}
+
+// alias returns the name f imports path p as, if it names it.
+func alias(f *ast.File, p string) string {
+	if f == nil {
+		return ""
+	}
+	for _, s := range f.Imports {
+		if s.Name != nil && s.Name.Name != "_" && s.Name.Name != "." && strings.Trim(s.Path.Value, `"`) == p {
+			return s.Name.Name
+		}
+	}
+	return ""
 }
 
 func (g *gen) typeString(t types.Type) string {
@@ -790,7 +907,7 @@ func (g *gen) typeString(t types.Type) string {
 		if p == g.pkg.Types {
 			return ""
 		}
-		return g.pkgName(p.Path())
+		return g.pkgName(p.Path(), p.Name())
 	})
 }
 

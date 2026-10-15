@@ -30,3 +30,15 @@ func NoClose(s *scope.Scope) (*DB, error) {
 func TwoInputs(a A, b B) (*Service, error) {
 	panic(layer.Build(NewRepoService)) // ERROR "several inputs implement Repo, needed by NewRepoService: a, b"
 }
+
+func Aliased() (*Service, error) { // ERROR "Aliased: several providers for \*DB: NewDB, NewPrimary"
+	panic(layer.Build(NewDB, NewPrimary, NewService))
+}
+
+func Literal() (A, error) {
+	panic(layer.Build(func() A { return A{} })) // ERROR "a provider is a function's name"
+}
+
+func Call() (A, error) {
+	panic(layer.Build(Provide())) // ERROR "Provide\(\): a provider is a function's name"
+}

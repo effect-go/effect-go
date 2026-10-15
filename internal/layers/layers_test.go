@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"golang.org/x/tools/go/packages"
 )
 
 // Each injector in testdata/bad reports the error marked on its line.
@@ -55,13 +57,19 @@ func TestGolden(t *testing.T) {
 	}
 }
 
-// A provider runs once, however many interfaces and types it is needed as.
-func TestProviderRunsOnce(t *testing.T) {
+// The wiring of testdata/shared compiles, and a provider runs once, however
+// many interfaces and types it is needed as.
+func TestShared(t *testing.T) {
 	res, err := Generate("testdata/shared")
 	if err != nil || res == nil || len(res.Diags) > 0 {
 		t.Fatal(err, res)
 	}
 	if n := strings.Count(string(res.Code), "NewStore()"); n != 1 {
 		t.Fatalf("NewStore called %d times:\n%s", n, res.Code)
+	}
+	path, _ := filepath.Abs(res.Path)
+	cfg := &packages.Config{Mode: packages.LoadSyntax, Dir: "testdata/shared", Overlay: map[string][]byte{path: res.Code}}
+	if pkgs, err := packages.Load(cfg, "."); err != nil || packages.PrintErrors(pkgs) > 0 {
+		t.Fatalf("%v\n%s", err, res.Code)
 	}
 }
