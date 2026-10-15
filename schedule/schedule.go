@@ -38,11 +38,13 @@ func (s Schedule) Next(n int, err error) (time.Duration, bool) {
 }
 
 // Exponential retries forever, waiting base, then 2×base, 4×base, and so on.
-// Combine it with Recurs or UpTo to bound it.
+// Combine it with Recurs to bound the attempts, and with UpTo to cap the
+// delays.
 func Exponential(base time.Duration) Schedule {
 	return Schedule{step: func(n int, _ error) (time.Duration, bool) {
 		d := float64(base) * math.Pow(2, float64(n-1))
-		if d > math.MaxInt64 {
+		// float64(math.MaxInt64) is 2^63, already past the largest Duration.
+		if d >= math.MaxInt64 {
 			return math.MaxInt64, true
 		}
 		return time.Duration(d), true

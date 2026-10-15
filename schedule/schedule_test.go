@@ -3,6 +3,7 @@ package schedule
 import (
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"testing"
 	"testing/synctest"
@@ -183,9 +184,12 @@ func TestRepeat(t *testing.T) {
 	})
 }
 
-// Jitter on a delay near the largest Duration saturates instead of
-// overflowing into a negative one.
-func TestJitterSaturates(t *testing.T) {
+// Delays near the largest Duration saturate instead of overflowing into a
+// negative one: Exponential's at exactly 2^63ns, and Jittered's.
+func TestDelaysSaturate(t *testing.T) {
+	if d, _ := Exponential(1<<30).Next(34, nil); d != math.MaxInt64 {
+		t.Fatalf("Exponential: delay %v", d)
+	}
 	for range 100 {
 		if d, _ := Exponential(time.Second).Jittered().Next(80, nil); d <= 0 {
 			t.Fatalf("delay %v", d)
