@@ -3,5 +3,9 @@ package syntax
 func f() {
 	x := f"unterminated {x" // ERROR "string literal not terminated"
 	z := g() else { } // ERROR "else { } needs arms"
+	v := match x {
+		1 => // ERROR "expected a value after =>"
+		_ => 0
+	}
 	y := 1 +
 } // ERROR "expected operand"

@@ -279,6 +279,15 @@ func (p *parser) parseArms(expr bool, context string) (lbrace token.Pos, arms []
 		p.inPattern = false
 		arm.Arrow = p.expect(scanner.FATARROW)
 		switch {
+		case p.tok != token.LBRACE && p.lineFor(p.pos) > p.lineFor(arm.Arrow):
+			// Nothing follows => on its line: the arm is empty. Read on,
+			// and the next arm would be its body: Red => Green => paint().
+			if expr {
+				p.error(arm.Arrow, "expected a value after =>")
+				arm.Body = &ast.BadExpr{From: arm.Arrow, To: arm.Arrow + 2}
+			} else {
+				arm.Body = &ast.EmptyStmt{Semicolon: arm.Arrow + 2, Implicit: true}
+			}
 		case p.tok == token.LBRACE:
 			b := p.parseBlockStmt()
 			arm.Body = b
