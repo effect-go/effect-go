@@ -81,12 +81,12 @@ func newCmd(args []string) error {
 	}
 //line new.ego:63
 	steps := [][]string{{"go", "mod", "init", module}}
-	// The generated code imports the runtime packages: get them first.
-	// Tidy after generating: until then, only .ego files import packages,
-	// and go mod tidy can't see them.
+	// The generated code imports the runtime packages: get them first, at
+	// this ego's version. Tidy after generating: until then, only .ego
+	// files import packages, and go mod tidy can't see them.
 	get := []string{"go", "get"}
 	for _, pkg := range []string{"scope", "schedule", "trace", "layer"} {
-		get = append(get, modulePath+"/"+pkg+"@latest")
+		get = append(get, modulePath+"/"+pkg+"@"+runtimeVersion())
 	}
 	if *replace != "" {
 		abs, err := filepath.Abs(*replace)
@@ -96,7 +96,7 @@ func newCmd(args []string) error {
 //line new.ego:73
 		steps = append(steps, []string{"go", "mod", "edit", "-require=" + modulePath + "@v0.0.0", "-replace=" + modulePath + "=" + abs})
 		for i := 2; i < len(get); i++ {
-			get[i] = strings.TrimSuffix(get[i], "@latest")
+			get[i], _, _ = strings.Cut(get[i], "@")
 		}
 	}
 	steps = append(steps, get, []string{self, "generate", "./..."}, []string{"go", "mod", "tidy"})
