@@ -150,3 +150,16 @@ func TestLifting(t *testing.T) {
 		t.Errorf("NestedLift: %d, %v", n, err)
 	}
 }
+
+func TestNames(t *testing.T) {
+	port, n, err := Hidden("x")
+	if port != 80 || n != 7 || err == nil || !strings.HasPrefix(err.Error(), "parse x:") {
+		t.Errorf("Hidden: %d %d %v", port, n, err)
+	}
+	errs := make(chan error, 1)
+	errs <- io.EOF
+	sel, lambda, arm := GeneratedNames(errs, false)
+	if sel != "EOF 1" || lambda != "EOF 2" || arm != "not ok" {
+		t.Errorf("GeneratedNames: %q %q %q", sel, lambda, arm)
+	}
+}

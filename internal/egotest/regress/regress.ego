@@ -222,3 +222,44 @@ effect NestedLift(m map[int]int) (int, error) {
 	a, b := check all(retry(schedule.Recurs(1), strconv.Atoi(strconv.Itoa(m[3] ?? 3))), timeout(time.Second, strconv.Atoi("4")))
 	return a + b, nil
 }
+
+// Hidden: with :=, a check label, an else fallback and else arms mean the
+// variable the declaration hides.
+func Hidden(s string) (int, int, error) {
+	port, n := 80, 7
+	{
+		port := strconv.Atoi(s) else port
+		n := must strconv.Atoi(s) else { strconv.ErrSyntax => n }
+		return port, n, parseHidden(s)
+	}
+}
+
+func parseHidden(s string) error {
+	if s != "" {
+		s := check strconv.Atoi(s) "parse {s}"
+		_ = s
+	}
+	return nil
+}
+
+// GeneratedNames: the err and ok the generated code declares don't hide
+// the user's: an err from a select case or a lambda's parameter, an ok
+// used in the arm that matched.
+func GeneratedNames(errs chan error, ok bool) (string, string, string) {
+	var fromSelect string
+	select {
+	case err := <-errs:
+		n := must strconv.Atoi("1")
+		fromSelect = f"{err} {n}"
+	}
+	var f func(error) string = err => {
+		n := must strconv.Atoi("2")
+		return f"{err} {n}"
+	}
+	arm := match error(Duplicate{Slug: "a"}) {
+		nil => "nil"
+		Duplicate(_) => if ok { "ok" } else { "not ok" }
+		_ => "other"
+	}
+	return fromSelect, f(io.EOF), arm
+}

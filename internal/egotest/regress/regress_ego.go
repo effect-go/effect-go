@@ -440,3 +440,80 @@ func NestedLift(ctx context.Context, m map[int]int) (_ int, err error) {
 //line regress.ego:223
 	return a + b, nil
 }
+
+// Hidden: with :=, a check label, an else fallback and else arms mean the
+// variable the declaration hides.
+func Hidden(s string) (int, int, error) {
+	port, n := 80, 7
+	{
+		v, err := strconv.Atoi(s)
+		if err != nil {
+			v = port
+		}
+		port := v
+//line regress.ego:232
+		v2, err := strconv.Atoi(s)
+		if err != nil {
+			if egoerrors.Is(err, strconv.ErrSyntax) {
+				v2 = n
+			} else {
+				panic(err)
+			}
+		}
+		n := v2
+//line regress.ego:233
+		return port, n, parseHidden(s)
+	}
+}
+
+func parseHidden(s string) error {
+	if s != "" {
+		v, err := strconv.Atoi(s)
+		if err != nil {
+			return egofmt.Errorf("parse %v: %w", s, err)
+		}
+		s := v
+//line regress.ego:240
+		_ = s
+	}
+	return nil
+}
+
+// GeneratedNames: the err and ok the generated code declares don't hide
+// the user's: an err from a select case or a lambda's parameter, an ok
+// used in the arm that matched.
+func GeneratedNames(errs chan error, ok bool) (string, string, string) {
+	var fromSelect string
+	select {
+	case err := <-errs:
+		n, err2 := strconv.Atoi("1")
+		if err2 != nil {
+			panic(err2)
+		}
+		fromSelect = egofmt.Sprintf("%v %d", err, n)
+	}
+//line regress.ego:255
+	var f func(error) string = func(err error) string {
+		n, err2 := strconv.Atoi("2")
+		if err2 != nil {
+			panic(err2)
+		}
+		return egofmt.Sprintf("%v %d", err, n)
+	}
+//line regress.ego:259
+	var arm string
+	v := error(Duplicate{Slug: "a"})
+	if v == nil {
+		arm = "nil"
+	} else if _, ok2 := egoerrors.AsType[Duplicate](v); ok2 {
+		if ok {
+			arm = "ok"
+		} else {
+			arm = "not ok"
+		}
+	} else {
+		arm = "other"
+	}
+//line regress.ego:264
+	return fromSelect, f(io.EOF), arm
+}

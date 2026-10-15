@@ -375,8 +375,10 @@ func (g *fileGen) chain(p *matchPlan, isExpr bool, body func(*ast.MatchArm)) {
 				// An if's init variables stay in scope in its else
 				// branches, the later arms: fresh names there, and the
 				// arm's own name inside its block.
+				// The arm's own block doesn't use ok: an ok there is
+				// the user's.
 				ok, v := "ok", pt.bind
-				if laterUse(p, i, "ok") {
+				if usesName(a.Body, "ok") || laterUse(p, i, "ok") {
 					ok = g.temp("ok")
 				}
 				if pt.bind != "_" && laterUse(p, i, pt.bind) {

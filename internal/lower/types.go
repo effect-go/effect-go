@@ -365,6 +365,44 @@ func (g *fileGen) objectOf(n ast.Expr) types.Object {
 	return nil
 }
 
+// declares reports whether := declares id, rather than assigning to a
+// variable already in the same scope.
+func (g *fileGen) declares(id *ast.Ident) bool {
+	if id.Name == "_" {
+		return false
+	}
+	gid, ok := g.goExpr(id).(*goast.Ident)
+	return !ok || g.r.ti == nil || g.r.ti.info.Defs[gid] != nil
+}
+
+// hides reports whether xs mention a variable that lhs declares with :=.
+// They run before the declaration, so they mean the variable it hides.
+func (g *fileGen) hides(lhs []ast.Expr, xs ...ast.Node) bool {
+	for _, l := range lhs {
+		id, ok := l.(*ast.Ident)
+		if !ok || !g.declares(id) {
+			continue
+		}
+		for _, x := range xs {
+			if x != nil && usesName(x, id.Name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// defineTok is the token that sets lhs from temporaries, for a := that
+// was split: := if it declares one of them, and = otherwise.
+func (g *fileGen) defineTok(lhs []ast.Expr) string {
+	for _, l := range lhs {
+		if id, ok := l.(*ast.Ident); ok && g.declares(id) {
+			return ":="
+		}
+	}
+	return "="
+}
+
 // typeString renders t as Go source in this file, adding imports as needed.
 func (g *fileGen) typeString(t types.Type) string {
 	return types.TypeString(t, func(p *types.Package) string {

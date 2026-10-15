@@ -204,21 +204,27 @@ func (g *fileGen) check(lhs []ast.Expr, tok token.Token, c *ast.CheckExpr) {
 		g.w.str("if " + blanks + ev + " := ")
 		g.w.add(call)
 		g.w.str("; " + ev + " != nil {\n" + handle + "\n}")
-	case tok == token.DEFINE:
+	case tok == token.DEFINE && !g.hides(lhs, labelNode(c), c.Case):
 		g.lhs(lhs)
 		g.w.str(", " + ev + " := ")
 		g.w.add(call)
 		g.w.str("\nif " + ev + " != nil {\n" + handle + "\n}")
 	default:
+		// Through temporaries: for =, and for a := whose label or case
+		// mentions a variable it declares, which must still be the outer one.
 		var tmps []string
 		for range lhs {
 			tmps = append(tmps, g.temp("v"))
+		}
+		op := tok.String()
+		if tok == token.DEFINE {
+			op = g.defineTok(lhs)
 		}
 		g.w.str(strings.Join(tmps, ", ") + ", " + ev + " := ")
 		g.w.add(call)
 		g.w.str("\nif " + ev + " != nil {\n" + handle + "\n}\n")
 		g.lhs(lhs)
-		g.w.str(" " + tok.String() + " " + strings.Join(tmps, ", "))
+		g.w.str(" " + op + " " + strings.Join(tmps, ", "))
 	}
 }
 
@@ -258,7 +264,7 @@ func (g *fileGen) errInScope(n ast.Node) bool {
 		case *ast.CaseClause:
 			before = p.Body
 		case *ast.CommClause:
-			before = p.Body
+			before = append([]ast.Stmt{p.Comm}, p.Body...) // case err := <-errs:
 		case *ast.IfStmt:
 			before = []ast.Stmt{p.Init}
 		case *ast.ForStmt:
@@ -277,6 +283,10 @@ func (g *fileGen) errInScope(n ast.Node) bool {
 			}
 		case *ast.FuncLit:
 			if hasField(p.Type.Params, "err") || hasField(p.Type.Results, "err") {
+				return true
+			}
+		case *ast.LambdaExpr:
+			if hasField(p.Params, "err") {
 				return true
 			}
 		}
@@ -521,11 +531,20 @@ func (g *fileGen) elseStmt(lhs []ast.Expr, tok token.Token, e *ast.ElseExpr) {
 	target := g.renderStr(lhs[0])
 	ev := g.errVar(e)
 	if tok == token.DEFINE {
-		g.w.str(target + ", " + ev + " := ")
+		// A fallback that mentions the variable means the outer one: the
+		// value goes through a temporary.
+		v, op := target, ""
+		if g.hides(lhs, e.Fallback) {
+			v, op = g.temp("v"), g.defineTok(lhs)
+		}
+		g.w.str(v + ", " + ev + " := ")
 		g.w.add(call)
 		g.w.str("\nif " + ev + " != nil {\n")
-		g.lowerInto(target, false, t, e.Fallback)
+		g.lowerInto(v, false, t, e.Fallback)
 		g.w.str("}")
+		if v != target {
+			g.w.str("\n" + target + " " + op + " " + v)
+		}
 		return
 	}
 	v := g.temp("v")
@@ -604,11 +623,15 @@ func (g *fileGen) elseArms(lhs []ast.Expr, tok token.Token, e *ast.ElseExpr) {
 		}
 	}
 
-	// x, err := f(); if err != nil { arms }, through a temporary for =.
+	// x, err := f(); if err != nil { arms }, through a temporary for =,
+	// and for a := whose arms mention the variable: they mean the outer one.
 	target := g.renderStr(lhs[0])
-	v := target
-	if tok != token.DEFINE {
+	v, op := target, tok.String()
+	switch {
+	case tok != token.DEFINE:
 		v = g.temp("v")
+	case g.hides(lhs, armNodes(e.Arms, labelNode(c))...):
+		v, op = g.temp("v"), g.defineTok(lhs)
 	}
 	g.w.str(v + ", " + ev + " := ")
 	g.w.add(callW)
@@ -616,8 +639,24 @@ func (g *fileGen) elseArms(lhs []ast.Expr, tok token.Token, e *ast.ElseExpr) {
 	g.chain(p, false, func(a *ast.MatchArm) { g.armBody(a, v, t) })
 	g.w.str("}")
 	if v != target {
-		g.w.str("\n" + target + " " + tok.String() + " " + v)
+		g.w.str("\n" + target + " " + op + " " + v)
 	}
+}
+
+// labelNode returns c's label as a node, or nil: c or its label may be nil.
+func labelNode(c *ast.CheckExpr) ast.Node {
+	if c == nil || c.Label == nil {
+		return nil
+	}
+	return c.Label
+}
+
+// armNodes returns the arms as nodes, after more.
+func armNodes(arms []*ast.MatchArm, more ...ast.Node) []ast.Node {
+	for _, a := range arms {
+		more = append(more, a)
+	}
+	return more
 }
 
 // fail lowers fail X.
