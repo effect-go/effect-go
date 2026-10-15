@@ -1,11 +1,14 @@
 # effect-go
 
-**Concurrent Go that cleans up after itself.** Run calls in parallel, retry
-them, give them a deadline, and get every error back, without goroutines
-left running or a `ctx` passed by mistake.
+**Reliable Go, without the boilerplate.**
+
+Typed errors, structured concurrency, retries, tracing and dependency wiring,
+built in, in code that reads like what it does: no `if err != nil`, no `ctx`
+passed by hand, no goroutines to keep track of. Build services your team can
+ship, your users can rely on, and coding agents can work on.
 
 Use it as a plain Go library, or write `.ego` files: Go plus a few keywords
-that compile back to ordinary Go.
+that compile back to the Go you'd have written by hand.
 
 ## Before and after
 
@@ -57,30 +60,47 @@ ego new example.com/hello
 cd hello && ego test ./... && go run .
 ```
 
-`ego new` creates a small HTTP service to explore. [AGENTS.md](AGENTS.md)
-is the whole language on one page, for you and for coding agents.
+`ego new` creates a small HTTP service to explore.
 
-## What's in it
+## Built in
 
-**The library**, for plain Go (`go get github.com/effect-go/effect-go`):
-- [`scope`](scope): run calls in parallel (`All2`, `Each`, `Race`), with a
-  deadline (`Timeout`), and close resources in order when you're done
-  (`Run`, `Defer`, `Main`).
-- [`schedule`](schedule): retry policies as values, like "back off
-  exponentially, at most 3 times" (`Retry`), and loops that stop with
-  their context (`Repeat`).
-- [`trace`](trace): an OpenTelemetry span per call, and `slog` records that
-  carry trace IDs.
-- [`layer`](layer): dependency wiring checked at build time, for large
-  graphs that tests vary (`ego generate` writes it).
+**Errors you can read, and can't forget to handle**
+- `check f()` replaces `if err != nil { return err }`, and labels the error
+  with the call that failed.
+- Error sets list what a function can fail with, in its signature, and
+  `match` makes sure you handle every case.
+- Parallel calls give back every real failure, not just the first.
 
-**The dialect**, in `.ego` files:
-- **Errors**: `check f()` returns the error for you; error sets list a
-  service's failures, and `match` makes sure you handle each one.
-- **Concurrency**: `effect` functions pass `ctx` for you, and
-  `all`, `race`, `retry`, `repeat`, `timeout` and `each` replace
-  hand-written goroutines.
-- **Shorthand**, if you like it: `x => x.ID`, `f"{n} items"`, `a ?? b`.
+**Structured concurrency**
+- `all`, `race`, `each` and `timeout` instead of goroutines, WaitGroups and
+  errgroups, with limits: `each(ids, 8, users.Get)`.
+- Nothing outlives the call: a failure cancels the rest, a panic reaches the
+  caller, and resources close in reverse order ([`scope`](scope)).
+
+**Retries and schedules**
+- Policies are values: "back off exponentially, with jitter, at most 3 times"
+  ([`schedule`](schedule)).
+- `retry` a call, or `repeat` it as a loop that stops with its context.
+
+**Context and tracing, passed for you**
+- `effect` functions get their `ctx` and an OpenTelemetry span without you
+  writing either ([`trace`](trace)).
+- `slog` records carry the trace and span IDs.
+
+**Dependency wiring**
+- Constructors wired by generated code, checked when you run `ego generate`,
+  with no reflection ([`layer`](layer)).
+- Swap one provider in tests: `layer.Build(AppSet, NewMemRepo)`.
+
+Everything except the syntax is a plain Go library
+(`go get github.com/effect-go/effect-go`), and the shorthand is there if you
+like it: `x => x.ID`, `f"{n} items"`, `a ?? b`.
+
+## For coding agents
+
+[AGENTS.md](AGENTS.md) is the whole language on one page. Agents write and
+read less code, and the compiler checks what they'd get wrong: every error
+case handled, the right `ctx` passed, nothing left running.
 
 ## Safe to try
 
@@ -103,7 +123,7 @@ With one slow feed, its shutdown went from 18 seconds to instant.
 
 ## Status
 
-effect-go is young (v0.2) and meant to be used. A new release never
+effect-go is young (v0.3) and meant to be used. A new release never
 changes your build until you run `ego generate`. Before v1.0, breaking
 changes only come in minor versions (v0.2, v0.3…), each with a
 [changelog](CHANGELOG.md) entry saying how to update. New Go releases are
