@@ -177,4 +177,7 @@ func TestUntyped(t *testing.T) {
 	if f, d := Untyped(true); f != 3 || d != 100*time.Millisecond {
 		t.Errorf("Untyped: %v %v", f, d)
 	}
+	if n := Labeled(nil, []int{1, 2, 3}); n != 1 {
+		t.Errorf("Labeled: %d", n)
+	}
 }

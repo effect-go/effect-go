@@ -701,8 +701,16 @@ func (g *fileGen) computeNeeds() {
 		if !ok || !g.needs[n] {
 			return true
 		}
-		switch s.(type) {
-		case *ast.BlockStmt, *ast.LabeledStmt, *ast.CaseClause, *ast.CommClause:
+		switch l := s.(type) {
+		case *ast.LabeledStmt:
+			// Lowered with its statement: what the statement's header
+			// needs goes before the label, which must stay on the loop
+			// or switch for break and continue.
+			if _, isBlock := l.Stmt.(*ast.BlockStmt); !isBlock && hasDirect(l.Stmt, g) {
+				g.lowered[s] = true
+			}
+			return true
+		case *ast.BlockStmt, *ast.CaseClause, *ast.CommClause:
 			return true
 		case *ast.FailStmt, *ast.MatchStmt:
 			g.lowered[s] = true

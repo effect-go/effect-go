@@ -305,3 +305,18 @@ func Untyped(c bool) (float64, time.Duration) {
 }
 
 func untypedReturn(c bool) float64 { return if c { 1 } else { 0 } }
+
+// Labeled: what a labeled loop's header needs goes before the label.
+func Labeled(m map[string][]int, xs []int) int {
+	n := 0
+outer:
+	for _, x := range m["a"] ?? xs {
+		for range 2 {
+			if x > 1 {
+				continue outer
+			}
+		}
+		n += x
+	}
+	return n
+}

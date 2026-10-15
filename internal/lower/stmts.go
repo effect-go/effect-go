@@ -23,6 +23,10 @@ func (g *fileGen) stmt(s ast.Stmt) {
 
 func (g *fileGen) lowerStmt(s ast.Stmt) {
 	switch s := s.(type) {
+	case *ast.LabeledStmt:
+		g.copy(g.off(s.Pos()), g.off(s.Stmt.Pos()))
+		g.lowerStmt(s.Stmt)
+		return
 	case *ast.AssignStmt:
 		if len(s.Rhs) == 1 {
 			switch x := s.Rhs[0].(type) {

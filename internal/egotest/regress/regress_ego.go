@@ -602,3 +602,25 @@ func untypedReturn(c bool) float64 {
 	}
 	return v
 }
+
+// Labeled: what a labeled loop's header needs goes before the label.
+//
+//line regress.ego:310
+func Labeled(m map[string][]int, xs []int) int {
+	n := 0
+	v, ok := m["a"]
+	if !ok {
+		v = xs
+	}
+outer:
+	for _, x := range v {
+		for range 2 {
+			if x > 1 {
+				continue outer
+			}
+		}
+		n += x
+	}
+//line regress.ego:321
+	return n
+}
