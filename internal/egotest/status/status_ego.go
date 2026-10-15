@@ -102,6 +102,7 @@ func Describe(err error) string {
 	} else if d, ok := errors.AsType[Declined](err); ok {
 		v = d.Reason
 	} else {
+//line status.ego:41
 		v = "failed: " + err.Error()
 	}
 	return v

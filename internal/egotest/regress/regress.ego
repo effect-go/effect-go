@@ -5,6 +5,7 @@ package regress
 import (
 	"context"
 	"io"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -398,3 +399,31 @@ effect Immediate() (string, error) {
 	v := check effect() (string, error) { return ctxValue() }()
 	return v, nil
 }
+
+// here returns the line it is called from.
+func here() int {
+	_, _, l, _ := runtime.Caller(1)
+	return l
+}
+
+// Lines calls here in branches and in a lambda's statements, whose lines
+// a stack trace must report.
+func Lines(n int) []int {
+	v := if n > 0 {
+		0
+	} else {
+		here() // line: else
+	}
+	w := match n {
+		0 => here() // line: arm
+		_ => 0
+	}
+	var f func(int) int = k => {
+		x := *(m(k) ?? &k)
+
+		return here() + x // line: lambda
+	}
+	return []int{v, w, f(0)}
+}
+
+func m(k int) *int { return nil }

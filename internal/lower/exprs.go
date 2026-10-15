@@ -286,8 +286,12 @@ func (g *fileGen) optInto(target string, declare bool, t types.Type, x ast.Expr)
 	g.w.str("}\n")
 }
 
-// branchInto stores a branch's value in target.
+// branchInto stores a branch's value in target. One that calls a function
+// is on the branch's line, for stack traces: not the closing brace's.
 func (g *fileGen) branchInto(target string, t types.Type, x ast.Expr) {
+	if hasCall(x) {
+		g.mark(x.Pos())
+	}
 	g.lowerInto(target, false, t, x)
 }
 
@@ -954,12 +958,19 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 		}
 		switch b := x.Body.(type) {
 		case *ast.BlockStmt:
+			// As in a block: the source between statements, and each on
+			// its line.
 			saved := g.pre
 			g.pre = nil
+			cur := g.off(b.Lbrace) + 1
 			for _, s := range b.List {
+				g.copy(cur, g.off(s.Pos()))
+				g.mark(s.Pos())
 				g.node(s)
-				g.w.str("\n")
+				cur = g.off(s.End())
 			}
+			g.copy(cur, g.off(b.Rbrace))
+			g.w.str("\n")
 			g.pre = saved
 		case ast.Expr:
 			ret := "return "

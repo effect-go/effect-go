@@ -32,8 +32,10 @@ func (s *session) run(args ...string) (string, int) {
 	cmd, err := ParseArgs(args)
 	var code int
 	if err != nil {
+//line cli_test.ego:29
 		code = Report(s.out, err)
 	} else {
+//line cli_test.ego:29
 		code = s.cli.Run(s.t.Context(), cmd)
 	}
 //line cli_test.ego:30

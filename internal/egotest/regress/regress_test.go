@@ -221,3 +221,17 @@ func TestImmediate(t *testing.T) {
 		t.Errorf("Immediate: %q %v", v, err)
 	}
 }
+
+func TestLines(t *testing.T) {
+	if testing.CoverMode() != "" {
+		t.Skip("ego test -cover reports the generated Go's lines")
+	}
+	src, _ := os.ReadFile("regress.ego")
+	lines := strings.Split(string(src), "\n")
+	at := func(marker string) int {
+		return slices.IndexFunc(lines, func(l string) bool { return strings.HasSuffix(l, "// line: "+marker) }) + 1
+	}
+	if got, want := Lines(0), []int{at("else"), at("arm"), at("lambda")}; !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}

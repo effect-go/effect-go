@@ -86,6 +86,7 @@ func (m *MemStore) Count(ctx context.Context, f Filter, now time.Time) (_ int, e
 		case Done:
 			ok = t.DoneAt != nil
 		case Overdue:
+//line memstore.ego:63
 			ok = t.Overdue(now)
 		default:
 			panic(f)

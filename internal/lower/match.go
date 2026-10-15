@@ -316,7 +316,7 @@ func (g *fileGen) armBody(a *ast.MatchArm, target string, t types.Type) {
 		g.w.str("\n")
 	case ast.Expr:
 		if target != "" {
-			g.lowerInto(target, false, t, b)
+			g.branchInto(target, t, b)
 			return
 		}
 		g.mark(b.Pos())

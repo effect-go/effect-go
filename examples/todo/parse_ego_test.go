@@ -16,13 +16,14 @@ func TestParse(t *testing.T) {
 		p, err := ParsePriority(in)
 		var got string
 		if err == nil {
+//line parse_test.ego:13
 			got = p.String()
 		} else if _, ok := errors.AsType[Invalid](err); ok {
 			got = "invalid"
 		} else {
+//line parse_test.ego:15
 			got = err.Error()
 		}
-//line parse_test.ego:17
 		if got != want {
 			t.Errorf("ParsePriority(%q) = %s, want %s", in, got, want)
 		}

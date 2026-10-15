@@ -19,6 +19,7 @@ func main() {
 	stop()
 	var v int
 	if err != nil {
+//line main.ego:13
 		v = Report(os.Stderr, err)
 	} else {
 		v = code
