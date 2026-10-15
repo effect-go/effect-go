@@ -27,5 +27,6 @@ func _egoCo[T any](T, T) (v T)                                       { return }
 func _egoUse(...any)                                                 {}
 func _egoEach[R any](int, func() R) (v []R, err error)               { return }
 func _egoEachF[T, R any]([]T, int, func(_ego_context.Context, T) (R, error)) (v []R, err error) { return }
+func _egoEachE[T any]([]T, int, func(_ego_context.Context, T) error) (v []struct{}, err error) { return }
 `)
 }

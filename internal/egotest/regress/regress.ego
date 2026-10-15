@@ -6,6 +6,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -331,4 +332,31 @@ func Missing(a *Address, m map[string]*int, x any) (string, int, int) {
 	n := m["k"] ?? &def
 	p := x.(*int) ?? &def
 	return tag, *n, *p
+}
+
+// Shelf removes items, failing on negative ones.
+type Shelf struct{ removed atomic.Int64 }
+
+// Remove returns only an error.
+effect (s *Shelf) Remove(n int) error {
+	if n < 0 {
+		fail Moved{Slug: "n", Times: n}
+	}
+	s.removed.Add(int64(n))
+	return nil
+}
+
+// RemoveAll passes a method returning only an error to each.
+effect (s *Shelf) RemoveAll(ns []int) (int64, error) {
+	check each(ns, 2, s.Remove)
+	return s.removed.Load(), nil
+}
+
+// Move has case messages with expressions and raw strings.
+error MoveError {
+	Moved {
+		Slug  string
+		Times int
+	} "{Slug} moved {Times + 1} times"
+	Gone{ Slug string } `"{Slug}" is gone`
 }

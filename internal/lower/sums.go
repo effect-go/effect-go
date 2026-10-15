@@ -133,10 +133,15 @@ func (g *fileGen) message(c *ast.SumCase) string {
 			}
 			args = append(args, g.fieldExpr(p.X, fields))
 		}
-		if len(args) == 0 {
-			return `"` + plain.String() + `"`
+		// The text keeps its escapes: it stays in the literal's quotes.
+		q := `"`
+		if c.Message.Raw() {
+			q = "`"
 		}
-		return g.pkgRef("fmt") + `.Sprintf("` + format.String() + `", ` + strings.Join(args, ", ") + ")"
+		if len(args) == 0 {
+			return q + plain.String() + q
+		}
+		return g.pkgRef("fmt") + ".Sprintf(" + q + format.String() + q + ", " + strings.Join(args, ", ") + ")"
 	}
 	text := words(c.Name.Name)
 	var args []string
@@ -159,24 +164,31 @@ func (g *fileGen) message(c *ast.SumCase) string {
 }
 
 // fieldExpr renders an expression in a case message, reading the case's
-// fields from e.
+// fields from e: {ID + 1} is e.ID + 1.
 func (g *fileGen) fieldExpr(x ast.Expr, fields map[string]bool) string {
-	switch x := x.(type) {
-	case *ast.Ident:
-		if fields[x.Name] {
-			return "e." + x.Name
+	skip := map[*ast.Ident]bool{} // names that aren't variables: x.Name, T{Name: v}
+	var refs []*ast.Ident
+	ast.Inspect(x, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.SelectorExpr:
+			skip[n.Sel] = true
+		case *ast.KeyValueExpr:
+			if k, ok := n.Key.(*ast.Ident); ok {
+				skip[k] = true
+			}
+		case *ast.Ident:
+			if fields[n.Name] && !skip[n] {
+				refs = append(refs, n)
+			}
 		}
-		return x.Name
-	case *ast.SelectorExpr:
-		return g.fieldExpr(x.X, fields) + "." + x.Sel.Name
-	case *ast.CallExpr:
-		var args []string
-		for _, a := range x.Args {
-			args = append(args, g.fieldExpr(a, fields))
-		}
-		return g.fieldExpr(x.Fun, fields) + "(" + strings.Join(args, ", ") + ")"
+		return true
+	})
+	src, base := g.text(x), g.off(x.Pos())
+	for i := len(refs) - 1; i >= 0; i-- {
+		at := g.off(refs[i].Pos()) - base
+		src = src[:at] + "e." + src[at:]
 	}
-	return g.text(x)
+	return src
 }
 
 // words turns NotFound into "not found".

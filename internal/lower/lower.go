@@ -196,7 +196,7 @@ func Generate(cfg Config) (*Result, error) {
 			return nil, err
 		}
 	}
-	sortDiags(res.Diags)
+	res.Diags = sortDiags(res.Diags)
 	return res, nil
 }
 
@@ -378,7 +378,8 @@ func (p *pkgGen) run(res *Result, only []*fileGen) (*typeInfo, error) {
 	return ti, nil
 }
 
-func sortDiags(ds []Diagnostic) {
+// sortDiags sorts diagnostics by position and drops exact duplicates.
+func sortDiags(ds []Diagnostic) []Diagnostic {
 	sort.SliceStable(ds, func(i, j int) bool {
 		a, b := ds[i].Pos, ds[j].Pos
 		if a.Filename != b.Filename {
@@ -389,15 +390,7 @@ func sortDiags(ds []Diagnostic) {
 		}
 		return a.Column < b.Column
 	})
-	// Drop exact duplicates.
-	out := ds[:0]
-	for i, d := range ds {
-		if i > 0 && d.Pos == ds[i-1].Pos && d.Msg == ds[i-1].Msg {
-			continue
-		}
-		out = append(out, d)
-	}
-	clear(ds[len(out):])
+	return slices.Compact(ds) // exact duplicates
 }
 
 // read returns a file's contents, from the overlay if it's there.

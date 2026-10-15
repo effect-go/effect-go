@@ -1062,18 +1062,37 @@ func (g *fileGen) each(x *ast.CallExpr) []types.Type {
 			return nil
 		}
 		// A function value: its type gives the result.
-		if !g.r.final {
+		sig, _ := typeUnder[*types.Signature](g.typeOf(f))
+		errOnly := sig != nil && sig.Results().Len() == 1 && sig.Params().Len() == 2
+		switch {
+		case !g.r.final && errOnly:
+			g.w.str("_egoEachE(")
+		case !g.r.final:
 			g.w.str("_egoEachF(")
-		} else {
+		default:
 			g.w.str(g.pkgRef(scopePath) + ".Each(ctx, ")
 		}
 		g.node(items)
 		g.w.str(", ")
 		g.node(limit)
 		g.w.str(", ")
-		g.node(f)
+		if errOnly && g.r.final {
+			// scope.Each wants a value with each error: give it struct{}{}.
+			if hasCall(f) {
+				g.errorf(f.Pos(), "each takes a function value or x => call(x) here, not a call returning a function")
+			}
+			item := g.temp("item")
+			g.w.str("func(ctx " + g.pkgRef("context") + ".Context, " + item + " " + g.typeString(sig.Params().At(1).Type()) + ") (struct{}, error) { return struct{}{}, ")
+			g.node(f)
+			g.w.str("(ctx, " + item + ") }")
+		} else {
+			g.node(f)
+		}
 		g.w.str(")")
-		if sig, ok := typeUnder[*types.Signature](g.typeOf(f)); ok && sig.Results().Len() == 2 {
+		switch {
+		case errOnly:
+			return []types.Type{types.NewSlice(types.NewStruct(nil, nil))}
+		case sig != nil && sig.Results().Len() == 2:
 			return []types.Type{types.NewSlice(sig.Results().At(0).Type())}
 		}
 		return nil

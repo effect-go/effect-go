@@ -194,3 +194,16 @@ func TestMissing(t *testing.T) {
 		}
 	}
 }
+
+func TestEachErrOnly(t *testing.T) {
+	var s Shelf
+	if n, err := s.RemoveAll(t.Context(), []int{1, 2, 3}); n != 6 || err != nil {
+		t.Errorf("RemoveAll: %d %v", n, err)
+	}
+	if _, err := s.RemoveAll(t.Context(), []int{1, -2}); err == nil || err.Error() != "n moved -1 times" {
+		t.Errorf("RemoveAll: %v", err)
+	}
+	if got := (Gone{Slug: "a"}).Error(); got != `"a" is gone` {
+		t.Errorf("Gone: %s", got)
+	}
+}
