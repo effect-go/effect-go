@@ -29,6 +29,9 @@ effect   (s *S)Get( id int )(int,E){
   match v{
   1=>
   2=>  log(v)
+  3=>
+    log(v,
+      v)
   }
   match (v){1=>log(v)}
   k := match *pp{1=>"one"; _=>"many"}

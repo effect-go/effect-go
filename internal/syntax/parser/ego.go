@@ -277,9 +277,10 @@ func (p *parser) parseArms(expr bool, context string) (lbrace token.Pos, arms []
 		p.inPattern = false
 		arm.Arrow = p.expect(scanner.FATARROW)
 		switch {
-		case p.tok != token.LBRACE && p.lineFor(p.pos) > p.lineFor(arm.Arrow):
-			// Nothing follows => on its line: the arm is empty. Read on,
-			// and the next arm would be its body: Red => Green => paint().
+		case p.lineFor(p.pos) > p.lineFor(arm.Arrow) && p.armFollows():
+			// Nothing follows => before the next arm: the arm is empty.
+			// Read on, and the next arm would be its body:
+			// Red => Green => paint().
 			if expr {
 				p.error(arm.Arrow, "expected a value after =>")
 				arm.Body = &ast.BadExpr{From: arm.Arrow, To: arm.Arrow + 2}
@@ -301,6 +302,33 @@ func (p *parser) parseArms(expr bool, context string) (lbrace token.Pos, arms []
 	p.exprLev--
 	rbrace = p.expectClosing(token.RBRACE, context)
 	return
+}
+
+// armFollows reports whether the current token ends an arm: it's the }
+// of the match, or the line it starts is another arm, with => outside of
+// parentheses and braces.
+func (p *parser) armFollows() bool {
+	s := p.scanner.Lookahead()
+	depth := 0
+	for tok := p.tok; ; _, tok, _ = s.ScanToken() {
+		switch tok {
+		case token.LPAREN, token.LBRACK, token.LBRACE:
+			depth++
+		case token.RPAREN, token.RBRACK, token.RBRACE:
+			depth--
+			if depth < 0 {
+				return tok == p.tok
+			}
+		case scanner.FATARROW:
+			if depth == 0 {
+				return true
+			}
+		case token.SEMICOLON, token.EOF:
+			if depth <= 0 {
+				return false
+			}
+		}
+	}
 }
 
 // parseEgoStmt parses an effect-go statement starting at an identifier, or
