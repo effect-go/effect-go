@@ -257,9 +257,9 @@ func GeneratedNames(errs chan error, ok bool) (string, string, string) {
 		return f"{err} {n}"
 	}
 	arm := match error(Duplicate{Slug: "a"}) {
-		nil => "nil"
+		nil          => "nil"
 		Duplicate(_) => if ok { "ok" } else { "not ok" }
-		_ => "other"
+		_            => "other"
 	}
 	return fromSelect, f(io.EOF), arm
 }
