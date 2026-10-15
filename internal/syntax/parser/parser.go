@@ -1204,6 +1204,10 @@ func (p *parser) parseMethodSpec() *ast.Field {
 			typ = p.parseTypeInstance(typ)
 		}
 	}
+	if effect.IsValid() && idents == nil {
+		// effect-go: an embedded type has no effect to keep.
+		p.error(effect, "effect needs a method: effect Name(params) results")
+	}
 
 	// Comment is added at the callsite: the field below may joined with
 	// additional type specs using '|'.

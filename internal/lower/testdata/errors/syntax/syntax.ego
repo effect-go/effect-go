@@ -1,5 +1,9 @@
 package syntax
 
+type I interface {
+	effect io.Reader // ERROR "effect needs a method: effect Name\(params\) results"
+}
+
 func f() {
 	x := f"unterminated {x" // ERROR "string literal not terminated"
 	z := g() else { } // ERROR "else { } needs arms"
