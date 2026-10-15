@@ -3,6 +3,7 @@ package lower
 import (
 	"go/token"
 	"go/types"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -800,16 +801,24 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 			if len(resTexts) == 0 && (f.sig != nil && !f.openRes || g.r.final) {
 				ret = ""
 			}
-			if g.r.final && needsHoist(b) && ret != "" && len(res) == 1 {
-				name := g.temp("v")
-				g.lowerInto(name, true, res[0], b)
-				g.w.str("return " + name + "\n")
-			} else {
+			switch {
+			case !g.r.final || !needsHoist(b):
 				// One line, as a hand-written function literal would be.
 				g.w.buf = g.w.buf[:len(g.w.buf)-1]
 				g.w.str(" " + ret)
 				g.node(b)
 				g.w.str(" ")
+			case ret != "" && len(res) == 1:
+				name := g.temp("v")
+				g.lowerInto(name, true, res[0], b)
+				g.w.str("return " + name + "\n")
+			default:
+				// The statements b needs go inside the function: before
+				// the statement holding it, they would run once, outside.
+				g.genStmt(func() {
+					g.w.str(ret)
+					g.node(b)
+				})
 			}
 		}
 		g.fn = g.fn.outer
@@ -1101,9 +1110,10 @@ func (g *fileGen) each(x *ast.CallExpr) []types.Type {
 	case elem != nil:
 		g.w.str(" " + g.typeString(elem))
 	}
-	g.w.str(") (" + g.typeString(r) + ", error) { return ")
+	g.w.str(") (" + g.typeString(r) + ", error) {")
+	ret := "return "
 	if errOnly {
-		g.w.str("struct{}{}, ")
+		ret += "struct{}{}, "
 	}
 	saved := g.fn
 	g.fn = &funcState{outer: saved, ctx: true, used: map[string]bool{}, temps: map[string]bool{}}
@@ -1111,9 +1121,9 @@ func (g *fileGen) each(x *ast.CallExpr) []types.Type {
 		g.fn.used = saved.used
 		g.fn.temps = saved.temps
 	}
-	g.node(body)
+	g.returnBody(ret, body)
 	g.fn = saved
-	g.w.str(" })")
+	g.w.str(")")
 	return []types.Type{types.NewSlice(r)}
 }
 
@@ -1138,10 +1148,8 @@ func (g *fileGen) draftBranch(a ast.Expr) {
 // nil for a call returning only an error.
 func (g *fileGen) branchType(a ast.Expr) types.Type {
 	if c, ok := ast.Unparen(a).(*ast.CallExpr); ok && g.builtin(c) != "" {
-		saved := g.w
-		g.w = &writer{}
-		vals := g.combinator(c)
-		g.w = saved
+		var vals []types.Type
+		g.measure(func() { vals = g.combinator(c) })
 		if len(vals) == 1 {
 			return vals[0]
 		}
@@ -1160,6 +1168,26 @@ func (g *fileGen) branchType(a ast.Expr) types.Type {
 	return nil
 }
 
+// measure runs fn for what it returns, discarding what it writes: its
+// code, the statements it would hoist, the names it would take and its
+// errors. The real rendering comes after.
+func (g *fileGen) measure(fn func()) {
+	savedW, savedPre, nDiags := g.w, g.pre, len(g.diags)
+	var temps map[string]bool
+	if g.fn != nil {
+		temps = maps.Clone(g.fn.temps)
+	}
+	g.w = &writer{}
+	if g.pre != nil {
+		g.pre = &writer{}
+	}
+	fn()
+	g.w, g.pre, g.diags = savedW, savedPre, g.diags[:nDiags]
+	if g.fn != nil {
+		maps.DeleteFunc(g.fn.temps, func(n string, _ bool) bool { return !temps[n] })
+	}
+}
+
 // task renders a branch as a scope.Task: a closure taking its own ctx.
 func (g *fileGen) task(a ast.Expr) types.Type {
 	a = ast.Unparen(a)
@@ -1174,18 +1202,32 @@ func (g *fileGen) task(a ast.Expr) types.Type {
 		g.fn.used = saved.used
 		g.fn.temps = saved.temps
 	}
+	ret := "return "
 	if t == nil {
-		g.w.str("func(ctx " + ctxType + ") (struct{}, error) { return struct{}{}, ")
-		g.node(a)
-		g.w.str(" }")
-		g.fn = saved
-		return types.NewStruct(nil, nil)
+		t, ret = types.NewStruct(nil, nil), "return struct{}{}, "
 	}
-	g.w.str("func(ctx " + ctxType + ") (" + g.typeString(t) + ", error) { return ")
-	g.node(a)
-	g.w.str(" }")
+	g.w.str("func(ctx " + ctxType + ") (" + g.typeString(t) + ", error) {")
+	g.returnBody(ret, a)
 	g.fn = saved
 	return t
+}
+
+// returnBody writes the end of a function literal returning ret and x: on
+// one line, or, when x needs statements before it, with them inside the
+// function, so they run each time it does and with its ctx.
+func (g *fileGen) returnBody(ret string, x ast.Expr) {
+	if !g.r.final || !needsHoist(x) {
+		g.w.str(" " + ret)
+		g.node(x)
+		g.w.str(" }")
+		return
+	}
+	g.w.str("\n")
+	g.genStmt(func() {
+		g.w.str(ret)
+		g.node(x)
+	})
+	g.w.str("}")
 }
 
 // autoLabel returns the label check gives a call: the last two parts of the

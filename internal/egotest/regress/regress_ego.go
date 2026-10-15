@@ -11,20 +11,23 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/effect-go/effect-go/schedule"
+	"github.com/effect-go/effect-go/scope"
 	"github.com/effect-go/effect-go/trace"
 )
 
 // CheckKeepsErr: check doesn't overwrite an err declared before it.
 //
-//line regress.ego:12
+//line regress.ego:13
 func CheckKeepsErr(a, b string) (int, error) {
 	x, err := strconv.Atoi(a)
 	y, err2 := strconv.Atoi(b)
 	if err2 != nil {
 		return 0, egofmt.Errorf("strconv.Atoi: %w", err2)
 	}
-//line regress.ego:15
+//line regress.ego:16
 	if err != nil {
 		return -1, err
 	}
@@ -38,7 +41,7 @@ func ElseKeepsErr(a, b string) (int, error) {
 	if err2 != nil {
 		y = 0
 	}
-//line regress.ego:25
+//line regress.ego:26
 	if err != nil {
 		return -1, err
 	}
@@ -51,7 +54,7 @@ func ElseKeepsNamedErr(b string) (n int, err error) {
 	if err2 != nil {
 		y = 7
 	}
-//line regress.ego:34
+//line regress.ego:35
 	n = y
 	return
 }
@@ -77,7 +80,7 @@ func Sentinel(err error) string {
 	return v
 }
 
-//line regress.ego:55
+//line regress.ego:56
 type User struct{ Name string }
 
 // OptAssign: x = u?.Name gives the zero value when u is nil.
@@ -90,7 +93,7 @@ func OptAssign(us []*User) []string {
 		} else {
 			name = ""
 		}
-//line regress.ego:63
+//line regress.ego:64
 		out = append(out, name)
 	}
 	return out
@@ -136,7 +139,7 @@ func (e Unavailable) As(target any) bool {
 
 // inTx runs fn as a transaction would: its error comes back as an error.
 //
-//line regress.ego:75
+//line regress.ego:76
 func inTx(fn func() error) error { return fn() }
 
 // PassThrough: check … as Unavailable lets a case of the set through.
@@ -147,14 +150,14 @@ func PassThrough(slug string) error {
 		}
 		return Unavailable{Cause: err}
 	}
-//line regress.ego:80
+//line regress.ego:81
 	if err := inTx(func() error { return io.EOF }); err != nil {
 		if _, ok := egoerrors.AsType[ArticleError](err); ok {
 			return err
 		}
 		return Unavailable{Cause: err}
 	}
-//line regress.ego:81
+//line regress.ego:82
 	return nil
 }
 
@@ -173,7 +176,7 @@ func ShortCircuit(p *Box) bool {
 		v = (v2)
 	}
 	ok := v
-//line regress.ego:89
+//line regress.ego:90
 	return ok
 }
 
@@ -189,7 +192,7 @@ func Order() []string {
 		v2 = 2
 	}
 	x := v + (v2)
-//line regress.ego:97
+//line regress.ego:98
 	_ = x
 	return calls
 }
@@ -214,11 +217,11 @@ func Shadow(err error) string {
 
 // DivOneLine panics on a line that a stack trace must report as this one.
 //
-//line regress.ego:112
+//line regress.ego:113
 func DivOneLine(ctx context.Context, m map[string]int) (_ int, err error) {
 	ctx, span := trace.Start(ctx, "regress.DivOneLine")
 	defer trace.End(span, &err)
-//line regress.ego:112
+//line regress.ego:113
 	return m["a"] / len(m), nil
 } // one-line
 
@@ -235,12 +238,12 @@ func OptFallback(p *Player) (float64, City) {
 	if p != nil {
 		s = p.Score
 	}
-//line regress.ego:124
+//line regress.ego:125
 	var h City = "none"
 	if p != nil {
 		h = p.Home
 	}
-//line regress.ego:125
+//line regress.ego:126
 	return s, h
 }
 
@@ -278,7 +281,7 @@ func LocalNames(s string) (int, error) {
 		}
 		return 0, Unavailable{Cause: err}
 	}
-//line regress.ego:156
+//line regress.ego:157
 	return n + fmt, nil
 }
 
@@ -293,12 +296,12 @@ func ParenReceiver(s string) (int, error) {
 	if err != nil {
 		panic(err)
 	}
-//line regress.ego:167
+//line regress.ego:168
 	b, err := (&Counter{N: s}).Value()
 	if err != nil {
 		return 0, err
 	}
-//line regress.ego:168
+//line regress.ego:169
 	return a + b, nil
 }
 
@@ -312,4 +315,92 @@ func CoalesceInLambda(s string) string {
 		}
 		return v
 	}, s)
+}
+
+//line regress.ego:178
+func apply(xs []int, f func(int)) {
+	for _, x := range xs {
+		f(x)
+	}
+}
+
+// LambdaLift: what a lambda's ?? needs runs inside the lambda, with its
+// parameter, not with a variable of the same name outside.
+func LambdaLift(m map[int]string) []string {
+	var out []string
+	x := 0
+	apply([]int{1, 2}, func(x int) {
+		v, ok := m[x]
+		if !ok {
+			v = "none"
+		}
+		print(&out, v)
+	})
+//line regress.ego:190
+	_ = x
+	return out
+}
+
+func print(out *[]string, s string) { *out = append(*out, s) }
+
+func failing(int) (int, error) { return 0, io.EOF }
+
+// BranchLift: what a branch's ?? needs runs on every attempt of a retry,
+// and in each's function.
+func BranchLift(ctx context.Context, m map[int]int, ids []int) (_ int, _ []int, err error) {
+	ctx, span := trace.Start(ctx, "regress.BranchLift")
+	defer trace.End(span, &err)
+//line regress.ego:201
+	attempts := 0
+	count := func() int { attempts++; return attempts }
+	last, err := schedule.Retry(ctx, schedule.Recurs(2), func(ctx context.Context) (int, error) {
+		v, ok := m[0]
+		if !ok {
+			v = count()
+		}
+		return failing(v)
+	})
+	if err != nil {
+		last = -1
+	}
+//line regress.ego:204
+	_ = last
+	got, err := scope.Each(ctx, ids, 2, func(ctx context.Context, id int) (int, error) {
+		v2, ok2 := m[id]
+		if !ok2 {
+			v2 = id
+		}
+		return strconv.Atoi(strconv.Itoa(v2))
+	})
+	if err != nil {
+		return 0, nil, egofmt.Errorf("strconv.Atoi: %w", err)
+	}
+//line regress.ego:206
+	return attempts, got, nil
+}
+
+// NestedLift: a combinator in another one is lowered once.
+func NestedLift(ctx context.Context, m map[int]int) (_ int, err error) {
+	ctx, span := trace.Start(ctx, "regress.NestedLift")
+	defer trace.End(span, &err)
+//line regress.ego:211
+	a, b, err := scope.All2(ctx,
+		func(ctx context.Context) (int, error) {
+			return schedule.Retry(ctx, schedule.Recurs(1), func(ctx context.Context) (int, error) {
+				v, ok := m[3]
+				if !ok {
+					v = 3
+				}
+				return strconv.Atoi(strconv.Itoa(v))
+			})
+		},
+		func(ctx context.Context) (int, error) {
+			return scope.Timeout(ctx, time.Second, func(ctx context.Context) (int, error) { return strconv.Atoi("4") })
+		},
+	)
+	if err != nil {
+		return 0, err
+	}
+//line regress.ego:212
+	return a + b, nil
 }

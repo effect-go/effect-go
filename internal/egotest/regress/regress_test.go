@@ -137,3 +137,16 @@ func TestCoalesceInLambda(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestLifting(t *testing.T) {
+	if got := LambdaLift(map[int]string{1: "one"}); !slices.Equal(got, []string{"one", "none"}) {
+		t.Errorf("LambdaLift: %q", got)
+	}
+	attempts, got, err := BranchLift(t.Context(), map[int]int{2: 20}, []int{1, 2})
+	if attempts != 3 || !slices.Equal(got, []int{1, 20}) || err != nil {
+		t.Errorf("BranchLift: %d attempts, %v, %v", attempts, got, err)
+	}
+	if n, err := NestedLift(t.Context(), nil); n != 7 || err != nil {
+		t.Errorf("NestedLift: %d, %v", n, err)
+	}
+}
