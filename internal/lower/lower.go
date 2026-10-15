@@ -349,6 +349,10 @@ func (p *pkgGen) run(res *Result, only []*fileGen) (*typeInfo, error) {
 		diags = append(diags, f.diags...)
 		outs = append(outs, &Output{Ego: f.path, Go: filepath.Join(cfg.Dir, GoName(f.name)), Src: f.src, Raw: w.buf, Map: newSourceMap(w), File: f.tf})
 	}
+	if slices.ContainsFunc(diags, func(d Diagnostic) bool { return strings.HasPrefix(d.Msg, "can't tell the") }) {
+		// Often because of a typo elsewhere, which only the draft saw.
+		diags = append(diags, p.undefinedInDraft(ti, keep)...)
+	}
 	if len(diags) == 0 && !cfg.NoTypeCheck {
 		// Type-check the result, and report its errors at .ego positions.
 		final, err := p.check(ws, false)
@@ -641,6 +645,33 @@ func (p *pkgGen) mapErrors(ti *typeInfo, outs []*Output) []Diagnostic {
 		if o, ok := byName[pos.Filename]; ok {
 			src, _ := o.Map.ToSource(pos.Offset)
 			ds = append(ds, Diagnostic{Pos: o.File.Position(o.File.Pos(min(src, o.File.Size()))), Msg: te.Msg})
+		}
+	}
+	return ds
+}
+
+// undefinedInDraft returns the draft's errors about undefined names in the
+// source, at .ego positions, in the files keep keeps. The draft's other errors may
+// come from the forms it couldn't type yet, but a name it couldn't find is
+// one the source lacks.
+func (p *pkgGen) undefinedInDraft(ti *typeInfo, keep func(*fileGen) bool) []Diagnostic {
+	if ti == nil {
+		return nil
+	}
+	var ds []Diagnostic
+	for _, err := range ti.errs {
+		var te types.Error
+		if !errors.As(err, &te) || !strings.Contains(te.Msg, "undefined") {
+			continue
+		}
+		pos := ti.fset.Position(te.Pos)
+		for f, ft := range ti.files {
+			if ft.tf.Name() == pos.Filename && keep(f) {
+				// Not where the draft wrote a name of its own, such as ctx.
+				if src, exact := ft.m.ToSource(pos.Offset); exact {
+					ds = append(ds, Diagnostic{Pos: f.tf.Position(f.tf.Pos(min(src, f.tf.Size()))), Msg: te.Msg})
+				}
+			}
 		}
 	}
 	return ds

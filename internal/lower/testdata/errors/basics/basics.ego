@@ -184,3 +184,10 @@ effect getUser(s *users.Service, id users.UserID) (users.User, users.UserError) 
 	u := check s.Get(id)
 	return u, nil
 }
+
+// A typo that leaves a type unknown is reported, not only what follows.
+func typo(m map[string]int) int {
+	x := m["k"] ?? undefinedOne    // ERROR "undefined: undefinedOne"
+	z := if x > 0 { 1 } else { 3 } // ERROR "can't tell the type"
+	return x + z
+}
