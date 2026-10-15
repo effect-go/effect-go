@@ -41,16 +41,35 @@ func TestCoverage(t *testing.T) {
 	}
 }
 
-// copyPackage copies files of a package into a new directory in the module,
-// so that it builds; go ignores directories starting with _ in patterns
-// such as ./...
-func copyPackage(t *testing.T, from string, files ...string) string {
+// runtimeModule makes the current directory a new module, which can import
+// this module's packages through a go.work file.
+func runtimeModule(t *testing.T) {
 	t.Helper()
-	dir, err := os.MkdirTemp(".", "_pkg")
+	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"go.mod":  "module example.com/tmp\n\ngo 1.26.0\n",
+		"go.work": "go 1.26.0\n\nuse (\n\t.\n\t" + root + "\n)\n",
+	})
+	t.Chdir(dir)
+}
+
+// copyPackage copies files of a package into a new module, which becomes
+// the current directory, and returns the package's directory there.
+func copyPackage(t *testing.T, from string, files ...string) string {
+	t.Helper()
+	from, err := filepath.Abs(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeModule(t)
+	dir := filepath.Base(from)
+	if err := os.Mkdir(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
 	for _, f := range files {
 		data, err := os.ReadFile(filepath.Join(from, f))
 		if err != nil {
@@ -63,25 +82,50 @@ func copyPackage(t *testing.T, from string, files ...string) string {
 	return dir
 }
 
-// Flag values and what follows -args aren't packages; import paths are.
+// Flag values and what follows -args aren't packages.
 func TestTestPackages(t *testing.T) {
 	cases := []struct {
 		args []string
+		dir  string
 		want []string
+		tags string
 	}{
-		{nil, []string{"."}},
-		{[]string{"-run", "./x", "./a/...", "-v", "-count=1"}, []string{"./a/..."}},
-		{[]string{"-coverprofile", "./c.out", "."}, []string{"."}},
-		{[]string{"./b", "-args", "./c"}, []string{"./b"}},
+		{nil, "", []string{"."}, ""},
+		{[]string{"-run", "./x", "./a/...", "-v", "-count=1"}, "", []string{"./a/..."}, ""},
+		{[]string{"-coverprofile", "./c.out", "."}, "", []string{"."}, ""},
+		{[]string{"./b", "-args", "./c"}, "", []string{"./b"}, ""},
+		{[]string{"-c", "./a", "-artifacts", "./b", "-buildvcs", "./c", "-test.v", "./d"}, "", []string{"./a", "./b", "./c", "./d"}, ""},
+		{[]string{"-C", "sub", "-tags", "integration", "./..."}, "sub", []string{"./..."}, "integration"},
+		{[]string{"-C=sub", "-tags=a,b", "example.com/m/x"}, "sub", []string{"example.com/m/x"}, "a,b"},
 	}
 	for _, c := range cases {
-		got, err := testPackages(c.args)
-		if err != nil || !slices.Equal(got, c.want) {
-			t.Errorf("testPackages(%q) = %q, %v; want %q", c.args, got, err, c.want)
+		dir, got, tags := testPackages(c.args)
+		if dir != c.dir || !slices.Equal(got, c.want) || tags != c.tags {
+			t.Errorf("testPackages(%q) = %q, %q, %q; want %q, %q, %q", c.args, dir, got, tags, c.dir, c.want, c.tags)
 		}
 	}
-	got, err := testPackages([]string{"github.com/effect-go/effect-go/scope"})
-	if err != nil || len(got) != 1 || filepath.Base(got[0]) != "scope" {
-		t.Errorf("import path: %q, %v", got, err)
+}
+
+// ego test -C dir generates the packages of dir, and -tags those of its
+// tagged files.
+func TestTestFlags(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"go.mod":               "module example.com/flags\n\ngo 1.26\n",
+		"a.ego":                "package a\n\nfunc A() int { return 1 }\n",
+		"a_test.go":            "package a\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {\n\tif A() != 1 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"integration_test.ego": "//go:build integration\n\npackage a\n\nimport \"testing\"\n\nfunc TestIntegration(t *testing.T) {}\n",
+	})
+	t.Chdir(t.TempDir())
+	if err := testCmd([]string{"-C", dir, "-count=1", "-tags", "integration", "./..."}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a_ego.go", "integration_ego_test.go"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Error(err)
+		}
 	}
 }

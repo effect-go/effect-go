@@ -3,13 +3,12 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"github.com/effect-go/effect-go/internal/lower"
 )
@@ -17,30 +16,66 @@ import (
 // testCmd regenerates the packages to test, then runs go test with the same
 // arguments, so tests never run against stale generated code.
 //
-//line test.ego:17
+//line test.ego:16
 func testCmd(args []string) error {
-	pkgs, err := testPackages(args)
+	dir, pkgs, tags := testPackages(args)
+	wd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-//line test.ego:19
-	if err := generate(pkgs); err != nil {
+	// With -C, go test runs in another directory: so does the rest.
+//line test.ego:20
+	if dir != "" {
+		if err := os.Chdir(dir); err != nil {
+			return err
+		}
+//line test.ego:22
+		defer os.Chdir(wd)
+	}
+	gen := pkgs
+	if tags != "" {
+		gen = append([]string{"-tags=" + tags}, pkgs...)
+	}
+	if err := generate(gen); err != nil {
 		return err
 	}
-//line test.ego:20
+//line test.ego:29
+	var sigs chan os.Signal
 	if wantsCoverage(args) {
+		if tags != "" {
+			defer setTags(tags)()
+		}
 		restore, err := withoutLines(pkgs)
 		defer restore()
 		if err != nil {
 			return err
 		}
-		// Ctrl-C stops go test; the files are restored once it returns.
-		signal.Ignore(os.Interrupt)
-		defer signal.Reset(os.Interrupt)
+		// The files are restored once go test returns: signals stop it,
+		// not ego. (Ctrl-C reaches both.)
+		sigs = make(chan os.Signal, 1)
+		signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+		defer signal.Stop(sigs)
 	}
 	cmd := exec.Command("go", append([]string{"test"}, args...)...)
+	cmd.Dir = wd // where -C is relative to
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+//line test.ego:49
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		for {
+			select {
+			case s := <-sigs:
+				cmd.Process.Signal(s)
+			case <-done:
+				return
+			}
+		}
+	}()
+	if err := cmd.Wait(); err != nil {
 		return errSilent
 	}
 	return nil
@@ -49,44 +84,41 @@ func testCmd(args []string) error {
 // boolFlags are go test's and go build's flags that take no value: any
 // other flag written without = takes the next argument.
 var boolFlags = map[string]bool{
-	"a": true, "asan": true, "benchmem": true, "cover": true, "failfast": true, "fullpath": true,
-	"json": true, "linkshared": true, "modcacherw": true, "msan": true, "n": true, "race": true,
-	"short": true, "trimpath": true, "v": true, "work": true, "x": true,
+	"a": true, "artifacts": true, "asan": true, "benchmem": true, "buildvcs": true, "c": true,
+	"cover": true, "failfast": true, "fullpath": true, "json": true, "linkshared": true,
+	"modcacherw": true, "msan": true, "n": true, "race": true, "short": true, "trimpath": true,
+	"v": true, "work": true, "x": true,
 }
 
-// testPackages returns the directories of the packages go test would test
-// with args: patterns such as ./... as they are, import paths through go
-// list. Flag values and what follows -args are not packages.
-func testPackages(args []string) ([]string, error) {
-	var local, paths []string
+// testPackages returns what go test would test with args: the patterns and
+// import paths, the directory of -C, and the tags of -tags. Flag values and
+// what follows -args are not packages.
+func testPackages(args []string) (dir string, pkgs []string, tags string) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if a == "-args" || a == "--args" {
 			break
 		}
-		if strings.HasPrefix(a, "-") {
-			if name := strings.TrimLeft(a, "-"); !strings.Contains(name, "=") && !boolFlags[name] {
-				i++ // the flag's value
-			}
+		if !strings.HasPrefix(a, "-") {
+			pkgs = append(pkgs, a)
 			continue
 		}
-		if a == "." || a == ".." || strings.HasPrefix(a, "./") || strings.HasPrefix(a, "../") || filepath.IsAbs(a) {
-			local = append(local, a)
-		} else {
-			paths = append(paths, a)
+		name, value, hasValue := strings.Cut(strings.TrimPrefix(strings.TrimLeft(a, "-"), "test."), "=")
+		if !hasValue && !boolFlags[name] && i+1 < len(args) {
+			i++
+			value = args[i]
+		}
+		switch name {
+		case "C":
+			dir = value
+		case "tags":
+			tags = value
 		}
 	}
-	if len(paths) > 0 {
-		out, err := exec.Command("go", append([]string{"list", "-e", "-f", "{{.Dir}}"}, paths...)...).Output()
-		if err != nil {
-			return nil, fmt.Errorf("go list: %v", err)
-		}
-		local = append(local, strings.Fields(string(out))...)
+	if len(pkgs) == 0 {
+		pkgs = []string{"."}
 	}
-	if len(local) == 0 {
-		local = []string{"."}
-	}
-	return local, nil
+	return dir, pkgs, tags
 }
 
 func wantsCoverage(args []string) bool {
