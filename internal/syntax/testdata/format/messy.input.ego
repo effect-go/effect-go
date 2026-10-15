@@ -11,6 +11,7 @@ effect   (s *S)Get( id int )(int,E){
   p := check s.port(id)   as A   else{B(_)=>3000
       A(e)  =>  e.X }
   q := s.port(id)else{  _=>0}
+  for _,x:=range check s.all() as A{n+=x}
   match v{
   1=>
   2=>  log(v)

@@ -19,6 +19,9 @@ effect (s *S) Get(id int) (int, E) {
 		A(e) => e.X
 	}
 	q := s.port(id) else { _ => 0 }
+	for _, x := range check s.all() as A {
+		n += x
+	}
 	match v {
 		1 =>
 		2 => log(v)
