@@ -1,6 +1,7 @@
 package regress
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -212,5 +213,11 @@ func TestEachErrOnly(t *testing.T) {
 func TestFormatter(t *testing.T) {
 	if a, b := Formatter(true, 1); a != "1!" || b != "one 2" {
 		t.Errorf("Formatter: %q %q", a, b)
+	}
+}
+
+func TestImmediate(t *testing.T) {
+	if v, err := Immediate(context.WithValue(t.Context(), ctxKey{}, "v")); v != "v" || err != nil {
+		t.Errorf("Immediate: %q %v", v, err)
 	}
 }

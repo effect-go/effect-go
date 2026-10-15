@@ -1138,6 +1138,18 @@ func (g *fileGen) ctxEdits(n ast.Node) {
 		if !ok || g.builtin(call) != "" {
 			return true
 		}
+		if lit, ok := ast.Unparen(call.Fun).(*ast.FuncLit); ok && lit.Type.Effect.IsValid() {
+			// effect() (T, error) { … }(): the literal's type is unknown
+			// to the draft, but it gets a ctx parameter unless it has one.
+			if g.ctxSource(lit.Type) == "" && len(call.Args) == lit.Type.Params.NumFields() {
+				text := "ctx"
+				if len(call.Args) > 0 {
+					text += ", "
+				}
+				g.edits = append(g.edits, edit{g.off(call.Lparen) + 1, g.off(call.Lparen) + 1, text})
+			}
+			return true
+		}
 		tv, ok := g.tv(call.Fun)
 		if !ok || tv.IsType() || tv.IsBuiltin() {
 			return true

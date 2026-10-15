@@ -3,6 +3,7 @@
 package regress
 
 import (
+	"context"
 	"io"
 	"strconv"
 	"strings"
@@ -385,4 +386,15 @@ func Formatter(loud bool, k int) (string, string) {
 	var g func(int) string
 	g = match k { 1 => n => f"one {n}"; _ => n => "other" }
 	return f(1), g(2)
+}
+
+// ctxValue reads a value from ctx.
+func ctxValue(ctx context.Context) (string, error) { return ctx.Value(ctxKey{}).(string), nil }
+
+type ctxKey struct{}
+
+// Immediate calls an effect literal at once: it gets ctx.
+effect Immediate() (string, error) {
+	v := check effect() (string, error) { return ctxValue() }()
+	return v, nil
 }
