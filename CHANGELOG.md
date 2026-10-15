@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.3.5 (2026-10-15)
 
 - `ego generate` removes the Go it generated from a `.ego` file that was
   deleted or renamed (`x_ego.go`, `x_ego_test.go`), and `layers_ego.go` once
