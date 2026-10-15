@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"time"
+
+	"github.com/effect-go/effect-go/internal/egotest/users"
 )
 
 error E {
@@ -175,4 +177,10 @@ effect errResult() error {
 	}
 	var err error // ERROR "err is already this effect function's error result"
 	return err
+}
+
+// Another package's error set can't be a result.
+effect getUser(s *users.Service, id users.UserID) (users.User, users.UserError) { // ERROR "users.UserError is an error set of another package"
+	u := check s.Get(id)
+	return u, nil
 }

@@ -1222,8 +1222,16 @@ func (g *fileGen) pushFunc(ft *ast.FuncType, body ast.Node) {
 		}
 		if n := len(exprs); n > 0 {
 			last := exprs[n-1]
+			if _, ok := last.(*ast.SelectorExpr); ok && g.r.final {
+				if set, _ := sumCases(g.typeOf(last)); set != nil {
+					g.errorf(last.Pos(), "%s is an error set of another package: return error, or an error set of this package with check … as one of its cases", g.text(last))
+					fs.hasErr = true // check and fail still work, rather than add errors
+				}
+			}
 			if fs.set != nil || isErrorIdent(last) {
 				fs.hasErr = true
+			}
+			if fs.hasErr {
 				exprs = exprs[:n-1]
 			}
 		}
