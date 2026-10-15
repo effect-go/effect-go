@@ -445,9 +445,11 @@ func (p *parser) interpolate(lit *ast.BasicLit) *ast.FString {
 }
 
 // matchBrace returns the index of the "}" closing an interpolation that
-// starts at i, and of the first ':' at its top level (or -1).
+// starts at i, and of the first ':' at its top level (or -1). Only braces
+// count to find the end, as for the scanner: a stray ) is then reported by
+// the parser of the expression, rather than as an unclosed {.
 func matchBrace(v string, i, end int) (int, int) {
-	depth, colon := 0, -1
+	braces, parens, colon := 0, 0, -1
 	for ; i < end; i++ {
 		switch c := v[i]; c {
 		case '"', '\'', '`':
@@ -457,17 +459,19 @@ func matchBrace(v string, i, end int) (int, int) {
 					i++
 				}
 			}
-		case '(', '[', '{':
-			depth++
+		case '(', '[':
+			parens++
 		case ')', ']':
-			depth--
+			parens--
+		case '{':
+			braces++
 		case '}':
-			if depth == 0 {
+			if braces == 0 {
 				return i, colon
 			}
-			depth--
+			braces--
 		case ':':
-			if depth == 0 && colon < 0 {
+			if braces == 0 && parens == 0 && colon < 0 {
 				colon = i
 			}
 		}
@@ -493,7 +497,11 @@ func (p *parser) subExpr(start, end int) ast.Expr {
 		q.next()
 	}
 	if q.tok != token.EOF {
-		p.error(q.pos, "unexpected "+scanner.TokenString(q.tok)+" in {…}")
+		tok := scanner.TokenString(q.tok)
+		if q.tok.IsLiteral() {
+			tok = q.lit // b rather than IDENT
+		}
+		p.error(q.pos, "unexpected "+tok+" in {…}")
 	}
 	return x
 }

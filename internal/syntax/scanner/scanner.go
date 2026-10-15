@@ -1119,7 +1119,11 @@ func (s *Scanner) scanFString() string {
 		case ch == '"' && depth == 0:
 			return string(s.src[offs:s.offset])
 		case ch == '\\' && depth == 0:
-			s.scanEscape('"')
+			if !s.scanEscape('"') && (s.ch == '{' || s.ch == '}') {
+				// \{ is no escape, but its brace is text, as in a plain
+				// string: not an interpolation running to the end.
+				s.next()
+			}
 		case ch == '{':
 			if depth == 0 && s.ch == '{' {
 				s.next() // {{ is a literal brace

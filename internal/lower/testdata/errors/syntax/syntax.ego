@@ -11,5 +11,8 @@ func f() {
 		1 => // ERROR "expected a value after =>"
 		_ => 0
 	}
+	a := f"{a)}" // ERROR "unexpected \) in \{…\}"
+	b := f"{a b}" // ERROR "unexpected b in \{…\}"
+	c := f"\{ {a}" // ERROR "unknown escape sequence"
 	y := 1 +
 } // ERROR "expected operand"
