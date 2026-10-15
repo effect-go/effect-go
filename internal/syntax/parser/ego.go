@@ -389,8 +389,11 @@ func (p *parser) parseSumDecl() *ast.SumDecl {
 // expressions are parsed in place, so their positions are real.
 func (p *parser) interpolate(lit *ast.BasicLit) *ast.FString {
 	fs := &ast.FString{Lit: lit}
-	v := lit.Value
+	// Read the literal from the source, where offsets are file offsets: the
+	// value of a raw string lacks the carriage returns of a CRLF file. Its
+	// text parts drop them too.
 	base := p.file.Offset(lit.ValuePos)
+	v := string(p.scanner.Source()[base:p.file.Offset(lit.End())])
 	start := 1
 	if v[0] == 'f' {
 		start = 2
@@ -434,6 +437,7 @@ func (p *parser) interpolate(lit *ast.BasicLit) *ast.FString {
 		case c == '\\' && !raw && j+1 < end:
 			text = append(text, v[j], v[j+1])
 			j++
+		case c == '\r' && raw:
 		default:
 			text = append(text, c)
 		}

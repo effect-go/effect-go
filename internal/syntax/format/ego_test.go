@@ -5,11 +5,13 @@ import (
 	"flag"
 	"fmt"
 	stdformat "go/format"
+	"go/token"
 	"go/version"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,7 +19,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/effect-go/effect-go/internal/syntax/ast"
 	"github.com/effect-go/effect-go/internal/syntax/format"
+	"github.com/effect-go/effect-go/internal/syntax/parser"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
@@ -137,6 +141,32 @@ func TestErrorsInStringFail(t *testing.T) {
 	src := "package p\n\nvar x = f`{func() int {\n" + strings.Repeat("\tif {}\n", 12) + "\treturn 1\n}()}`\n"
 	if out, err := format.Source([]byte(src)); err == nil {
 		t.Fatalf("no error; formatted to %q", out)
+	}
+}
+
+// A file with CRLF line endings formats like its LF version, raw f-strings
+// included: their interpolations sit at file offsets, which the value of a
+// raw string, stripped of its carriage returns, doesn't keep. Their text
+// drops the carriage returns, like the value.
+func TestCRLF(t *testing.T) {
+	src := "package p\n\nvar x = f`line one\n{a} and {b}`\n\nfunc g() error {\n\tfail `multi\nline {a}`\n}\n"
+	crlf := []byte(strings.ReplaceAll(src, "\n", "\r\n"))
+	got, err := format.Source(crlf)
+	if err != nil || string(got) != src {
+		t.Errorf("got %q, %v", got, err)
+	}
+	f, _ := parser.ParseFile(token.NewFileSet(), "x.ego", crlf, 0)
+	var texts []string
+	ast.Inspect(f, func(n ast.Node) bool {
+		if s, ok := n.(*ast.FString); ok {
+			for _, p := range s.Parts {
+				texts = append(texts, p.Text)
+			}
+		}
+		return true
+	})
+	if want := []string{"line one\n", "", " and ", "", "multi\nline ", ""}; !slices.Equal(texts, want) {
+		t.Errorf("text parts %q, want %q", texts, want)
 	}
 }
 
