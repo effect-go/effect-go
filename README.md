@@ -125,7 +125,7 @@ With one slow feed, its shutdown went from 18 seconds to instant.
 
 ## Status
 
-effect-go is young (v0.3) and meant to be used. A new release never
+effect-go is young (v0.4) and meant to be used. A new release never
 changes your build until you run `ego generate`. Before v1.0, breaking
 changes only come in minor versions (v0.2, v0.3…), each with a
 [changelog](CHANGELOG.md) entry saying how to update. New Go releases are

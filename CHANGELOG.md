@@ -1,13 +1,15 @@
 # Changelog
 
-## Unreleased
+## v0.4.0 (2026-10-16)
 
-Fixes from a review of the whole codebase.
+Fixes from a review of the whole codebase. To update, run
+`ego generate ./...`: the generated code changes.
 
 **Changes in behavior**
 - `a ?? b` also falls back when `a` is a nil map value, a nil result of a
   type assertion or a nil `(v, ok)` result, as it does for a nil pointer.
-  `u?.Tags["k"] ?? d` falls back on a missing key behind the chain too.
+  `u?.Tags["k"] ?? d` falls back on a missing key behind the chain too. To
+  keep a nil that is present, use a comma-ok lookup instead.
 - `scope.Main` logs and exits with status 1 when the shutdown fails (a
   resource fails to close, or fibers outlive `StopTimeout`), even after a
   clean stop by signal.
@@ -21,7 +23,8 @@ Fixes from a review of the whole codebase.
   `&TimeoutError{After: d}` with the field name.
 - `fail (x)`, `match (x)` and `match *p` are the keywords, as `must (x)`
   already was. `ego fmt` no longer turns `fail (x)` into a call or
-  `match *p` into a multiplication.
+  `match *p` into a multiplication. Go that calls a function named `fail`
+  or `match` with a space before `(` needs `fail(x)`, as gofmt writes it.
 
 **Generated code**
 - What `??`, `match` and the other forms need before a statement goes
