@@ -487,7 +487,10 @@ func (p *Proxy) regenLocked(dir string) error {
 		}
 	}
 	p.mu.Unlock()
-	res, err := lower.Generate(lower.Config{Dir: dir, Overlay: overlay, Importer: p.im, NoLines: true, NoTypeCheck: true})
+	// An open file that build constraints exclude here is compiled where
+	// they hold.
+	open := func(path string) bool { _, ok := overlay[path]; return ok }
+	res, err := lower.Generate(lower.Config{Dir: dir, Overlay: overlay, Importer: p.im, NoLines: true, NoTypeCheck: true, Excluded: open})
 	if err != nil {
 		// The open files show it: they can't have other diagnostics.
 		for path := range overlay {
@@ -551,7 +554,7 @@ func (p *Proxy) regenLocked(dir string) error {
 			return err2
 		}
 	}
-//line proxy.ego:521
+//line proxy.ego:524
 	for _, uri := range uris {
 		p.publish(uri)
 	}
@@ -598,24 +601,35 @@ func (p *Proxy) maskLeftovers(dir string, leftovers []string) []func() error {
 }
 
 // save removes the files left in dir from .ego files that are gone, as ego
-// generate does, then writes the generated files of dir, if it compiled
-// cleanly. Leftovers go first: where the file system ignores case, the Go
-// of a file renamed in case only would be written under its old name.
+// generate does, then writes the generated files of dir, with those of the
+// open files that build constraints exclude here, if it compiled cleanly.
+// Leftovers go first: where the file system ignores case, the Go of a file
+// renamed in case only would be written under its old name.
 func (p *Proxy) save(dir string) error {
 	removed, err := removeLeftovers(dir)
 	if err != nil {
 		return err
 	}
-//line proxy.ego:572
+//line proxy.ego:576
 	if err := p.unmask(removed); err != nil {
 		return err
 	}
-//line proxy.ego:573
-	res, err := lower.Generate(lower.Config{Dir: dir, Importer: p.im})
+//line proxy.ego:577
+	open := func(path string) bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		for _, d := range p.egos {
+			if d.path == path {
+				return true
+			}
+		}
+		return false
+	}
+	res, err := lower.Generate(lower.Config{Dir: dir, Importer: p.im, Excluded: open})
 	if err != nil {
 		return err
 	}
-//line proxy.ego:574
+//line proxy.ego:588
 	if len(res.Diags) > 0 {
 		return nil
 	}
@@ -627,7 +641,7 @@ func (p *Proxy) save(dir string) error {
 			return err
 		}
 	}
-//line proxy.ego:583
+//line proxy.ego:597
 	return nil
 }
 
@@ -658,7 +672,7 @@ func removeLeftovers(dir string) ([]string, error) {
 		if err := os.Remove(path); err != nil {
 			return nil, err
 		}
-//line proxy.ego:611
+//line proxy.ego:625
 		removed = append(removed, path)
 	}
 	return removed, nil
@@ -681,7 +695,7 @@ func (p *Proxy) unmask(paths []string) error {
 			return err
 		}
 	}
-//line proxy.ego:631
+//line proxy.ego:645
 	return nil
 }
 
@@ -748,7 +762,7 @@ func (p *Proxy) fromGopls() error {
 		if err != nil {
 			return err
 		}
-//line proxy.ego:694
+//line proxy.ego:708
 		if err := p.safely(m, m.isResponse(), p.handleGopls); err != nil {
 			p.logf("from gopls: %v", err)
 		}
@@ -772,7 +786,7 @@ func (p *Proxy) handleGopls(m *message) error {
 		if err := json.Unmarshal(m.Result, &v); err != nil {
 			return err
 		}
-//line proxy.ego:715
+//line proxy.ego:729
 		if egos := p.unopened(v); len(egos) > 0 {
 			return p.editor.replyError(m.ID, requestFailed, fmt.Sprintf("this changes %s too, which the editor doesn't have open: open it, then try again", strings.Join(egos, ", ")))
 		}
@@ -782,7 +796,7 @@ func (p *Proxy) handleGopls(m *message) error {
 			return err
 		}
 		m.Result = v2
-//line proxy.ego:720
+//line proxy.ego:734
 		return p.editor.write(m)
 	}
 	if m.Method == "textDocument/publishDiagnostics" {
@@ -838,7 +852,7 @@ func (p *Proxy) toGen(raw json.RawMessage, egoText []byte, genURI string, gen *l
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return nil, err
 	}
-//line proxy.ego:773
+//line proxy.ego:787
 	src := newText(egoText)
 	out := newText(gen.Raw)
 	conv := func(pos any) any {

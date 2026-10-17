@@ -456,7 +456,10 @@ func (p *Proxy) regenLocked(dir string) error {
 		}
 	}
 	p.mu.Unlock()
-	res, err := lower.Generate(lower.Config{Dir: dir, Overlay: overlay, Importer: p.im, NoLines: true, NoTypeCheck: true})
+	// An open file that build constraints exclude here is compiled where
+	// they hold.
+	open := func(path string) bool { _, ok := overlay[path]; return ok }
+	res, err := lower.Generate(lower.Config{Dir: dir, Overlay: overlay, Importer: p.im, NoLines: true, NoTypeCheck: true, Excluded: open})
 	if err != nil {
 		// The open files show it: they can't have other diagnostics.
 		for path := range overlay {
@@ -564,13 +567,24 @@ func (p *Proxy) maskLeftovers(dir string, leftovers []string) []func() error {
 }
 
 // save removes the files left in dir from .ego files that are gone, as ego
-// generate does, then writes the generated files of dir, if it compiled
-// cleanly. Leftovers go first: where the file system ignores case, the Go
-// of a file renamed in case only would be written under its old name.
+// generate does, then writes the generated files of dir, with those of the
+// open files that build constraints exclude here, if it compiled cleanly.
+// Leftovers go first: where the file system ignores case, the Go of a file
+// renamed in case only would be written under its old name.
 func (p *Proxy) save(dir string) error {
 	removed := check removeLeftovers(dir) ""
 	check p.unmask(removed) ""
-	res := check lower.Generate(lower.Config{Dir: dir, Importer: p.im}) ""
+	open := func(path string) bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		for _, d := range p.egos {
+			if d.path == path {
+				return true
+			}
+		}
+		return false
+	}
+	res := check lower.Generate(lower.Config{Dir: dir, Importer: p.im, Excluded: open}) ""
 	if len(res.Diags) > 0 {
 		return nil
 	}

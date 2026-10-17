@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -831,5 +832,52 @@ func TestEditorShorthand(t *testing.T) {
 		if !strings.Contains(string(res), c.want) {
 			t.Errorf("hover at %q: %s", c.at, res)
 		}
+	}
+}
+
+// An open file that build constraints exclude here is compiled where they
+// hold: it gets the compiler's diagnostics and gopls's, and saving it
+// writes its Go.
+func TestExcludedFile(t *testing.T) {
+	other := "linux"
+	if runtime.GOOS == other {
+		other = "darwin"
+	}
+	repo, _ := filepath.Abs("../..")
+	root := t.TempDir()
+	writeFiles(t, root, map[string]string{
+		"go.mod":  "module example.com/tmp\n\ngo 1.26.0\n",
+		"go.work": "go 1.26.0\n\nuse (\n\t.\n\t" + repo + "\n)\n",
+		"p/a.ego": "package p\n\nfunc Shared() int { return 1 }\n",
+	})
+	generate(t, filepath.Join(root, "p"))
+	cl, _ := start(t, root)
+	name := "x_" + other + ".ego"
+	path := filepath.Join(root, "p", name)
+	src := "package p\n\nimport \"strconv\"\n\nfunc Bad() int {\n\tn := check strconv.Atoi(\"1\")\n\treturn n + Shared() + nope\n}\n"
+	writeFiles(t, root, map[string]string{"p/" + name: src})
+	uri := pathToURI(path)
+	cl.c.notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "ego", "version": 1, "text": src}})
+	for _, want := range []struct{ msg, at string }{{"check needs a function that returns an error", "check"}, {"undefined: nope", "nope"}} {
+		line := at(src, want.at, 0).Line
+		cl.waitDiags(uri, func(ds []map[string]any) bool {
+			for _, d := range ds {
+				r, _ := d["range"].(map[string]any)
+				start, _ := r["start"].(map[string]any)
+				if strings.Contains(fmt.Sprint(d["message"]), want.msg) && start["line"] == float64(line) {
+					return true
+				}
+			}
+			return false
+		})
+	}
+
+	fixed := "package p\n\nfunc Good() int { return Shared() }\n"
+	writeFiles(t, root, map[string]string{"p/" + name: fixed})
+	cl.c.notify("textDocument/didChange", map[string]any{"textDocument": map[string]any{"uri": uri, "version": 2}, "contentChanges": []any{map[string]any{"text": fixed}}})
+	cl.c.notify("textDocument/didSave", map[string]any{"textDocument": map[string]any{"uri": uri}})
+	cl.call("textDocument/hover", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": at(fixed, "Shared", 0)})
+	if code, err := os.ReadFile(filepath.Join(root, "p", lower.GoName(name))); err != nil || !strings.Contains(string(code), "//go:build "+other) {
+		t.Errorf("saved: %v\n%s", err, code)
 	}
 }
