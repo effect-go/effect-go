@@ -39,6 +39,19 @@ func TestErrors(t *testing.T) {
 	}
 }
 
+// The build tags of GOFLAGS, which ego generate -tags sets, count with the
+// injectors' own.
+func TestGoflagsTags(t *testing.T) {
+	if res, err := Generate("testdata/tagged"); err != nil || res == nil || len(res.Diags) == 0 {
+		t.Fatalf("without the tag: %v, %+v", err, res)
+	}
+	t.Setenv("GOFLAGS", "-mod=mod -tags=extra")
+	res, err := Generate("testdata/tagged")
+	if err != nil || res == nil || len(res.Diags) > 0 || res.Code == nil {
+		t.Fatalf("with the tag: %v, %+v", err, res)
+	}
+}
+
 func TestNoInjectors(t *testing.T) {
 	if res, err := Generate("."); res != nil || err != nil {
 		t.Fatal(res, err)

@@ -88,7 +88,7 @@ func Generate(dir string) (*Result, error) {
 	cfg := &packages.Config{
 		Mode:       packages.NeedName | packages.NeedFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports,
 		Dir:        dir,
-		BuildFlags: []string{"-tags=" + Tag},
+		BuildFlags: []string{"-tags=" + strings.Join(append(goflagsTags(), Tag), ",")},
 	}
 	// The package, then also the packages declaring the sets it uses, until
 	// every set's declaration is loaded: in one load, so they share types.
@@ -140,6 +140,18 @@ func Generate(dir string) (*Result, error) {
 		}
 		return res, nil
 	}
+}
+
+// goflagsTags returns the build tags of GOFLAGS, where ego generate -tags
+// puts them: a -tags flag would replace them.
+func goflagsTags() []string {
+	var tags []string
+	for _, f := range strings.Fields(os.Getenv("GOFLAGS")) {
+		if t, ok := strings.CutPrefix(strings.TrimLeft(f, "-"), "tags="); ok {
+			tags = strings.FieldsFunc(t, func(r rune) bool { return r == ',' })
+		}
+	}
+	return tags
 }
 
 // generate renders the wiring of g.pkg's injectors, reporting whether it
