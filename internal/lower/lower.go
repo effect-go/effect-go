@@ -58,6 +58,11 @@ type Config struct {
 	NoTypeCheck bool
 	// Importer, if set, is reused across calls to cache loaded packages.
 	Importer *Importer
+	// Excluded, if set, picks among the .ego files that build constraints
+	// exclude here those to compile all the same, each in a build context
+	// where its constraints hold: another GOOS or GOARCH, or other build
+	// tags. Their Go is generated and type-checked from any platform.
+	Excluded func(ego string) bool
 }
 
 // An Output is the Go generated from one .ego file.
@@ -86,9 +91,10 @@ type Result struct {
 	Diags   []Diagnostic
 	Fset    *token.FileSet
 	Phases  []Phase // where the time went
-	// Excluded are the .ego files that build constraints exclude here: they
-	// aren't compiled, as their Go needs the types of the platform or tags
-	// they are for.
+	// Excluded are the .ego files that build constraints exclude here, and
+	// that weren't compiled elsewhere: Config.Excluded didn't pick them, or
+	// no build context includes them. Their Go needs the types of the
+	// platform or tags they are for.
 	Excluded []Excluded
 	// Leftovers are the files ego generate wrote from .ego files that are
 	// gone. They aren't part of the package: ego generate removes them.
@@ -198,7 +204,7 @@ func Generate(cfg Config) (*Result, error) {
 	start := time.Now()
 	p := &pkgGen{cfg: cfg, fset: token.NewFileSet(), facts: map[ast.Node]*fact{}, times: &times{}}
 	res := &Result{Fset: p.fset}
-	if err := p.parse(res); err != nil {
+	if err := p.parse(res, buildContext()); err != nil {
 		return nil, err
 	}
 	parsed := time.Since(start)
@@ -212,53 +218,145 @@ func Generate(cfg Config) (*Result, error) {
 			{"format", t.format},
 		}
 	}()
+	if err := p.compile(res, nil); err != nil {
+		return nil, err
+	}
+	if cfg.Excluded != nil {
+		if err := p.elsewhere(res); err != nil {
+			return nil, err
+		}
+	}
+	res.Diags = sortDiags(res.Diags)
+	return res, nil
+}
+
+// compile compiles the package and its tests, adding to res the outputs and
+// diagnostics of the files in want, or of every file if want is nil. The
+// variants that have none of them are skipped, unless a later one needs
+// their types.
+func (p *pkgGen) compile(res *Result, want map[string]bool) error {
 	if len(p.files)+len(p.testFiles)+len(p.xtestFiles) == 0 || len(res.Diags) > 0 {
-		return res, nil // nothing to do, or syntax errors
+		return nil // nothing to do, or syntax errors
 	}
 	// Load what the package and its tests import at once. Loading more paths
 	// later loads their dependencies again, so the external tests would see
 	// another net/http than the package under test does.
 	paths, err := p.imports()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	t := time.Now()
-	err = cfg.Importer.load(cfg.Dir, paths)
+	err = p.cfg.Importer.load(p.cfg.Dir, paths)
 	since(&p.times.load, t)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	pick := func(fs []*fileGen) []*fileGen {
+		if want == nil {
+			return fs
+		}
+		picked := []*fileGen{}
+		for _, f := range fs {
+			if want[f.path] {
+				picked = append(picked, f)
+			}
+		}
+		return picked
+	}
+	some := func(fs []*fileGen) bool { return want == nil || len(pick(fs)) > 0 }
 
 	// The package itself.
-	ti, err := p.run(res, nil)
-	if err != nil {
-		return nil, err
+	var ti *typeInfo
+	if some(p.files) || len(p.testFiles) == 0 && some(p.xtestFiles) {
+		if ti, err = p.run(res, pick(p.files)); err != nil {
+			return err
+		}
 	}
 
 	// In-package tests are checked with the package, as go test does.
 	under := p
-	if len(p.testFiles) > 0 {
+	if len(p.testFiles) > 0 && (some(p.testFiles) || some(p.xtestFiles)) {
 		under = p.variant(append(slices.Clone(p.files), p.testFiles...), append(slices.Clone(p.goFiles), p.testGo...), p.path, p.name)
-		ti, err = under.run(res, p.testFiles)
-		if err != nil {
-			return nil, err
+		if ti, err = under.run(res, pick(p.testFiles)); err != nil {
+			return err
 		}
 	}
 
 	// External tests are their own package, importing the one under test
 	// (with its in-package test files, again as go test does).
-	if len(p.xtestFiles) > 0 {
+	if len(p.xtestFiles) > 0 && some(p.xtestFiles) {
 		v := p.variant(p.xtestFiles, p.xtestGo, p.path+"_test", p.name+"_test")
 		if ti != nil && ti.pkg != nil {
 			v.override = p.recheck(ti.pkg)
 			v.under = under
 		}
-		if _, err := v.run(res, p.xtestFiles); err != nil {
-			return nil, err
+		if _, err := v.run(res, pick(p.xtestFiles)); err != nil {
+			return err
 		}
 	}
-	res.Diags = sortDiags(res.Diags)
-	return res, nil
+	return nil
+}
+
+// elsewhere compiles the files of res.Excluded that cfg.Excluded picks, each
+// in a build context that includes it, and adds their outputs and
+// diagnostics to res. There the package has the files that context
+// includes, and the types of its imports there. A context compiles every
+// excluded file it includes, so there is one compile per context. The files
+// no context includes stay in res.Excluded.
+func (p *pkgGen) elsewhere(res *Result) error {
+	excluded := res.Excluded
+	res.Excluded = nil
+	done := map[string]bool{}
+	for _, ex := range excluded {
+		if done[ex.Ego] {
+			continue
+		}
+		var ctx build.Context
+		ok := p.cfg.Excluded(ex.Ego)
+		if ok {
+			src, err := p.read(ex.Ego)
+			if err != nil {
+				return err
+			}
+			ctx, ok = contextFor(buildContext(), p.cfg.Dir, filepath.Base(ex.Ego), bytes.TrimPrefix(src, bom))
+		}
+		if !ok {
+			res.Excluded = append(res.Excluded, ex)
+			continue
+		}
+		want := map[string]bool{}
+		for _, e := range excluded {
+			if done[e.Ego] || !p.cfg.Excluded(e.Ego) {
+				continue
+			}
+			if src, err := p.read(e.Ego); err == nil && matchBuild(ctx, p.cfg.Dir, filepath.Base(e.Ego), bytes.TrimPrefix(src, bom)) {
+				want[e.Ego], done[e.Ego] = true, true
+			}
+		}
+		cfg := p.cfg
+		cfg.Importer = cfg.Importer.platform(ctx)
+		q := &pkgGen{cfg: cfg, fset: p.fset, facts: map[ast.Node]*fact{}, times: p.times}
+		sub := &Result{}
+		if err := q.parse(sub, ctx); err != nil {
+			return err
+		}
+		if len(sub.Diags) > 0 {
+			// Syntax errors. Those of the files compiled here are reported
+			// already.
+			for _, d := range sub.Diags {
+				if want[d.Pos.Filename] {
+					res.Diags = append(res.Diags, d)
+				}
+			}
+			continue
+		}
+		if err := q.compile(sub, want); err != nil {
+			return err
+		}
+		res.Outputs = append(res.Outputs, sub.Outputs...)
+		res.Diags = append(res.Diags, sub.Diags...)
+	}
+	return nil
 }
 
 // recheck returns the package under test, and the packages its external
@@ -468,8 +566,9 @@ func (p *pkgGen) read(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-// parse parses the package's .ego files and lists its .go files.
-func (p *pkgGen) parse(res *Result) error {
+// parse parses the .ego files of the package that ctx includes, and lists
+// its .go files.
+func (p *pkgGen) parse(res *Result, ctx build.Context) error {
 	entries, err := os.ReadDir(p.cfg.Dir)
 	if err != nil {
 		return err
@@ -496,7 +595,6 @@ func (p *pkgGen) parse(res *Result) error {
 	}
 	sort.Strings(egos)
 	sort.Strings(gos)
-	ctx := buildContext()
 	generated := map[string]bool{}
 	var tests []*fileGen
 	for _, name := range egos {
@@ -513,7 +611,7 @@ func (p *pkgGen) parse(res *Result) error {
 		}
 		// A byte order mark would end up after the generated header, where
 		// Go rejects it.
-		src = bytes.TrimPrefix(src, []byte("\xef\xbb\xbf"))
+		src = bytes.TrimPrefix(src, bom)
 		if !matchBuild(ctx, p.cfg.Dir, name, src) {
 			ex := Excluded{Ego: path, Go: goPath, Missing: !names[goName]}
 			if !ex.Missing {
@@ -798,6 +896,9 @@ func (p *pkgGen) undefinedInDraft(ti *typeInfo, keep func(*fileGen) bool) []Diag
 	}
 	return ds
 }
+
+// bom is the UTF-8 byte order mark.
+var bom = []byte("\xef\xbb\xbf")
 
 // buildContext is the context files are matched against: the default one,
 // with the -tags of GOFLAGS, as go list sees them. (ego generate -tags sets

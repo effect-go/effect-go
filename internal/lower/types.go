@@ -34,6 +34,10 @@ type Importer struct {
 	stamps map[string]time.Time // modification times of the loaded workspace files
 	files  map[string][]string  // the Go files of each loaded package
 	ego    map[string]*egoDecls // the parsed .ego files of loaded packages
+	// For another platform: go list's environment and flags. Its importers
+	// are kept with the current platform's, by build context.
+	env, flags []string
+	others     map[string]*Importer
 }
 
 // egoDecls are what an imported package's .ego files declare that its Go
@@ -69,7 +73,7 @@ func (im *Importer) load(dir string, paths []string) error {
 		}
 	}
 	sort.Strings(all)
-	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedFiles | packages.NeedTypes | packages.NeedImports | packages.NeedDeps, Dir: dir}
+	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedFiles | packages.NeedTypes | packages.NeedImports | packages.NeedDeps, Dir: dir, Env: im.env, BuildFlags: im.flags}
 	loaded, err := packages.Load(cfg, all...)
 	if err != nil {
 		return fmt.Errorf("loading imports: %v", err)
@@ -169,6 +173,9 @@ func (im *Importer) Forget(dir string) {
 	defer im.mu.Unlock()
 	delete(im.pkgs, path)
 	delete(im.errs, path)
+	for _, o := range im.others {
+		o.Forget(dir)
+	}
 }
 
 // dependents returns the loaded packages reachable from roots that import

@@ -2,8 +2,12 @@ package lower
 
 import (
 	"bytes"
+	"go/build"
+	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -157,5 +161,129 @@ func TestExcluded(t *testing.T) {
 	res = generate(t, dir)
 	if len(res.Excluded) != 0 || len(res.Outputs) != 2 || len(res.Diags) > 0 {
 		t.Fatalf("with the tag: excluded %+v, %d outputs\n%s", res.Excluded, len(res.Outputs), diags(res))
+	}
+}
+
+// A file that build constraints exclude here is compiled in the first
+// context that includes it: here with other tags, else the most common
+// port, with here's GOARCH if it can.
+func TestContextFor(t *testing.T) {
+	t.Setenv("CGO_ENABLED", "")
+	here := build.Default
+	here.GOOS, here.GOARCH, here.BuildTags, here.CgoEnabled = "darwin", "arm64", nil, true
+	tagged := here
+	tagged.BuildTags = []string{"foo"}
+	for _, c := range []struct {
+		here       build.Context
+		name, head string
+		want       string // GOOS/GOARCH tags, or "" for none
+	}{
+		{here, "x_linux.ego", "", "linux/arm64 "},
+		{here, "x_windows_386.ego", "", "windows/386 "},
+		{here, "x_linux_test.ego", "//go:build !arm64", "linux/amd64 "},
+		{here, "x.ego", "//go:build integration", "darwin/arm64 integration"},
+		{here, "x.ego", "// Doc.\n\n/* A\nblock */\n//go:build b && !darwin && (a || c)", "linux/arm64 a,b"},
+		{here, "x.ego", "//go:build !darwin", "linux/arm64 "},
+		{here, "x.ego", "//go:build plan9", "plan9/amd64 "},
+		{here, "x.ego", "//go:build js", "js/wasm "},
+		{here, "x.ego", "//go:build ios", "ios/arm64 "},
+		{here, "x.ego", "//go:build linux && !foo || windows && foo", "linux/arm64 "},
+		{tagged, "x.ego", "//go:build !foo", "darwin/arm64 "},
+		{tagged, "x_linux.ego", "//go:build foo", "linux/arm64 foo"},
+		{here, "x.ego", "//go:build linux && windows", ""},
+		{here, "x_linux.ego", "//go:build cgo", ""},
+		{here, "x.ego", "//go:build go1.999", ""},
+		{here, "x.ego", "//go:build ignore", ""},
+	} {
+		src := []byte(c.head + "\n\npackage p\n")
+		got := ""
+		if ctx, ok := contextFor(c.here, "/p", c.name, src); ok {
+			got = ctx.GOOS + "/" + ctx.GOARCH + " " + strings.Join(ctx.BuildTags, ",")
+		}
+		if got != c.want {
+			t.Errorf("%s %q: got %q, want %q", c.name, c.head, got, c.want)
+		}
+	}
+}
+
+// With Config.Excluded, the files that build constraints exclude here are
+// compiled where they hold: with the files of the package there, other
+// platforms' .go files in and this one's out, and the types of the
+// platform. Files no context includes stay excluded.
+func TestExcludedElsewhere(t *testing.T) {
+	other, sym := "linux", "syscall.EPOLLIN"
+	if runtime.GOOS == other {
+		other, sym = "darwin", "syscall.EVFILT_READ"
+	}
+	dir := pkg(t, map[string]string{
+		"a.ego":                        "package p\n\nfunc Shared() int { return 1 }\n",
+		"here_" + runtime.GOOS + ".go": "package p\n\nfunc helper() int { return 1 }\n",
+		"there_" + other + ".go":       "package p\n\nfunc helper() int { return 2 }\n\nfunc otherOnly() int { return 3 }\n",
+		"x_" + other + ".ego":          "package p\n\nimport (\n\t\"strconv\"\n\t\"syscall\"\n)\n\nfunc Platform(s string) (int, error) {\n\tn := check strconv.Atoi(s)\n\treturn n + Shared() + helper() + otherOnly() + int(" + sym + "), nil\n}\n",
+		"x_" + other + "_test.ego":     "package p\n\nimport \"testing\"\n\nfunc TestPlatform(t *testing.T) { _, _ = Platform(\"1\") }\n",
+		"z_" + other + "_test.ego":     "package p_test\n\nimport (\n\t\"testing\"\n\n\t\"example.com/p\"\n)\n\nfunc TestZ(t *testing.T) { _ = must p.Platform(\"1\") }\n",
+		"tag.ego":                      "//go:build integration\n\npackage p\n\nfunc Tagged() int { return Shared() }\n",
+		"never.ego":                    "//go:build linux && windows\n\npackage p\n",
+	})
+	all := func(string) bool { return true }
+	res, err := Generate(Config{Dir: dir, Excluded: all})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Diags) > 0 {
+		t.Fatalf("diagnostics:\n%s", diags(res))
+	}
+	got := map[string]string{}
+	for _, out := range res.Outputs {
+		if _, dup := got[filepath.Base(out.Go)]; dup {
+			t.Errorf("%s twice", out.Go)
+		}
+		got[filepath.Base(out.Go)] = string(out.Code)
+	}
+	for name, line := range map[string]string{
+		"a_ego.go":                    "",
+		"x_" + other + "_ego.go":      "//go:build " + other,
+		"x_" + other + "_ego_test.go": "//go:build " + other,
+		"z_" + other + "_ego_test.go": "//go:build " + other,
+		"tag_ego.go":                  "//go:build integration",
+	} {
+		code, ok := got[name]
+		if !ok || !strings.Contains(code, line) {
+			t.Errorf("%s: %v\n%s", name, ok, code)
+		}
+	}
+	if len(got) != 5 {
+		t.Errorf("outputs: %v", slices.Sorted(maps.Keys(got)))
+	}
+	if len(res.Excluded) != 1 || filepath.Base(res.Excluded[0].Ego) != "never.ego" {
+		t.Errorf("excluded: %+v", res.Excluded)
+	}
+
+	// Without it, they are only listed.
+	if res := generate(t, dir); len(res.Outputs) != 1 || len(res.Excluded) != 5 {
+		t.Errorf("without Excluded: %d outputs, excluded %+v", len(res.Outputs), res.Excluded)
+	}
+
+	// Their errors are reported at .ego positions, and only theirs.
+	bad := filepath.Join(dir, "bad_"+other+".ego")
+	if err := os.WriteFile(bad, []byte("package p\n\nfunc Bad() int { return nope }\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	res, err = Generate(Config{Dir: dir, Excluded: all})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := diags(res); got != "bad_"+other+".ego:3:25: undefined: nope\n" {
+		t.Errorf("diagnostics:\n%s", got)
+	}
+	if err := os.WriteFile(bad, []byte("package p\n\nfunc Bad( {\n"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	res, err = Generate(Config{Dir: dir, Excluded: all})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := diags(res); !strings.HasPrefix(got, "bad_"+other+".ego:3:") || strings.Count(got, "\n") != strings.Count(got, "bad_"+other+".ego") {
+		t.Errorf("diagnostics:\n%s", got)
 	}
 }
