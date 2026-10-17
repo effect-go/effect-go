@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+To update, run `ego generate ./...`: it now writes the Go of `.ego` files
+excluded on your platform too.
+
 **New**
 - A function can return another package's error set:
   `func Get(id ID) (User, users.UserError)`. `check`, `fail`, `match` and
@@ -9,6 +12,26 @@
   it compiles to `error`. Parameters can be declared as one too. An alias
   of a set (`type UserError = users.UserError`) in a signature is
   reported, naming the set to write instead.
+- `ego generate` and `-check` compile the `.ego` files that build
+  constraints exclude here, where their constraints hold: here with the
+  tags they need, else on the first GOOS/GOARCH they allow. `x_linux.ego`
+  is generated and type-checked from a Mac, and CI on one platform checks
+  every platform's Go. Only files nothing satisfies, such as
+  `//go:build ignore`, keep the note. `ego eject` compiles them the same
+  way.
+- `ego lsp`: go to definition, references and implementation open the
+  `.ego` source even when the editor doesn't have that file open, in
+  another package or the same one, instead of the generated `_ego.go`.
+- `ego lsp`: an open `.ego` file excluded on this platform gets the
+  compiler's and gopls's diagnostics, and saving writes its Go.
+
+**Fixes**
+- `ego generate -tags` reaches the wiring: injectors can use providers
+  that only those tags include.
+- `ego lsp`: saving removes the Go left from `.ego` files deleted or
+  renamed (case-only renames included), as `ego generate` does. Before,
+  on a case-insensitive file system, the Go of a file renamed in case
+  only was written under its old name.
 
 ## v0.4.0 (2026-10-16)
 
