@@ -251,7 +251,7 @@ func Generate(cfg Config) (*Result, error) {
 		v := p.variant(p.xtestFiles, p.xtestGo, p.path+"_test", p.name+"_test")
 		if ti != nil && ti.pkg != nil {
 			v.override = p.recheck(ti.pkg)
-			v.overrideSigs = map[string]map[string]*setSig{p.path: under.sigs}
+			v.under = under
 		}
 		if _, err := v.run(res, p.xtestFiles); err != nil {
 			return nil, err

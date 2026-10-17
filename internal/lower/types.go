@@ -8,6 +8,7 @@ import (
 	"go/types"
 	"maps"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -32,7 +33,15 @@ type Importer struct {
 	errs   map[string]string
 	stamps map[string]time.Time // modification times of the loaded workspace files
 	files  map[string][]string  // the Go files of each loaded package
-	sigs   map[string]map[string]*setSig
+	ego    map[string]*egoDecls // the parsed .ego files of loaded packages
+}
+
+// egoDecls are what an imported package's .ego files declare that its Go
+// doesn't tell: the error sets in signatures.
+type egoDecls struct {
+	sums  map[string]*ast.SumDecl // its error sets and enums
+	sigs  map[string]*setSig      // its functions and methods with a set in their signature; nil until asked
+	files []*ast.File
 }
 
 func NewImporter() *Importer { return &Importer{pkgs: map[string]*types.Package{}} }
@@ -70,7 +79,7 @@ func (im *Importer) load(dir string, paths []string) error {
 	im.errs = map[string]string{}
 	im.stamps = map[string]time.Time{}
 	im.files = map[string][]string{}
-	im.sigs = map[string]map[string]*setSig{}
+	im.ego = map[string]*egoDecls{}
 	goroot, modcache := filepath.Join(runtime.GOROOT(), "src"), os.Getenv("GOMODCACHE")
 	if modcache == "" {
 		modcache = filepath.Join(build.Default.GOPATH, "pkg", "mod")
@@ -229,16 +238,14 @@ func (im *Importer) Import(path string) (*types.Package, error) {
 	return nil, fmt.Errorf("package %s not loaded", path)
 }
 
-// setSigs returns the functions and methods that an imported package's
-// .ego files declare with an error set in their signature.
-func (im *Importer) setSigs(path string) map[string]*setSig {
+// decls parses the .ego files of a loaded package, once.
+func (im *Importer) decls(path string) *egoDecls {
 	im.mu.Lock()
 	defer im.mu.Unlock()
-	if s, ok := im.sigs[path]; ok {
-		return s
+	if d, ok := im.ego[path]; ok {
+		return d
 	}
-	var files []*ast.File
-	sums := map[string]*ast.SumDecl{}
+	d := &egoDecls{sums: map[string]*ast.SumDecl{}}
 	for _, f := range im.files[path] {
 		base, ok := strings.CutSuffix(f, "_ego.go")
 		if !ok {
@@ -252,18 +259,49 @@ func (im *Importer) setSigs(path string) map[string]*setSig {
 		if err != nil {
 			continue
 		}
-		files = append(files, af)
-		for _, d := range af.Decls {
-			if sd, ok := d.(*ast.SumDecl); ok {
-				sums[sd.Name.Name] = sd
+		d.files = append(d.files, af)
+		for _, decl := range af.Decls {
+			if sd, ok := decl.(*ast.SumDecl); ok {
+				d.sums[sd.Name.Name] = sd
 			}
 		}
 	}
-	s := setSigs(files, sums)
-	if im.sigs != nil {
-		im.sigs[path] = s
+	if im.ego != nil {
+		im.ego[path] = d
 	}
-	return s
+	return d
+}
+
+// egoSums returns the error sets and enums an imported package's .ego files
+// declare.
+func (im *Importer) egoSums(path string) map[string]*ast.SumDecl { return im.decls(path).sums }
+
+// pkgName returns the name of an imported package.
+func (im *Importer) pkgName(p string) string {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+	if pkg := im.pkgs[p]; pkg != nil {
+		return pkg.Name()
+	}
+	return pathpkg.Base(p)
+}
+
+// setSigs returns the functions and methods that an imported package's
+// .ego files declare with an error set in their signature.
+func (im *Importer) setSigs(path string) map[string]*setSig {
+	d := im.decls(path)
+	im.mu.Lock()
+	sigs := d.sigs
+	im.mu.Unlock()
+	if sigs != nil {
+		return sigs
+	}
+	// Resolving the sets of other packages locks im: not while holding it.
+	sigs = setSigs(d.files, path, d.sums, im)
+	im.mu.Lock()
+	d.sigs = sigs
+	im.mu.Unlock()
+	return sigs
 }
 
 // typeInfo is the result of type-checking one draft of the package.

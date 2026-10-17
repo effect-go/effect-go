@@ -12,11 +12,21 @@ effect Words(text string) (int, error) {
 	return n, nil
 }
 
-// Status maps a user lookup to an HTTP status. users.Service.Get returns
-// UserError, so the match needs no _ arm, and a case added to UserError
-// won't compile until it has one here.
+// Get is s.Get for a given ID. It returns another package's error set:
+// s.Get's errors pass through as they are, and fail takes the set's cases.
+effect Get(s *users.Service, id users.UserID) (users.User, users.UserError) {
+	if id == "" {
+		fail users.NotFound{ID: id}
+	}
+	u := check s.Get(id)
+	return u, nil
+}
+
+// Status maps a user lookup to an HTTP status. Get returns UserError, so
+// the match needs no _ arm, and a case added to UserError won't compile
+// until it has one here.
 effect Status(s *users.Service, id users.UserID) int {
-	_, err := s.Get(id)
+	_, err := Get(s, id)
 	return match err {
 		nil                => 200
 		users.NotFound(_)  => 404

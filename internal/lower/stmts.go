@@ -288,7 +288,7 @@ func (g *fileGen) returnErr(c *ast.CheckExpr, ev string) string {
 	if c.Case == nil || g.fn == nil || g.fn.set == nil {
 		return ret
 	}
-	return "if _, ok := " + g.pkgRef("errors") + ".AsType[" + g.fn.set.Name.Name + "](" + ev + "); ok {\n" + g.ret(ev) + "\n}\n" + ret
+	return "if _, ok := " + g.pkgRef("errors") + ".AsType[" + g.setType(g.fn.set) + "](" + ev + "); ok {\n" + g.ret(ev) + "\n}\n" + ret
 }
 
 // errVar names the variable that holds the error of a check or an else at
@@ -456,7 +456,7 @@ func (g *fileGen) draftCheck(lhs []ast.Expr, tok token.Token, c *ast.CheckExpr) 
 // wrap returns the error a check returns, given the variable holding the
 // error: labelled, or as an error set case.
 func (g *fileGen) wrap(c *ast.CheckExpr, err string) string {
-	set := (*ast.SumDecl)(nil)
+	set := (*errSet)(nil)
 	if g.fn != nil {
 		set = g.fn.set
 	}
@@ -490,8 +490,8 @@ func (g *fileGen) wrap(c *ast.CheckExpr, err string) string {
 			if field == "" && lit == nil {
 				g.errorf(c.Case.Pos(), "%s has no error field to hold the cause: give its fields, as in %s{…}", g.text(typ), g.text(typ))
 			}
-			if set != nil && !g.inSet(t, set) {
-				g.errorf(c.Case.Pos(), "%s is not a case of %s", g.text(typ), set.Name.Name)
+			if set != nil && !inSet(t, set) {
+				g.errorf(c.Case.Pos(), "%s is not a case of %s", g.text(typ), set.text)
 			}
 		}
 		if lit == nil {
@@ -517,9 +517,9 @@ func (g *fileGen) wrap(c *ast.CheckExpr, err string) string {
 	if set != nil {
 		if !g.passesSet(c.X, set) {
 			if call, ok := ast.Unparen(c.X).(*ast.CallExpr); ok && (g.builtin(call) == "timeout" || g.builtin(call) == "each") {
-				g.errorf(c.Pos(), "%s can fail with a cancellation, which isn't a case of %s: write check … as <case> for it", g.builtin(call), set.Name.Name)
+				g.errorf(c.Pos(), "%s can fail with a cancellation, which isn't a case of %s: write check … as <case> for it", g.builtin(call), set.text)
 			} else {
-				g.errorf(c.Pos(), "this function returns %s: write check … as <case>", set.Name.Name)
+				g.errorf(c.Pos(), "this function returns %s: write check … as <case>", set.text)
 			}
 		}
 		return err
@@ -542,10 +542,12 @@ func (g *fileGen) wrap(c *ast.CheckExpr, err string) string {
 	return g.pkgRef("fmt") + `.Errorf("` + label + `: %w", ` + err + `)`
 }
 
-// inSet reports whether a case type belongs to an error set.
-func (g *fileGen) inSet(t types.Type, set *ast.SumDecl) bool {
-	s := setOf(t)
-	return s != nil && s.Obj().Name() == set.Name.Name
+// setType returns the Go type of an error set, in this file.
+func (g *fileGen) setType(set *errSet) string {
+	if set.path == g.pkg.path {
+		return set.name
+	}
+	return g.use(set.path, g.pkg.pkgName(set.path)) + "." + set.name
 }
 
 // elseStmt lowers x := f() else fallback.
@@ -723,12 +725,12 @@ func (g *fileGen) fail(s *ast.FailStmt) {
 		errText = string(g.w.buf)
 		g.w = saved
 		if g.fn != nil && g.fn.set != nil {
-			g.errorf(s.X.Pos(), "this function returns %s: fail with one of its cases", g.fn.set.Name.Name)
+			g.errorf(s.X.Pos(), "this function returns %s: fail with one of its cases", g.fn.set.text)
 		}
 	default:
 		if g.r.final && g.fn != nil && g.fn.set != nil {
-			if t := g.typeOf(x); t != nil && !g.inSet(t, g.fn.set) && !g.isErrorSet(t, g.fn.set) {
-				g.errorf(x.Pos(), "%s is not a case of %s", types.TypeString(t, func(*types.Package) string { return "" }), g.fn.set.Name.Name)
+			if t := g.typeOf(x); t != nil && !inSet(t, g.fn.set) && !isErrorSet(t, g.fn.set) {
+				g.errorf(x.Pos(), "%s is not a case of %s", types.TypeString(t, func(*types.Package) string { return "" }), g.fn.set.text)
 			}
 		}
 		g.w.str(strings.TrimSuffix(g.ret("X"), "X"))

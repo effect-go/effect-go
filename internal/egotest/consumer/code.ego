@@ -1,0 +1,10 @@
+package consumer
+
+import "github.com/effect-go/effect-go/internal/egotest/users"
+
+// Code is a coarser Status, for an error callers in .ego must give as one of
+// users.UserError. This file names users only in the signature, which the
+// generated Go writes with error: it keeps the import used.
+func Code(err users.UserError) int {
+	return if err == nil { 200 } else { 500 }
+}

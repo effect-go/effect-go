@@ -27,9 +27,15 @@ func (r repo) Find(_ context.Context, id users.UserID) (users.User, bool, error)
 
 func TestStatus(t *testing.T) {
 	s := &users.Service{Repo: repo{"ada": {ID: "ada"}}, Now: time.Now}
-	for id, want := range map[users.UserID]int{"ada": 200, "bob": 404, "broken": 503} {
+	for id, want := range map[users.UserID]int{"ada": 200, "bob": 404, "": 404, "broken": 503} {
 		if got := Status(t.Context(), s, id); got != want {
 			t.Errorf("Status(%s) = %d, want %d", id, got, want)
 		}
+	}
+}
+
+func TestCode(t *testing.T) {
+	if Code(nil) != 200 || Code(users.NotFound{}) != 500 {
+		t.Fatal(Code(nil), Code(users.NotFound{}))
 	}
 }

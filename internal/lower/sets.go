@@ -3,6 +3,7 @@ package lower
 import (
 	"go/token"
 	"go/types"
+	"slices"
 
 	"github.com/effect-go/effect-go/internal/syntax/ast"
 )
@@ -56,15 +57,23 @@ func (g *fileGen) sig(fun ast.Expr) (*types.Package, *setSig) {
 		return nil, nil
 	case pkg.Path() == g.pkg.path:
 		return pkg, g.pkg.sigs[key]
-	case g.pkg.overrideSigs[pkg.Path()] != nil:
-		return pkg, g.pkg.overrideSigs[pkg.Path()][key]
+	case g.pkg.under != nil && pkg.Path() == g.pkg.under.path:
+		return pkg, g.pkg.under.sigs[key]
 	}
 	return pkg, g.pkg.cfg.Importer.setSigs(pkg.Path())[key]
 }
 
-// lookupSet returns the type of an error set declared in pkg.
-func lookupSet(pkg *types.Package, set *ast.SumDecl) *types.Named {
-	if tn, ok := pkg.Scope().Lookup(set.Name.Name).(*types.TypeName); ok {
+// lookupSet returns the type of an error set a signature of pkg names: declared
+// in pkg, or in a package it imports.
+func lookupSet(pkg *types.Package, set *errSet) *types.Named {
+	if pkg.Path() != set.path {
+		i := slices.IndexFunc(pkg.Imports(), func(p *types.Package) bool { return p.Path() == set.path })
+		if i < 0 {
+			return nil
+		}
+		pkg = pkg.Imports()[i]
+	}
+	if tn, ok := pkg.Scope().Lookup(set.name).(*types.TypeName); ok {
 		n, _ := types.Unalias(tn.Type()).(*types.Named)
 		return n
 	}
@@ -115,13 +124,18 @@ func isCheck(x ast.Expr) bool {
 
 // passesSet reports whether x is a call whose errors are all of set, so
 // they can be passed on as they are.
-func (g *fileGen) passesSet(x ast.Expr, set *ast.SumDecl) bool { return g.isErrorSet(g.argSet(x), set) }
+func (g *fileGen) passesSet(x ast.Expr, set *errSet) bool { return isErrorSet(g.argSet(x), set) }
 
-// isErrorSet reports whether t is the interface type of set, an error set
-// of this package.
-func (g *fileGen) isErrorSet(t types.Type, set *ast.SumDecl) bool {
+// isErrorSet reports whether t is the interface type of set.
+func isErrorSet(t types.Type, set *errSet) bool {
 	n, ok := types.Unalias(t).(*types.Named)
-	return ok && n != nil && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == g.pkg.path && n.Obj().Name() == set.Name.Name
+	return ok && n != nil && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == set.path && n.Obj().Name() == set.name
+}
+
+// inSet reports whether t is a case of set.
+func inSet(t types.Type, set *errSet) bool {
+	s := setOf(t)
+	return s != nil && isErrorSet(s, set)
 }
 
 // checkSets reports the errors that may not be cases of the error set
@@ -142,7 +156,7 @@ func (g *fileGen) checkSets() {
 		default:
 			return true
 		}
-		set := g.pkg.resultSet(ft)
+		set := g.resultSet(ft)
 		if set == nil || body == nil {
 			return true
 		}
@@ -153,7 +167,7 @@ func (g *fileGen) checkSets() {
 		// A named result is returned by a bare return.
 		if names := ft.Results.List[len(ft.Results.List)-1].Names; len(names) > 0 {
 			if _, why := g.varSet(names[len(names)-1]); why != "" {
-				g.errorf(names[len(names)-1].Pos(), "%s can be given errors that aren't cases of %s (%s)", names[len(names)-1].Name, set.Name.Name, why)
+				g.errorf(names[len(names)-1].Pos(), "%s can be given errors that aren't cases of %s (%s)", names[len(names)-1].Name, set.text, why)
 			}
 		}
 		ast.Inspect(body, func(n ast.Node) bool {
@@ -164,7 +178,7 @@ func (g *fileGen) checkSets() {
 				if len(n.Results) == results {
 					g.returnsCase(n.Results[results-1], set)
 				} else if len(n.Results) == 1 && !isCheck(n.Results[0]) && !g.passesSet(n.Results[0], set) {
-					g.errorf(n.Results[0].Pos(), "%s may fail with errors that aren't cases of %s: use check … as <case>", g.text(n.Results[0]), set.Name.Name)
+					g.errorf(n.Results[0].Pos(), "%s may fail with errors that aren't cases of %s: use check … as <case>", g.text(n.Results[0]), set.text)
 				}
 			}
 			return true
@@ -197,14 +211,14 @@ func (g *fileGen) checkArgs(c *ast.CallExpr) {
 			if why != "" {
 				why = " (" + why + ")"
 			}
-			g.errorf(arg.Pos(), "%s can hold errors that aren't cases of %s%s, and %s takes only %s", g.text(arg), set.Name.Name, why, g.text(c.Fun), set.Name.Name)
+			g.errorf(arg.Pos(), "%s can hold errors that aren't cases of %s%s, and %s takes only %s", g.text(arg), set.text, why, g.text(c.Fun), set.text)
 		}
 	}
 }
 
 // returnsCase reports x, returned as an error of set, unless it is nil, a
 // case of set or a call returning set.
-func (g *fileGen) returnsCase(x ast.Expr, set *ast.SumDecl) {
+func (g *fileGen) returnsCase(x ast.Expr, set *errSet) {
 	switch x := ast.Unparen(x).(type) {
 	case *ast.IfExpr:
 		g.returnsCase(x.Then, set)
@@ -222,10 +236,10 @@ func (g *fileGen) returnsCase(x ast.Expr, set *ast.SumDecl) {
 		return
 	}
 	t := g.typeOf(x)
-	if t == nil || g.inSet(t, set) || g.isErrorSet(t, set) {
+	if t == nil || inSet(t, set) || isErrorSet(t, set) {
 		return
 	}
-	g.errorf(x.Pos(), "%s is not a case of %s: return one of its cases, or use check … as <case>", g.text(x), set.Name.Name)
+	g.errorf(x.Pos(), "%s is not a case of %s: return one of its cases, or use check … as <case>", g.text(x), set.text)
 }
 
 func (g *fileGen) isNil(x ast.Expr) bool {
@@ -326,7 +340,7 @@ func (g *fileGen) varSet(id *ast.Ident) (*types.Named, string) {
 		case *ast.Field:
 			fl, _ := g.parent(p).(*ast.FieldList)
 			ft, _ := g.parent(fl).(*ast.FuncType)
-			switch ps := paramSet(p, g.pkg.sums); {
+			switch ps := g.namedSet(p.Type); {
 			case ps != nil && g.r.ti != nil:
 				add(lookupSet(g.r.ti.pkg, ps))
 			case ft != nil && ft.Results == fl:

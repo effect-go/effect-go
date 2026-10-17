@@ -179,10 +179,19 @@ effect errResult() error {
 	return err
 }
 
-// Another package's error set can't be a result.
-effect getUser(s *users.Service, id users.UserID) (users.User, users.UserError) { // ERROR "users.UserError is an error set of another package"
+// Another package's error set works as this package's do.
+effect getUser(s *users.Service, id users.UserID) (users.User, users.UserError) {
 	u := check s.Get(id)
+	_ = check load() // ERROR "this function returns users.UserError: write check … as <case>"
+	fail B{}         // ERROR "B is not a case of users.UserError"
 	return u, nil
+}
+
+// An alias of a set isn't one to the compiler.
+type Alias = users.UserError
+
+func aliased() (int, Alias) { // ERROR "Alias stands for the error set users.UserError: write users.UserError in signatures"
+	fail users.NotFound{}
 }
 
 // A typo that leaves a type unknown is reported, not only what follows.

@@ -27,14 +27,31 @@ func Words(ctx context.Context, text string) (_ int, err error) {
 	return n, nil
 }
 
-// Status maps a user lookup to an HTTP status. users.Service.Get returns
-// UserError, so the match needs no _ arm, and a case added to UserError
-// won't compile until it has one here.
+// Get is s.Get for a given ID. It returns another package's error set:
+// s.Get's errors pass through as they are, and fail takes the set's cases.
+func Get(ctx context.Context, s *users.Service, id users.UserID) (_ users.User, err error) {
+	ctx, span := trace.Start(ctx, "consumer.Get")
+	defer trace.End(span, &err)
+//line consumer.ego:18
+	if id == "" {
+		return users.User{}, users.NotFound{ID: id}
+	}
+	u, err := s.Get(ctx, id)
+	if err != nil {
+		return users.User{}, err
+	}
+//line consumer.ego:22
+	return u, nil
+}
+
+// Status maps a user lookup to an HTTP status. Get returns UserError, so
+// the match needs no _ arm, and a case added to UserError won't compile
+// until it has one here.
 func Status(ctx context.Context, s *users.Service, id users.UserID) (_ int) {
 	ctx, span := trace.Start(ctx, "consumer.Status")
 	defer trace.End(span, nil)
-//line consumer.ego:19
-	_, err := s.Get(ctx, id)
+//line consumer.ego:29
+	_, err := Get(ctx, s, id)
 	var v int
 	if err == nil {
 		v = 200

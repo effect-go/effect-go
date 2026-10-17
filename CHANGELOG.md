@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**New**
+- A function can return another package's error set:
+  `func Get(id ID) (User, users.UserError)`. `check`, `fail`, `match` and
+  callers in other packages treat it as they do this package's sets, and
+  it compiles to `error`. Parameters can be declared as one too. An alias
+  of a set (`type UserError = users.UserError`) in a signature is
+  reported, naming the set to write instead.
+
 ## v0.4.0 (2026-10-16)
 
 Fixes from a review of the whole codebase. To update, run

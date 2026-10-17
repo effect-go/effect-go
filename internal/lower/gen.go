@@ -29,12 +29,28 @@ type pkgGen struct {
 	testGo, xtestGo       []string
 	override              map[string]*types.Package // imports checked here
 
-	topNames     map[string]bool               // package-level names, from all files
-	sums         map[string]*ast.SumDecl       // error sets and enums declared in .ego files
-	sigs         map[string]*setSig            // functions and methods with an error set in their signature, by "Name" or "Recv.Name"
-	overrideSigs map[string]map[string]*setSig // sigs of the packages in override
-	times        *times                        // shared by the variants
-	facts        map[ast.Node]*fact            // what drafts learned, kept across rounds
+	under    *pkgGen                 // for external tests, the package under test
+	topNames map[string]bool         // package-level names, from all files
+	sums     map[string]*ast.SumDecl // error sets and enums declared in .ego files
+	sigs     map[string]*setSig      // functions and methods with an error set in their signature, by "Name" or "Recv.Name"
+	times    *times                  // shared by the variants
+	facts    map[ast.Node]*fact      // what drafts learned, kept across rounds
+}
+
+// pkgName and egoSums tell what imported packages declare, the package under
+// test included (see setNames).
+func (p *pkgGen) pkgName(path string) string {
+	if p.under != nil && path == p.under.path {
+		return p.under.name
+	}
+	return p.cfg.Importer.pkgName(path)
+}
+
+func (p *pkgGen) egoSums(path string) map[string]*ast.SumDecl {
+	if p.under != nil && path == p.under.path {
+		return p.under.sums
+	}
+	return p.cfg.Importer.egoSums(path)
 }
 
 // A fact is type information about a node that survives the draft rounds.
@@ -88,7 +104,7 @@ func (p *pkgGen) collect() {
 	for i, f := range p.files {
 		files[i] = f.file
 	}
-	p.sigs = setSigs(files, p.sums)
+	p.sigs = setSigs(files, p.path, p.sums, p)
 	for _, path := range p.goFiles {
 		src, err := p.read(path)
 		if err != nil {
@@ -120,37 +136,96 @@ func (p *pkgGen) collect() {
 	}
 }
 
-// resultSet returns the error set a function type's last result names.
-func (p *pkgGen) resultSet(ft *ast.FuncType) *ast.SumDecl { return resultSet(ft, p.sums) }
+// An errSet is an error set a signature names: declared in its package, or
+// in an imported one.
+type errSet struct {
+	path, name string // its package's import path, and its name
+	text       string // as the file writes it: UserError or users.UserError
+}
 
-func resultSet(ft *ast.FuncType, sums map[string]*ast.SumDecl) *ast.SumDecl {
-	if ft.Results == nil || len(ft.Results.List) == 0 {
-		return nil
-	}
-	last := ft.Results.List[len(ft.Results.List)-1]
-	if id, ok := last.Type.(*ast.Ident); ok {
-		if s := sums[id.Name]; s != nil && !s.Enum {
-			return s
+// setNames tells the package names and error sets of imported packages.
+type setNames interface {
+	pkgName(path string) string
+	egoSums(path string) map[string]*ast.SumDecl
+}
+
+// namedSet returns the error set that type expression x names in file f, of
+// the package at path, whose error sets and enums are sums.
+func namedSet(f *ast.File, x ast.Expr, path string, sums map[string]*ast.SumDecl, im setNames) *errSet {
+	switch x := x.(type) {
+	case *ast.Ident:
+		if s := sums[x.Name]; s != nil && !s.Enum {
+			return &errSet{path, x.Name, x.Name}
+		}
+	case *ast.SelectorExpr:
+		q, ok := x.X.(*ast.Ident)
+		if !ok {
+			return nil
+		}
+		for _, spec := range f.Imports {
+			p, _ := strconv.Unquote(spec.Path.Value)
+			var name string
+			if spec.Name != nil {
+				name = spec.Name.Name
+			} else {
+				name = im.pkgName(p)
+			}
+			if name != q.Name {
+				continue
+			}
+			if s := im.egoSums(p)[x.Sel.Name]; s != nil && !s.Enum {
+				return &errSet{p, x.Sel.Name, q.Name + "." + x.Sel.Name}
+			}
+			return nil
 		}
 	}
 	return nil
 }
 
-// A setSig records the error sets in a function's signature.
-type setSig struct {
-	result  *ast.SumDecl         // the set it returns; or nil
-	params  map[int]*ast.SumDecl // parameters declared as a set, by position
-	nparams int                  // parameters in the .ego declaration
+func resultSet(f *ast.File, ft *ast.FuncType, path string, sums map[string]*ast.SumDecl, im setNames) *errSet {
+	if ft.Results == nil || len(ft.Results.List) == 0 {
+		return nil
+	}
+	return namedSet(f, ft.Results.List[len(ft.Results.List)-1].Type, path, sums, im)
 }
 
-func newSetSig(ft *ast.FuncType, sums map[string]*ast.SumDecl) *setSig {
-	sig := &setSig{result: resultSet(ft, sums)}
+// namedSet returns the error set that type expression x names in this file.
+func (g *fileGen) namedSet(x ast.Expr) *errSet {
+	return namedSet(g.file, x, g.pkg.path, g.pkg.sums, g.pkg)
+}
+
+// resultSet returns the error set a function type returns, if any.
+func (g *fileGen) resultSet(ft *ast.FuncType) *errSet {
+	return resultSet(g.file, ft, g.pkg.path, g.pkg.sums, g.pkg)
+}
+
+// setTypeEdit rewrites type expression x to error if it names an error set.
+func (g *fileGen) setTypeEdit(x ast.Expr) {
+	set := g.namedSet(x)
+	if set == nil {
+		return
+	}
+	g.edits = append(g.edits, edit{g.off(x.Pos()), g.off(x.End()), "error"})
+	if set.path != g.pkg.path {
+		g.foreign[x] = set
+	}
+}
+
+// A setSig records the error sets in a function's signature.
+type setSig struct {
+	result  *errSet         // the set it returns; or nil
+	params  map[int]*errSet // parameters declared as a set, by position
+	nparams int             // parameters in the .ego declaration
+}
+
+func newSetSig(f *ast.File, ft *ast.FuncType, path string, sums map[string]*ast.SumDecl, im setNames) *setSig {
+	sig := &setSig{result: resultSet(f, ft, path, sums, im)}
 	i := 0
-	for _, f := range ft.Params.List {
-		for range max(1, len(f.Names)) {
-			if set := paramSet(f, sums); set != nil {
+	for _, fl := range ft.Params.List {
+		for range max(1, len(fl.Names)) {
+			if set := namedSet(f, fl.Type, path, sums, im); set != nil {
 				if sig.params == nil {
-					sig.params = map[int]*ast.SumDecl{}
+					sig.params = map[int]*errSet{}
 				}
 				sig.params[i] = set
 			}
@@ -164,25 +239,16 @@ func newSetSig(ft *ast.FuncType, sums map[string]*ast.SumDecl) *setSig {
 	return sig
 }
 
-// paramSet returns the error set a parameter is declared as.
-func paramSet(f *ast.Field, sums map[string]*ast.SumDecl) *ast.SumDecl {
-	if id, ok := f.Type.(*ast.Ident); ok {
-		if s := sums[id.Name]; s != nil && !s.Enum {
-			return s
-		}
-	}
-	return nil
-}
-
-// setSigs returns the functions, methods and interface methods of files
-// with an error set of sums in their signature, by "Name" or "Recv.Name".
-func setSigs(files []*ast.File, sums map[string]*ast.SumDecl) map[string]*setSig {
+// setSigs returns the functions, methods and interface methods of files,
+// of the package at path, with an error set in their signature, by "Name"
+// or "Recv.Name".
+func setSigs(files []*ast.File, path string, sums map[string]*ast.SumDecl, im setNames) map[string]*setSig {
 	out := map[string]*setSig{}
 	for _, f := range files {
 		for _, d := range f.Decls {
 			switch d := d.(type) {
 			case *ast.FuncDecl:
-				if sig := newSetSig(d.Type, sums); sig != nil {
+				if sig := newSetSig(f, d.Type, path, sums, im); sig != nil {
 					out[funcKey(d)] = sig
 				}
 			case *ast.GenDecl:
@@ -197,7 +263,7 @@ func setSigs(files []*ast.File, sums map[string]*ast.SumDecl) map[string]*setSig
 					}
 					for _, m := range it.Methods.List {
 						if ft, ok := m.Type.(*ast.FuncType); ok && len(m.Names) > 0 {
-							if sig := newSetSig(ft, sums); sig != nil {
+							if sig := newSetSig(f, ft, path, sums, im); sig != nil {
 								out[ts.Name.Name+"."+m.Names[0].Name] = sig
 							}
 						}
@@ -266,6 +332,7 @@ type fileGen struct {
 	taken   map[string]bool   // names of imports
 	diags   []Diagnostic
 	fn      *funcState
+	foreign map[ast.Expr]*errSet // another package's sets in signatures, rewritten to error
 
 	exprPats map[*ast.CallExpr]bool
 	parents  map[ast.Node]ast.Node
@@ -277,7 +344,7 @@ type funcState struct {
 	results []ast.Expr   // result type expressions, error excluded
 	types   []types.Type // their types, when known
 	hasErr  bool         // the last result is an error
-	set     *ast.SumDecl // the error set it returns; or nil
+	set     *errSet      // the error set it returns; or nil
 	effect  bool         // declared with effect
 	ctx     bool         // a ctx is in scope
 	used    map[string]bool
@@ -303,6 +370,7 @@ func (g *fileGen) render(r *round) *writer {
 	g.added = map[string]string{}
 	g.names = map[string]string{}
 	g.taken = map[string]bool{}
+	g.foreign = map[ast.Expr]*errSet{}
 	for _, s := range g.file.Imports {
 		p, _ := strconv.Unquote(s.Path.Value)
 		name := path.Base(p)
@@ -406,7 +474,44 @@ func (g *fileGen) render(r *round) *writer {
 		g.importBlock(paths, spec, nil)
 	}
 	out.add(body)
+	g.keepImports(out)
 	return out
+}
+
+// keepImports declares a blank variable of each set of another package that
+// signatures name, now rewritten to error, if nothing else in the file uses
+// its import.
+func (g *fileGen) keepImports(out *writer) {
+	if len(g.foreign) == 0 {
+		return
+	}
+	used := map[string]bool{}
+	ast.Inspect(g.file, func(n ast.Node) bool {
+		if x, ok := n.(ast.Expr); ok && g.foreign[x] != nil {
+			return false
+		}
+		if sel, ok := n.(*ast.SelectorExpr); ok {
+			if id, ok := sel.X.(*ast.Ident); ok {
+				// Not a variable hiding the package.
+				obj := g.objectOf(id)
+				if _, pkg := obj.(*types.PkgName); pkg || obj == nil {
+					used[id.Name] = true
+				}
+			}
+		}
+		return true
+	})
+	var keep []string
+	for _, set := range g.foreign {
+		q, _, _ := strings.Cut(set.text, ".")
+		if !used[q] && !slices.Contains(keep, set.text) {
+			keep = append(keep, set.text)
+		}
+	}
+	slices.Sort(keep)
+	for _, t := range keep {
+		out.str("\nvar _ " + t + " // used as error by the signatures above\n")
+	}
 }
 
 // use returns the name to refer to an imported package by, importing it if
@@ -829,9 +934,8 @@ func (g *fileGen) computeEdits() {
 					continue
 				}
 				g.setParamEdits(ft)
-				if set := g.pkg.resultSet(ft); set != nil {
-					last := ft.Results.List[len(ft.Results.List)-1]
-					g.edits = append(g.edits, edit{g.off(last.Type.Pos()), g.off(last.Type.End()), "error"})
+				if ft.Results != nil && len(ft.Results.List) > 0 {
+					g.setTypeEdit(ft.Results.List[len(ft.Results.List)-1].Type)
 				}
 				if ft.Effect.IsValid() {
 					g.edits = append(g.edits, edit{g.off(ft.Effect), g.off(m.Names[0].Pos()), ""})
@@ -944,12 +1048,11 @@ func (g *fileGen) ctxParamEdit(ft *ast.FuncType) string {
 // results and parameters to error.
 func (g *fileGen) funcHeaderEdits(recv *ast.FieldList, ft *ast.FuncType, body *ast.BlockStmt, spanName string) {
 	g.setParamEdits(ft)
-	set := g.pkg.resultSet(ft)
+	set := g.resultSet(ft)
 	if !ft.Effect.IsValid() {
 		if set != nil {
 			// The set's interface type stays declared; signatures return error.
-			last := ft.Results.List[len(ft.Results.List)-1]
-			g.edits = append(g.edits, edit{g.off(last.Type.Pos()), g.off(last.Type.End()), "error"})
+			g.setTypeEdit(ft.Results.List[len(ft.Results.List)-1].Type)
 		}
 		return
 	}
@@ -992,7 +1095,7 @@ func (g *fileGen) funcHeaderEdits(recv *ast.FieldList, ft *ast.FuncType, body *a
 					}
 				}
 				if set != nil {
-					g.edits = append(g.edits, edit{g.off(f.Type.Pos()), g.off(f.Type.End()), "error"})
+					g.setTypeEdit(f.Type)
 				}
 			}
 		}
@@ -1032,9 +1135,7 @@ func (g *fileGen) funcHeaderEdits(recv *ast.FieldList, ft *ast.FuncType, body *a
 // setParamEdits rewrites parameters declared as an error set to error.
 func (g *fileGen) setParamEdits(ft *ast.FuncType) {
 	for _, f := range ft.Params.List {
-		if paramSet(f, g.pkg.sums) != nil {
-			g.edits = append(g.edits, edit{g.off(f.Type.Pos()), g.off(f.Type.End()), "error"})
-		}
+		g.setTypeEdit(f.Type)
 	}
 }
 
@@ -1223,7 +1324,7 @@ func hasParam(ft *ast.FuncType, name string) bool {
 
 // pushFunc enters a function.
 func (g *fileGen) pushFunc(ft *ast.FuncType, body ast.Node) {
-	fs := &funcState{outer: g.fn, effect: ft.Effect.IsValid(), set: g.pkg.resultSet(ft), used: map[string]bool{}, temps: map[string]bool{}}
+	fs := &funcState{outer: g.fn, effect: ft.Effect.IsValid(), set: g.resultSet(ft), used: map[string]bool{}, temps: map[string]bool{}}
 	fs.ctx = fs.effect || hasParam(ft, "ctx")
 	if ft.Results != nil {
 		var exprs []ast.Expr
@@ -1234,11 +1335,16 @@ func (g *fileGen) pushFunc(ft *ast.FuncType, body ast.Node) {
 		}
 		if n := len(exprs); n > 0 {
 			last := exprs[n-1]
-			if _, ok := last.(*ast.SelectorExpr); ok && g.r.final {
-				if set, _ := sumCases(g.typeOf(last)); set != nil {
-					g.errorf(last.Pos(), "%s is an error set of another package: return error, or an error set of this package with check … as one of its cases", g.text(last))
-					fs.hasErr = true // check and fail still work, rather than add errors
-				}
+			if set, _ := sumCases(g.typeOf(last)); fs.set == nil && set != nil && implementsError(set) && g.r.final {
+				// An alias: only the set's own name tells the compiler.
+				name := types.TypeString(set, func(p *types.Package) string {
+					if p.Path() == g.pkg.path {
+						return ""
+					}
+					return p.Name()
+				})
+				g.errorf(last.Pos(), "%s stands for the error set %s: write %s in signatures", g.text(last), name, name)
+				fs.hasErr = true // check and fail still work, rather than add errors
 			}
 			if fs.set != nil || isErrorIdent(last) {
 				fs.hasErr = true

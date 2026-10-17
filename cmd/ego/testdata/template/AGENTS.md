@@ -38,7 +38,7 @@ code := match c { Red => 1; _ => 0 }   // expression form: every arm is one valu
 msg := match err { nil => "ok"; Timeout(_), Busy(_) => "retry"; _ => "failed" }  // several patterns per arm; on an error, the expression form needs a nil arm
 ```
 
-`match` must cover every case of an error set, enum or named-constant type, or have a `_` arm. A match on an `error` can leave out `_` only if the error can't be anything else: it comes from a function declared to return the set (from any package), or from a variable only assigned such errors, or it is a parameter declared as the set. Otherwise (a parameter of type `error`, an error from plain Go) it needs `_`. Functions declared to return `(T, UserError)` compile to `(T, error)`; `fail` takes one of its cases. A parameter declared as `UserError` compiles to `error`, and callers in `.ego` must pass an error of the set: `func Code(err UserError) int { return match err {…} }`.
+`match` must cover every case of an error set, enum or named-constant type, or have a `_` arm. A match on an `error` can leave out `_` only if the error can't be anything else: it comes from a function declared to return the set (from any package), or from a variable only assigned such errors, or it is a parameter declared as the set. Otherwise (a parameter of type `error`, an error from plain Go) it needs `_`. Functions declared to return `(T, UserError)`, or another package's `(T, users.UserError)`, compile to `(T, error)`; `fail` takes one of its cases. A parameter declared as `UserError` compiles to `error`, and callers in `.ego` must pass an error of the set: `func Code(err UserError) int { return match err {…} }`.
 
 ## effect functions and concurrency
 
