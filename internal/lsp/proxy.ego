@@ -42,12 +42,14 @@ type egoDoc struct {
 	text []byte
 }
 
-// genDoc is a generated file, open in gopls as an unsaved buffer.
+// genDoc is a generated file, open in gopls as an unsaved buffer, or one
+// gopls reads from disk (see docOf).
 type genDoc struct {
 	uri     string
 	egoURI  string
 	out     *lower.Output
 	version int
+	disk    *alignment // for a file gopls reads from disk, formatted: to out.Raw
 }
 
 type pending struct {
@@ -74,6 +76,9 @@ type Proxy struct {
 	goDiags  map[string][]any       // .ego URI -> gopls diagnostics, mapped
 	dirty    map[string]*time.Timer // directories with edits not compiled yet
 	im       *lower.Importer
+
+	diskMu sync.Mutex          // guards disk
+	disk   map[string]*diskDir // generated files gopls reads from disk, by directory
 }
 
 // debounce is how long the proxy waits after an edit before compiling. A
@@ -115,7 +120,7 @@ func newProxy(cfg Config, editor, gopls *conn) *Proxy {
 		cfg: cfg, editor: editor, gopls: gopls,
 		egos: map[string]*egoDoc{}, gens: map[string]*genDoc{}, byEgo: map[string]*genDoc{}, masked: map[string]string{},
 		pending: map[string]pending{}, egoDiags: map[string][]any{}, goDiags: map[string][]any{},
-		dirty: map[string]*time.Timer{}, im: lower.NewImporter(),
+		dirty: map[string]*time.Timer{}, im: lower.NewImporter(), disk: map[string]*diskDir{},
 	}
 	if os.Getenv("EGO_LSP_TRACE") != "" && cfg.Log != nil {
 		p.editor.name, p.editor.log = "editor", cfg.Log
@@ -843,7 +848,7 @@ func (p *Proxy) fromGen(v any, req, doc *genDoc) any {
 		_, edit := v["newText"]
 		for _, k := range []string{"uri", "targetUri"} {
 			if u, ok := v[k].(string); ok {
-				doc = p.genOf(u)
+				doc = p.docOf(u)
 				if doc != nil {
 					v[k] = p.egoURIOf(doc)
 				}
@@ -924,16 +929,29 @@ func (p *Proxy) mapRange(v any, gen *genDoc) (any, bool) {
 	if g == nil {
 		return nil, false
 	}
-	out, src := newText(g.Raw), newText(g.Src)
-	a, ok1 := g.Map.ToSource(out.offset(r.Start))
-	z, ok2 := g.Map.ToSource(out.offset(r.End))
+	var start, end int
+	exact := true
+	if al := gen.disk; al != nil {
+		// gopls has the file on disk, formatted.
+		t := newText(al.text)
+		var ok1, ok2 bool
+		start, ok1 = al.toRaw(t.offset(r.Start), false)
+		end, ok2 = al.toRaw(t.offset(r.End), true)
+		exact = ok1 && ok2
+	} else {
+		t := newText(g.Raw)
+		start, end = t.offset(r.Start), t.offset(r.End)
+	}
+	a, ok1 := g.Map.ToSource(start)
+	z, ok2 := g.Map.ToSource(end)
 	if !ok2 {
 		z = a
 	}
 	if z < a {
 		z = a
 	}
-	return Range{Start: src.position(a), End: src.position(z)}, ok1 && ok2
+	src := newText(g.Src)
+	return Range{Start: src.position(a), End: src.position(z)}, exact && ok1 && ok2
 }
 
 // Position and Range are LSP's, in UTF-16 code units.

@@ -46,12 +46,14 @@ type egoDoc struct {
 	text []byte
 }
 
-// genDoc is a generated file, open in gopls as an unsaved buffer.
+// genDoc is a generated file, open in gopls as an unsaved buffer, or one
+// gopls reads from disk (see docOf).
 type genDoc struct {
 	uri     string
 	egoURI  string
 	out     *lower.Output
 	version int
+	disk    *alignment // for a file gopls reads from disk, formatted: to out.Raw
 }
 
 type pending struct {
@@ -78,6 +80,9 @@ type Proxy struct {
 	goDiags  map[string][]any       // .ego URI -> gopls diagnostics, mapped
 	dirty    map[string]*time.Timer // directories with edits not compiled yet
 	im       *lower.Importer
+
+	diskMu sync.Mutex          // guards disk
+	disk   map[string]*diskDir // generated files gopls reads from disk, by directory
 }
 
 // debounce is how long the proxy waits after an edit before compiling. A
@@ -102,16 +107,16 @@ func Run(cfg Config, in io.Reader, out io.Writer) error {
 	if err2 != nil {
 		return err2
 	}
-//line proxy.ego:98
+//line proxy.ego:103
 	gout, err3 := cmd.StdoutPipe()
 	if err3 != nil {
 		return err3
 	}
-//line proxy.ego:99
+//line proxy.ego:104
 	if err4 := cmd.Start(); err4 != nil {
 		return fmt.Errorf("starting gopls: %w", err4)
 	}
-//line proxy.ego:100
+//line proxy.ego:105
 	p := newProxy(cfg, newConn(in, out), newConn(gout, gin))
 	done := make(chan error, 2)
 	go func() { done <- p.fromGopls() }()
@@ -130,7 +135,7 @@ func newProxy(cfg Config, editor, gopls *conn) *Proxy {
 		cfg: cfg, editor: editor, gopls: gopls,
 		egos: map[string]*egoDoc{}, gens: map[string]*genDoc{}, byEgo: map[string]*genDoc{}, masked: map[string]string{},
 		pending: map[string]pending{}, egoDiags: map[string][]any{}, goDiags: map[string][]any{},
-		dirty: map[string]*time.Timer{}, im: lower.NewImporter(),
+		dirty: map[string]*time.Timer{}, im: lower.NewImporter(), disk: map[string]*diskDir{},
 	}
 	if os.Getenv("EGO_LSP_TRACE") != "" && cfg.Log != nil {
 		p.editor.name, p.editor.log = "editor", cfg.Log
@@ -197,7 +202,7 @@ func (p *Proxy) fromEditor() error {
 		if err != nil {
 			return err
 		}
-//line proxy.ego:183
+//line proxy.ego:188
 		if err := p.safely(m, m.isRequest(), p.handleEditor); err != nil {
 			p.logf("%s: %v", m.Method, err)
 		}
@@ -284,7 +289,7 @@ func (p *Proxy) handleEditor(m *message) error {
 		if err := p.flush(dir); err != nil {
 			return err
 		}
-//line proxy.ego:267
+//line proxy.ego:272
 		return p.save(dir)
 	case "textDocument/didClose":
 		return p.close(key)
@@ -334,7 +339,7 @@ func utf16Only(raw json.RawMessage) json.RawMessage {
 	if err != nil {
 		panic(err)
 	}
-//line proxy.ego:313
+//line proxy.ego:318
 	return out
 }
 
@@ -451,13 +456,13 @@ func (p *Proxy) close(key string) error {
 			return err
 		}
 	}
-//line proxy.ego:427
+//line proxy.ego:432
 	for _, u := range append(cleared, uri) {
 		if err := p.editor.notify("textDocument/publishDiagnostics", map[string]any{"uri": u, "diagnostics": []any{}}); err != nil {
 			return err
 		}
 	}
-//line proxy.ego:430
+//line proxy.ego:435
 	if open {
 		return p.regenLocked(dir)
 	}
@@ -546,7 +551,7 @@ func (p *Proxy) regenLocked(dir string) error {
 			return err2
 		}
 	}
-//line proxy.ego:516
+//line proxy.ego:521
 	for _, uri := range uris {
 		p.publish(uri)
 	}
@@ -601,16 +606,16 @@ func (p *Proxy) save(dir string) error {
 	if err != nil {
 		return err
 	}
-//line proxy.ego:567
+//line proxy.ego:572
 	if err := p.unmask(removed); err != nil {
 		return err
 	}
-//line proxy.ego:568
+//line proxy.ego:573
 	res, err := lower.Generate(lower.Config{Dir: dir, Importer: p.im})
 	if err != nil {
 		return err
 	}
-//line proxy.ego:569
+//line proxy.ego:574
 	if len(res.Diags) > 0 {
 		return nil
 	}
@@ -622,7 +627,7 @@ func (p *Proxy) save(dir string) error {
 			return err
 		}
 	}
-//line proxy.ego:578
+//line proxy.ego:583
 	return nil
 }
 
@@ -653,7 +658,7 @@ func removeLeftovers(dir string) ([]string, error) {
 		if err := os.Remove(path); err != nil {
 			return nil, err
 		}
-//line proxy.ego:606
+//line proxy.ego:611
 		removed = append(removed, path)
 	}
 	return removed, nil
@@ -676,7 +681,7 @@ func (p *Proxy) unmask(paths []string) error {
 			return err
 		}
 	}
-//line proxy.ego:626
+//line proxy.ego:631
 	return nil
 }
 
@@ -743,7 +748,7 @@ func (p *Proxy) fromGopls() error {
 		if err != nil {
 			return err
 		}
-//line proxy.ego:689
+//line proxy.ego:694
 		if err := p.safely(m, m.isResponse(), p.handleGopls); err != nil {
 			p.logf("from gopls: %v", err)
 		}
@@ -767,7 +772,7 @@ func (p *Proxy) handleGopls(m *message) error {
 		if err := json.Unmarshal(m.Result, &v); err != nil {
 			return err
 		}
-//line proxy.ego:710
+//line proxy.ego:715
 		if egos := p.unopened(v); len(egos) > 0 {
 			return p.editor.replyError(m.ID, requestFailed, fmt.Sprintf("this changes %s too, which the editor doesn't have open: open it, then try again", strings.Join(egos, ", ")))
 		}
@@ -777,7 +782,7 @@ func (p *Proxy) handleGopls(m *message) error {
 			return err
 		}
 		m.Result = v2
-//line proxy.ego:715
+//line proxy.ego:720
 		return p.editor.write(m)
 	}
 	if m.Method == "textDocument/publishDiagnostics" {
@@ -833,7 +838,7 @@ func (p *Proxy) toGen(raw json.RawMessage, egoText []byte, genURI string, gen *l
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return nil, err
 	}
-//line proxy.ego:768
+//line proxy.ego:773
 	src := newText(egoText)
 	out := newText(gen.Raw)
 	conv := func(pos any) any {
@@ -912,7 +917,7 @@ func (p *Proxy) fromGen(v any, req, doc *genDoc) any {
 		_, edit := v["newText"]
 		for _, k := range []string{"uri", "targetUri"} {
 			if u, ok := v[k].(string); ok {
-				doc = p.genOf(u)
+				doc = p.docOf(u)
 				if doc != nil {
 					v[k] = p.egoURIOf(doc)
 				}
@@ -993,16 +998,29 @@ func (p *Proxy) mapRange(v any, gen *genDoc) (any, bool) {
 	if g == nil {
 		return nil, false
 	}
-	out, src := newText(g.Raw), newText(g.Src)
-	a, ok1 := g.Map.ToSource(out.offset(r.Start))
-	z, ok2 := g.Map.ToSource(out.offset(r.End))
+	var start, end int
+	exact := true
+	if al := gen.disk; al != nil {
+		// gopls has the file on disk, formatted.
+		t := newText(al.text)
+		var ok1, ok2 bool
+		start, ok1 = al.toRaw(t.offset(r.Start), false)
+		end, ok2 = al.toRaw(t.offset(r.End), true)
+		exact = ok1 && ok2
+	} else {
+		t := newText(g.Raw)
+		start, end = t.offset(r.Start), t.offset(r.End)
+	}
+	a, ok1 := g.Map.ToSource(start)
+	z, ok2 := g.Map.ToSource(end)
 	if !ok2 {
 		z = a
 	}
 	if z < a {
 		z = a
 	}
-	return Range{Start: src.position(a), End: src.position(z)}, ok1 && ok2
+	src := newText(g.Src)
+	return Range{Start: src.position(a), End: src.position(z)}, exact && ok1 && ok2
 }
 
 // Position and Range are LSP's, in UTF-16 code units.

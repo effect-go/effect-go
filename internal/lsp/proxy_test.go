@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"go/token"
 	"io"
 	"os"
 	"os/exec"
@@ -605,6 +606,182 @@ func TestSaveLeftovers(t *testing.T) {
 	notify("textDocument/didSave", map[string]any{"textDocument": map[string]any{"uri": uri}})
 	if got, want := files(), "a_ego.go hand_ego.go"; got != want {
 		t.Errorf("without injectors: %s, want %s", got, want)
+	}
+}
+
+// A position in a generated file that gopls reads from disk, formatted,
+// maps to the .ego file, with the //line directives or without; one in a
+// hand-written file, or in generated Go that is stale, doesn't.
+func TestDiskDocs(t *testing.T) {
+	_, dir := editorModule(t)
+	p := newProxy(Config{}, newConn(strings.NewReader(""), io.Discard), newConn(strings.NewReader(""), io.Discard))
+	goPath, egoPath := filepath.Join(dir, "users_ego.go"), filepath.Join(dir, "users.ego")
+	goURI := pathToURI(goPath)
+	read := func(path string) string {
+		t.Helper()
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	// check maps every identifier of the generated file that maps exactly,
+	// and some declarations.
+	check := func() {
+		t.Helper()
+		doc := p.docOf(goURI)
+		if doc == nil {
+			t.Fatal("no document")
+		}
+		gen, src := read(goPath), read(egoPath)
+		gt, st := newText([]byte(gen)), newText([]byte(src))
+		exact := 0
+		for _, tk := range tokens([]byte(gen)) {
+			if !token.IsIdentifier(tk.key) {
+				continue
+			}
+			r, ok := p.mapRange(Range{gt.position(tk.off), gt.position(tk.off + tk.n)}, doc)
+			if !ok {
+				continue
+			}
+			exact++
+			m := r.(Range)
+			if got := src[st.offset(m.Start):st.offset(m.End)]; got != tk.key {
+				t.Errorf("%s at %v maps to %q at %v", tk.key, gt.position(tk.off), got, m.Start)
+			}
+		}
+		if exact < 100 {
+			t.Errorf("only %d identifiers map exactly", exact)
+		}
+		for _, c := range []struct {
+			gen, src string
+			delta    int
+		}{
+			{"Get(ctx context.Context, id UserID)", "Get(id UserID)", 0},
+			{"NotFound struct", "NotFound{ ID", 0},
+			{"Service struct", "Service struct", 0},
+			{"GetAll(ctx", "GetAll(ids", 0},
+			{"http.StatusServiceUnavailable", "http.StatusServiceUnavailable", 5}, // after 🎉🎉🎉
+		} {
+			r, _ := p.mapRange(Range{at(gen, c.gen, c.delta), at(gen, c.gen, c.delta+1)}, doc)
+			if want := at(src, c.src, c.delta); r == nil || r.(Range).Start != want {
+				t.Errorf("%s maps to %v, want %v", c.gen, r, want)
+			}
+		}
+	}
+	check()
+
+	if p.docOf(pathToURI(filepath.Join(dir, "later.go"))) != nil {
+		t.Error("a hand-written file has a document")
+	}
+
+	src := read(egoPath)
+	writeFiles(t, dir, map[string]string{"users.ego": strings.Replace(src, "GetAll", "GetEvery", -1)})
+	if p.docOf(goURI) != nil {
+		t.Error("stale generated Go has a document")
+	}
+
+	writeFiles(t, dir, map[string]string{"users.ego": "// More lines.\n\n" + src})
+	res, err := lower.Generate(lower.Config{Dir: dir, NoLines: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, out := range res.Outputs {
+		writeFiles(t, dir, map[string]string{filepath.Base(out.Go): string(out.Code)})
+	}
+	check()
+}
+
+// Results that land in the generated Go of .ego files the editor doesn't
+// have open, in the package asked about or in another, point at the .ego
+// files; those in hand-written Go stay as gopls gives them.
+func TestEditorElsewhere(t *testing.T) {
+	repo, _ := filepath.Abs("../..")
+	src, err := os.ReadFile(filepath.Join(repo, "internal/egotest/users/users.ego"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"go.mod":          "module example.com/tmp\n\ngo 1.26.0\n",
+		"go.work":         "go 1.26.0\n\nuse (\n\t.\n\t" + repo + "\n)\n",
+		"users/users.ego": string(src) + "\n// Both calls Active, in more.ego.\neffect (s *Service) Both(id UserID) (bool, error) {\n\treturn s.Active(id)\n}\n",
+		"users/more.ego":  "package users\n\n// Active reports whether the user loads.\neffect (s *Service) Active(id UserID) (bool, error) {\n\t_, err := s.GetAll([]UserID{id})\n\treturn err == nil, nil\n}\n",
+		"users/plain.go":  "package users\n\nimport \"context\"\n\n// First is plain Go.\nfunc (s *Service) First(ctx context.Context, id UserID) (User, error) {\n\tus, err := s.GetAll(ctx, []UserID{id})\n\tif err != nil {\n\t\treturn User{}, err\n\t}\n\treturn us[0], nil\n}\n",
+		"app/app.ego":     "package app\n\nimport \"example.com/tmp/users\"\n\ntype mem struct{}\n\neffect (m mem) Find(id users.UserID) (users.User, bool, error) {\n\treturn users.User{}, false, nil\n}\n\neffect All(s *users.Service, ids []users.UserID) ([]users.User, error) {\n\treturn s.GetAll(ids)\n}\n\neffect Active(s *users.Service, id users.UserID) (bool, error) {\n\treturn s.Active(id)\n}\n\neffect First(s *users.Service, id users.UserID) (users.User, error) {\n\treturn s.First(id)\n}\n",
+	}
+	root := t.TempDir()
+	writeFiles(t, root, files)
+	generate(t, filepath.Join(root, "users"))
+	generate(t, filepath.Join(root, "app"))
+	cl, _ := start(t, root)
+
+	// loc is a location as file:line:character, the file relative to root.
+	type location struct {
+		URI   string
+		Range Range
+	}
+	loc := func(file, needle string, delta int) string {
+		p := at(files[file], needle, delta)
+		return fmt.Sprintf("%s:%d:%d", file, p.Line, p.Character)
+	}
+	locs := func(res json.RawMessage) []string {
+		var ls []location
+		json.Unmarshal(res, &ls)
+		var out []string
+		for _, l := range ls {
+			rel, _ := filepath.Rel(root, uriToPath(l.URI))
+			out = append(out, fmt.Sprintf("%s:%d:%d", filepath.ToSlash(rel), l.Range.Start.Line, l.Range.Start.Character))
+		}
+		sort.Strings(out)
+		return out
+	}
+	open := func(file string) string {
+		uri := pathToURI(filepath.Join(root, file))
+		cl.c.notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "ego", "version": 1, "text": files[file]}})
+		cl.waitDiags(uri, func(ds []map[string]any) bool { return len(ds) == 0 })
+		return uri
+	}
+	request := func(method, file, needle string, delta int) json.RawMessage {
+		params := map[string]any{"textDocument": map[string]any{"uri": pathToURI(filepath.Join(root, file))}, "position": at(files[file], needle, delta)}
+		if method == "textDocument/references" {
+			params["context"] = map[string]any{"includeDeclaration": true}
+		}
+		return cl.call(method, params)
+	}
+
+	app := open("app/app.ego")
+	for _, c := range []struct {
+		method, at string
+		delta      int
+		want       string
+	}{
+		{"definition", "s.GetAll(ids)", 2, loc("users/users.ego", "GetAll(ids []UserID)", 0)},
+		{"definition", "s.Active(id)", 2, loc("users/more.ego", "Active(id UserID)", 0)},
+		{"definition", "users.Service", 6, loc("users/users.ego", "Service struct", 0)},
+		{"definition", "s.First(id)", 2, loc("users/plain.go", "First(ctx", 0)},
+		{"implementation", "Find(id users.UserID)", 0, loc("users/users.ego", "Find(id UserID)", 0)},
+	} {
+		got := locs(request("textDocument/"+c.method, "app/app.ego", c.at, c.delta))
+		if fmt.Sprint(got) != fmt.Sprint([]string{c.want}) {
+			t.Errorf("%s of %s: %v, want %s", c.method, c.at, got, c.want)
+		}
+	}
+	cl.c.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": app}})
+	cl.waitDiags(app, func(ds []map[string]any) bool { return len(ds) == 0 })
+
+	open("users/users.ego")
+	if got, want := locs(request("textDocument/definition", "users/users.ego", "s.Active(id)", 2)), loc("users/more.ego", "Active(id UserID)", 0); fmt.Sprint(got) != fmt.Sprint([]string{want}) {
+		t.Errorf("definition in the package's other .ego file: %v, want %s", got, want)
+	}
+	got := locs(request("textDocument/references", "users/users.ego", "GetAll(ids []UserID)", 0))
+	want := []string{
+		loc("app/app.ego", "s.GetAll(ids)", 2),
+		loc("users/more.ego", "s.GetAll(", 2),
+		loc("users/plain.go", "s.GetAll(", 2),
+		loc("users/users.ego", "GetAll(ids []UserID)", 0),
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("references:\n%v, want\n%v", got, want)
 	}
 }
 
