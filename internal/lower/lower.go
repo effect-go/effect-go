@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/effect-go/effect-go/internal/layers"
 	"github.com/effect-go/effect-go/internal/syntax/ast"
 	"github.com/effect-go/effect-go/internal/syntax/parser"
 	"github.com/effect-go/effect-go/internal/syntax/scanner"
@@ -712,6 +713,29 @@ func (p *pkgGen) parse(res *Result, ctx build.Context) error {
 	return nil
 }
 
+// Leftovers returns the files ego generate wrote in dir whose source is
+// gone: the Go of a .ego file deleted or renamed (see Leftover), and the
+// wiring's layers_ego.go once no injector is left.
+func Leftovers(dir string) []string {
+	entries, _ := os.ReadDir(dir)
+	names := map[string]bool{} // exact: the file system may ignore case
+	for _, e := range entries {
+		names[e.Name()] = true
+	}
+	var out []string
+	for _, e := range entries {
+		path := filepath.Join(dir, e.Name())
+		if e.Name() == layers.FileName {
+			if _, ok := GeneratedFrom(path); ok && !layers.HasInjectors(dir) {
+				out = append(out, path)
+			}
+		} else if Leftover(dir, e.Name(), names) {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
 // Leftover reports whether ego generate wrote the Go file name in dir from
 // a .ego file that is gone: deleted, or renamed, if only in case. names are
 // the directory's file names. The wiring's layers_ego.go isn't one: it goes
@@ -724,7 +748,7 @@ func Leftover(dir, name string, names map[string]bool) bool {
 	if src == "" {
 		// A header without a source: the wiring's, or one rewritten for
 		// coverage.
-		if name == "layers_ego.go" {
+		if name == layers.FileName {
 			return false
 		}
 		if src, ok = SourceName(name); !ok {

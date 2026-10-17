@@ -25,7 +25,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/effect-go/effect-go/internal/layers"
 	"github.com/effect-go/effect-go/internal/lower"
 	"github.com/effect-go/effect-go/internal/syntax/format"
 )
@@ -512,6 +511,15 @@ func (p *Proxy) regenLocked(dir string) error {
 			})
 		}
 	}
+	// The Go of an excluded file, compiled while it was open, is gone.
+	for _, ex := range res.Excluded {
+		uri := pathToURI(ex.Go)
+		if gen := p.gens[uri]; gen != nil {
+			delete(p.gens, uri)
+			delete(p.byEgo, gen.egoURI)
+			notes = append(notes, () => p.gopls.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": uri}}))
+		}
+	}
 	notes = append(notes, p.maskLeftovers(dir, res.Leftovers)...)
 	var uris []string
 	for uri := range byFile {
@@ -572,7 +580,10 @@ func (p *Proxy) maskLeftovers(dir string, leftovers []string) []func() error {
 // Leftovers go first: where the file system ignores case, the Go of a file
 // renamed in case only would be written under its old name.
 func (p *Proxy) save(dir string) error {
-	removed := check removeLeftovers(dir) ""
+	removed := lower.Leftovers(dir)
+	for _, path := range removed {
+		check os.Remove(path) ""
+	}
 	check p.unmask(removed) ""
 	open := func(path string) bool {
 		p.mu.Lock()
@@ -595,36 +606,6 @@ func (p *Proxy) save(dir string) error {
 		check os.WriteFile(out.Go, out.Code, 0o666) ""
 	}
 	return nil
-}
-
-// removeLeftovers removes the files ego generate wrote in dir whose source
-// is gone, by ego generate's rules: x_ego.go once x.ego is deleted or
-// renamed, if only in case, layers_ego.go once no injector is left. It
-// returns their paths.
-func removeLeftovers(dir string) ([]string, error) {
-	entries, _ := os.ReadDir(dir)
-	names := map[string]bool{} // exact: the file system may ignore case
-	for _, e := range entries {
-		names[e.Name()] = true
-	}
-	var removed []string
-	for _, e := range entries {
-		name := e.Name()
-		path := filepath.Join(dir, name)
-		if !strings.HasSuffix(name, ".go") {
-			continue
-		}
-		leftover := lower.Leftover(dir, name, names)
-		if src, ok := lower.GeneratedFrom(path); ok && src == "" && name == layers.FileName {
-			leftover = !layers.HasInjectors(dir)
-		}
-		if !leftover {
-			continue
-		}
-		check os.Remove(path) ""
-		removed = append(removed, path)
-	}
-	return removed, nil
 }
 
 // unmask closes the empty buffers that gopls has of removed files.

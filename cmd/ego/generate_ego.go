@@ -172,28 +172,18 @@ func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]st
 }
 
 // removeLeftovers removes the files ego generate wrote in dir whose source
-// is gone: x_ego.go once x.ego is deleted or renamed, layers_ego.go once no
-// injector is left. With -check it only reports them.
+// is gone (see lower.Leftovers). With -check it only reports them.
 func removeLeftovers(dir string) error {
-	entries, _ := os.ReadDir(dir)
-	names := map[string]bool{} // exact: the file system may ignore case
-	for _, e := range entries {
-		names[e.Name()] = true
-	}
-	for _, e := range entries {
-		path := filepath.Join(dir, e.Name())
-		src, ok := generatedFrom(path)
-		if !ok || src == "" && layers.HasInjectors(dir) || src != "" && !lower.Leftover(dir, e.Name(), names) {
-			continue
-		}
+	for _, path := range lower.Leftovers(dir) {
 		if checkOnly {
+			src, _ := generatedFrom(path)
 			var why string
 			if src == "" {
 				why = "no injector"
 			} else {
 				why = "no " + src
 			}
-//line generate.ego:159
+//line generate.ego:149
 			fmt.Fprintf(os.Stderr, "%s: %s; run ego generate\n", rel(path), why)
 			stale = true
 			continue
@@ -201,7 +191,7 @@ func removeLeftovers(dir string) error {
 		if err := os.Remove(path); err != nil {
 			return err
 		}
-//line generate.ego:164
+//line generate.ego:154
 		fmt.Println("removed " + rel(path))
 	}
 	return nil
@@ -309,7 +299,7 @@ func write(path string, code []byte) (bool, error) {
 	if err := os.WriteFile(path, code, 0o666); err != nil {
 		return false, err
 	}
-//line generate.ego:269
+//line generate.ego:259
 	fmt.Println(rel(path))
 	return true, nil
 }
@@ -354,7 +344,7 @@ func egoDirs(args []string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-//line generate.ego:310
+//line generate.ego:300
 		local = append(local, ds...)
 	}
 	for _, a := range local {
@@ -364,7 +354,7 @@ func egoDirs(args []string) ([]string, error) {
 					return err
 				}
 				// What go's ./... skips.
-//line generate.ego:317
+//line generate.ego:307
 				if d.IsDir() && path != root && (strings.HasPrefix(d.Name(), ".") || strings.HasPrefix(d.Name(), "_") || d.Name() == "testdata" || d.Name() == "vendor") {
 					return filepath.SkipDir
 				}
@@ -385,7 +375,7 @@ func egoDirs(args []string) ([]string, error) {
 			}); err != nil {
 				return nil, err
 			}
-//line generate.ego:335
+//line generate.ego:325
 			continue
 		}
 		fi, err := os.Stat(a)
@@ -425,12 +415,12 @@ func importDirs(pattern string) ([]string, error) {
 	} else {
 		suffix = ""
 	}
-//line generate.ego:369
+//line generate.ego:359
 	out, err := exec.Command("go", "list", "-m", "-f", "{{.Path}} {{.Dir}}").Output()
 	if err != nil {
 		return nil, fmt.Errorf("%v: go list -m: %w", pattern, err)
 	}
-//line generate.ego:370
+//line generate.ego:360
 	best, bestDir := "", ""
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		mod, dir, _ := strings.Cut(line, " ")
@@ -446,7 +436,7 @@ func importDirs(pattern string) ([]string, error) {
 		return nil, fmt.Errorf("%v: go list: %w", pattern, err)
 	}
 	out = v
-//line generate.ego:381
+//line generate.ego:371
 	dirs := strings.Fields(string(out))
 	if len(dirs) == 0 {
 		return nil, fmt.Errorf("%v: no such package", pattern)

@@ -27,14 +27,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/effect-go/effect-go/internal/layers"
 	"github.com/effect-go/effect-go/internal/lower"
 	"github.com/effect-go/effect-go/internal/syntax/format"
 )
 
 // Config configures the proxy.
 //
-//line proxy.ego:34
+//line proxy.ego:33
 type Config struct {
 	Gopls string    // path to gopls; "gopls" if empty
 	Log   io.Writer // debug log; may be nil
@@ -107,16 +106,16 @@ func Run(cfg Config, in io.Reader, out io.Writer) error {
 	if err2 != nil {
 		return err2
 	}
-//line proxy.ego:103
+//line proxy.ego:102
 	gout, err3 := cmd.StdoutPipe()
 	if err3 != nil {
 		return err3
 	}
-//line proxy.ego:104
+//line proxy.ego:103
 	if err4 := cmd.Start(); err4 != nil {
 		return fmt.Errorf("starting gopls: %w", err4)
 	}
-//line proxy.ego:105
+//line proxy.ego:104
 	p := newProxy(cfg, newConn(in, out), newConn(gout, gin))
 	done := make(chan error, 2)
 	go func() { done <- p.fromGopls() }()
@@ -202,7 +201,7 @@ func (p *Proxy) fromEditor() error {
 		if err != nil {
 			return err
 		}
-//line proxy.ego:188
+//line proxy.ego:187
 		if err := p.safely(m, m.isRequest(), p.handleEditor); err != nil {
 			p.logf("%s: %v", m.Method, err)
 		}
@@ -289,7 +288,7 @@ func (p *Proxy) handleEditor(m *message) error {
 		if err := p.flush(dir); err != nil {
 			return err
 		}
-//line proxy.ego:272
+//line proxy.ego:271
 		return p.save(dir)
 	case "textDocument/didClose":
 		return p.close(key)
@@ -339,7 +338,7 @@ func utf16Only(raw json.RawMessage) json.RawMessage {
 	if err != nil {
 		panic(err)
 	}
-//line proxy.ego:318
+//line proxy.ego:317
 	return out
 }
 
@@ -456,13 +455,13 @@ func (p *Proxy) close(key string) error {
 			return err
 		}
 	}
-//line proxy.ego:432
+//line proxy.ego:431
 	for _, u := range append(cleared, uri) {
 		if err := p.editor.notify("textDocument/publishDiagnostics", map[string]any{"uri": u, "diagnostics": []any{}}); err != nil {
 			return err
 		}
 	}
-//line proxy.ego:435
+//line proxy.ego:434
 	if open {
 		return p.regenLocked(dir)
 	}
@@ -543,6 +542,17 @@ func (p *Proxy) regenLocked(dir string) error {
 			})
 		}
 	}
+	// The Go of an excluded file, compiled while it was open, is gone.
+	for _, ex := range res.Excluded {
+		uri := pathToURI(ex.Go)
+		if gen := p.gens[uri]; gen != nil {
+			delete(p.gens, uri)
+			delete(p.byEgo, gen.egoURI)
+			notes = append(notes, func() error {
+				return p.gopls.notify("textDocument/didClose", map[string]any{"textDocument": map[string]any{"uri": uri}})
+			})
+		}
+	}
 	notes = append(notes, p.maskLeftovers(dir, res.Leftovers)...)
 	var uris []string
 	for uri := range byFile {
@@ -554,7 +564,7 @@ func (p *Proxy) regenLocked(dir string) error {
 			return err2
 		}
 	}
-//line proxy.ego:524
+//line proxy.ego:532
 	for _, uri := range uris {
 		p.publish(uri)
 	}
@@ -606,15 +616,17 @@ func (p *Proxy) maskLeftovers(dir string, leftovers []string) []func() error {
 // Leftovers go first: where the file system ignores case, the Go of a file
 // renamed in case only would be written under its old name.
 func (p *Proxy) save(dir string) error {
-	removed, err := removeLeftovers(dir)
-	if err != nil {
-		return err
+	removed := lower.Leftovers(dir)
+	for _, path := range removed {
+		if err := os.Remove(path); err != nil {
+			return err
+		}
 	}
-//line proxy.ego:576
+//line proxy.ego:587
 	if err := p.unmask(removed); err != nil {
 		return err
 	}
-//line proxy.ego:577
+//line proxy.ego:588
 	open := func(path string) bool {
 		p.mu.Lock()
 		defer p.mu.Unlock()
@@ -629,7 +641,7 @@ func (p *Proxy) save(dir string) error {
 	if err != nil {
 		return err
 	}
-//line proxy.ego:588
+//line proxy.ego:599
 	if len(res.Diags) > 0 {
 		return nil
 	}
@@ -641,41 +653,8 @@ func (p *Proxy) save(dir string) error {
 			return err
 		}
 	}
-//line proxy.ego:597
+//line proxy.ego:608
 	return nil
-}
-
-// removeLeftovers removes the files ego generate wrote in dir whose source
-// is gone, by ego generate's rules: x_ego.go once x.ego is deleted or
-// renamed, if only in case, layers_ego.go once no injector is left. It
-// returns their paths.
-func removeLeftovers(dir string) ([]string, error) {
-	entries, _ := os.ReadDir(dir)
-	names := map[string]bool{} // exact: the file system may ignore case
-	for _, e := range entries {
-		names[e.Name()] = true
-	}
-	var removed []string
-	for _, e := range entries {
-		name := e.Name()
-		path := filepath.Join(dir, name)
-		if !strings.HasSuffix(name, ".go") {
-			continue
-		}
-		leftover := lower.Leftover(dir, name, names)
-		if src, ok := lower.GeneratedFrom(path); ok && src == "" && name == layers.FileName {
-			leftover = !layers.HasInjectors(dir)
-		}
-		if !leftover {
-			continue
-		}
-		if err := os.Remove(path); err != nil {
-			return nil, err
-		}
-//line proxy.ego:625
-		removed = append(removed, path)
-	}
-	return removed, nil
 }
 
 // unmask closes the empty buffers that gopls has of removed files.
@@ -695,7 +674,7 @@ func (p *Proxy) unmask(paths []string) error {
 			return err
 		}
 	}
-//line proxy.ego:645
+//line proxy.ego:626
 	return nil
 }
 
@@ -762,7 +741,7 @@ func (p *Proxy) fromGopls() error {
 		if err != nil {
 			return err
 		}
-//line proxy.ego:708
+//line proxy.ego:689
 		if err := p.safely(m, m.isResponse(), p.handleGopls); err != nil {
 			p.logf("from gopls: %v", err)
 		}
@@ -786,7 +765,7 @@ func (p *Proxy) handleGopls(m *message) error {
 		if err := json.Unmarshal(m.Result, &v); err != nil {
 			return err
 		}
-//line proxy.ego:729
+//line proxy.ego:710
 		if egos := p.unopened(v); len(egos) > 0 {
 			return p.editor.replyError(m.ID, requestFailed, fmt.Sprintf("this changes %s too, which the editor doesn't have open: open it, then try again", strings.Join(egos, ", ")))
 		}
@@ -796,7 +775,7 @@ func (p *Proxy) handleGopls(m *message) error {
 			return err
 		}
 		m.Result = v2
-//line proxy.ego:734
+//line proxy.ego:715
 		return p.editor.write(m)
 	}
 	if m.Method == "textDocument/publishDiagnostics" {
@@ -852,7 +831,7 @@ func (p *Proxy) toGen(raw json.RawMessage, egoText []byte, genURI string, gen *l
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return nil, err
 	}
-//line proxy.ego:787
+//line proxy.ego:768
 	src := newText(egoText)
 	out := newText(gen.Raw)
 	conv := func(pos any) any {

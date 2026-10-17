@@ -140,21 +140,11 @@ func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]st
 }
 
 // removeLeftovers removes the files ego generate wrote in dir whose source
-// is gone: x_ego.go once x.ego is deleted or renamed, layers_ego.go once no
-// injector is left. With -check it only reports them.
+// is gone (see lower.Leftovers). With -check it only reports them.
 func removeLeftovers(dir string) error {
-	entries, _ := os.ReadDir(dir)
-	names := map[string]bool{} // exact: the file system may ignore case
-	for _, e := range entries {
-		names[e.Name()] = true
-	}
-	for _, e := range entries {
-		path := filepath.Join(dir, e.Name())
-		src, ok := generatedFrom(path)
-		if !ok || src == "" && layers.HasInjectors(dir) || src != "" && !lower.Leftover(dir, e.Name(), names) {
-			continue
-		}
+	for _, path := range lower.Leftovers(dir) {
 		if checkOnly {
+			src, _ := generatedFrom(path)
 			why := if src == "" { "no injector" } else { "no " + src }
 			fmt.Fprintf(os.Stderr, "%s: %s; run ego generate\n", rel(path), why)
 			stale = true

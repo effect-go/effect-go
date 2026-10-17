@@ -524,6 +524,43 @@ func TestCloseDirectory(t *testing.T) {
 	expect(closed)
 }
 
+// An open file that build constraints exclude here has a buffer in gopls,
+// closed with the file even while others of its directory stay open.
+func TestCloseExcluded(t *testing.T) {
+	other := "linux"
+	if runtime.GOOS == other {
+		other = "darwin"
+	}
+	dir := t.TempDir()
+	name := "x_" + other + ".ego"
+	writeFiles(t, dir, map[string]string{
+		"go.mod": "module example.com/c\n\ngo 1.26\n",
+		"a.ego":  "package c\n\nfunc A() int { return 1 }\n",
+		name:     "package c\n\nfunc X() int { return A() }\n",
+	})
+	var sent bytes.Buffer // to gopls
+	p := newProxy(Config{}, newConn(strings.NewReader(""), io.Discard), newConn(strings.NewReader(""), &sent))
+	notify := func(method, name string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		text, _ := os.ReadFile(path)
+		b, _ := json.Marshal(map[string]any{"textDocument": map[string]any{"uri": pathToURI(path), "text": string(text)}})
+		if err := p.handleEditor(&message{Method: method, Params: b}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gen := "x_" + other + "_ego.go"
+	notify("textDocument/didOpen", "a.ego")
+	notify("textDocument/didOpen", name)
+	if got, _ := received(&sent); got != "didOpen a_ego.go, didOpen "+gen {
+		t.Errorf("gopls received %q", got)
+	}
+	notify("textDocument/didClose", name)
+	if got, _ := received(&sent); got != "didClose "+gen {
+		t.Errorf("gopls received %q, want its buffer closed", got)
+	}
+}
+
 // received returns the methods and files of the messages in sent, which
 // gopls received, sorted, and the files' new texts. It empties sent.
 func received(sent *bytes.Buffer) (string, map[string]string) {
