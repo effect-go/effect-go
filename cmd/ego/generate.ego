@@ -82,7 +82,9 @@ func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]st
 		*report = append(*report, rel(filepath.Join(dir, "layers.ego"))+": the name is taken by the wiring's "+layers.FileName+"; rename it")
 		return false, false, nil
 	}
-	res, err := lower.Generate(lower.Config{Dir: dir, NoLines: !lines, Importer: im})
+	// Files that build constraints exclude here are compiled where they
+	// hold, so their Go is current whatever the platform.
+	res, err := lower.Generate(lower.Config{Dir: dir, NoLines: !lines, Importer: im, Excluded: _ => true})
 	check runtimeHint(err) "{rel(dir)}"
 	if debug {
 		var phases []string
@@ -180,17 +182,19 @@ func generatedFrom(path string) (src string, ok bool) {
 	return src, true
 }
 
-// reportExcluded reports the .ego files that build constraints exclude here
-// whose Go is stale, which fails, or missing, which is only a note.
+// reportExcluded reports the .ego files that build constraints exclude in
+// every build context ego compiles in, whose Go is stale, which fails, or
+// missing, which is only a note.
 func reportExcluded(excluded []lower.Excluded, report *[]string) {
 	for _, ex := range excluded {
-		where := "generate it where they hold (with GOOS, GOARCH or ego generate -tags)"
+		why := f"no GOOS, GOARCH and build tags that ego compiles for satisfy the build constraints of {filepath.Base(ex.Ego)}"
+		where := "generate it where they hold (with GOOS, GOARCH, CGO_ENABLED or ego generate -tags)"
 		switch {
 		case ex.Stale:
-			*report = append(*report, f"{rel(ex.Go)}: stale: {filepath.Base(ex.Ego)} is excluded here by its build constraints, but {filepath.Base(ex.Go)} isn't; {where}")
+			*report = append(*report, f"{rel(ex.Go)}: stale: {why}, but {filepath.Base(ex.Go)} builds here; {where}")
 			stale = true
 		case ex.Missing:
-			*report = append(*report, f"{rel(ex.Go)}: not generated: {filepath.Base(ex.Ego)} is excluded here by its build constraints; {where}")
+			*report = append(*report, f"{rel(ex.Go)}: not generated: {why}; {where}")
 		}
 	}
 }

@@ -99,11 +99,13 @@ func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]st
 		*report = append(*report, rel(filepath.Join(dir, "layers.ego"))+": the name is taken by the wiring's "+layers.FileName+"; rename it")
 		return false, false, nil
 	}
-	res, err := lower.Generate(lower.Config{Dir: dir, NoLines: !lines, Importer: im})
+	// Files that build constraints exclude here are compiled where they
+	// hold, so their Go is current whatever the platform.
+	res, err := lower.Generate(lower.Config{Dir: dir, NoLines: !lines, Importer: im, Excluded: func(_ string) bool { return true }})
 	if err2 := runtimeHint(err); err2 != nil {
 		return false, false, fmt.Errorf("%v: %w", rel(dir), err2)
 	}
-//line generate.ego:87
+//line generate.ego:89
 	if debug {
 		var phases []string
 		for _, ph := range res.Phases {
@@ -129,7 +131,7 @@ func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]st
 			if err3 != nil {
 				return false, false, err3
 			}
-//line generate.ego:109
+//line generate.ego:111
 			changed = changed || wrote
 		}
 	}
@@ -147,7 +149,7 @@ func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]st
 	if err4 != nil {
 		return false, false, fmt.Errorf("%v: %w", rel(dir), err4)
 	}
-//line generate.ego:123
+//line generate.ego:125
 	if lr == nil {
 		return true, changed, nil
 	}
@@ -165,7 +167,7 @@ func generateDir(dir string, im *lower.Importer, lines, debug bool, report *[]st
 	if err5 != nil {
 		return false, false, err5
 	}
-//line generate.ego:137
+//line generate.ego:139
 	return true, changed || wrote, nil
 }
 
@@ -191,7 +193,7 @@ func removeLeftovers(dir string) error {
 			} else {
 				why = "no " + src
 			}
-//line generate.ego:157
+//line generate.ego:159
 			fmt.Fprintf(os.Stderr, "%s: %s; run ego generate\n", rel(path), why)
 			stale = true
 			continue
@@ -199,7 +201,7 @@ func removeLeftovers(dir string) error {
 		if err := os.Remove(path); err != nil {
 			return err
 		}
-//line generate.ego:162
+//line generate.ego:164
 		fmt.Println("removed " + rel(path))
 	}
 	return nil
@@ -221,17 +223,19 @@ func generatedFrom(path string) (src string, ok bool) {
 	return src, true
 }
 
-// reportExcluded reports the .ego files that build constraints exclude here
-// whose Go is stale, which fails, or missing, which is only a note.
+// reportExcluded reports the .ego files that build constraints exclude in
+// every build context ego compiles in, whose Go is stale, which fails, or
+// missing, which is only a note.
 func reportExcluded(excluded []lower.Excluded, report *[]string) {
 	for _, ex := range excluded {
-		where := "generate it where they hold (with GOOS, GOARCH or ego generate -tags)"
+		why := fmt.Sprintf("no GOOS, GOARCH and build tags that ego compiles for satisfy the build constraints of %s", filepath.Base(ex.Ego))
+		where := "generate it where they hold (with GOOS, GOARCH, CGO_ENABLED or ego generate -tags)"
 		switch {
 		case ex.Stale:
-			*report = append(*report, fmt.Sprintf("%s: stale: %s is excluded here by its build constraints, but %s isn't; %s", rel(ex.Go), filepath.Base(ex.Ego), filepath.Base(ex.Go), where))
+			*report = append(*report, fmt.Sprintf("%s: stale: %s, but %s builds here; %s", rel(ex.Go), why, filepath.Base(ex.Go), where))
 			stale = true
 		case ex.Missing:
-			*report = append(*report, fmt.Sprintf("%s: not generated: %s is excluded here by its build constraints; %s", rel(ex.Go), filepath.Base(ex.Ego), where))
+			*report = append(*report, fmt.Sprintf("%s: not generated: %s; %s", rel(ex.Go), why, where))
 		}
 	}
 }
@@ -305,7 +309,7 @@ func write(path string, code []byte) (bool, error) {
 	if err := os.WriteFile(path, code, 0o666); err != nil {
 		return false, err
 	}
-//line generate.ego:265
+//line generate.ego:269
 	fmt.Println(rel(path))
 	return true, nil
 }
@@ -350,7 +354,7 @@ func egoDirs(args []string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-//line generate.ego:306
+//line generate.ego:310
 		local = append(local, ds...)
 	}
 	for _, a := range local {
@@ -360,7 +364,7 @@ func egoDirs(args []string) ([]string, error) {
 					return err
 				}
 				// What go's ./... skips.
-//line generate.ego:313
+//line generate.ego:317
 				if d.IsDir() && path != root && (strings.HasPrefix(d.Name(), ".") || strings.HasPrefix(d.Name(), "_") || d.Name() == "testdata" || d.Name() == "vendor") {
 					return filepath.SkipDir
 				}
@@ -381,7 +385,7 @@ func egoDirs(args []string) ([]string, error) {
 			}); err != nil {
 				return nil, err
 			}
-//line generate.ego:331
+//line generate.ego:335
 			continue
 		}
 		fi, err := os.Stat(a)
@@ -421,12 +425,12 @@ func importDirs(pattern string) ([]string, error) {
 	} else {
 		suffix = ""
 	}
-//line generate.ego:365
+//line generate.ego:369
 	out, err := exec.Command("go", "list", "-m", "-f", "{{.Path}} {{.Dir}}").Output()
 	if err != nil {
 		return nil, fmt.Errorf("%v: go list -m: %w", pattern, err)
 	}
-//line generate.ego:366
+//line generate.ego:370
 	best, bestDir := "", ""
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		mod, dir, _ := strings.Cut(line, " ")
@@ -442,7 +446,7 @@ func importDirs(pattern string) ([]string, error) {
 		return nil, fmt.Errorf("%v: go list: %w", pattern, err)
 	}
 	out = v
-//line generate.ego:377
+//line generate.ego:381
 	dirs := strings.Fields(string(out))
 	if len(dirs) == 0 {
 		return nil, fmt.Errorf("%v: no such package", pattern)
