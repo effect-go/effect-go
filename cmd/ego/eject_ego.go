@@ -49,11 +49,13 @@ func ejectCmd(args []string) error {
 	var steps []step
 	im := lower.NewImporter()
 	for _, dir := range dependencyOrder(dirs) {
-		res, err := lower.Generate(lower.Config{Dir: dir, NoLines: true, Importer: im})
+		// Files that build constraints exclude here are compiled where they
+		// hold, as ego generate does.
+		res, err := lower.Generate(lower.Config{Dir: dir, NoLines: true, Importer: im, Excluded: func(_ string) bool { return true }})
 		if err != nil {
 			return fmt.Errorf("%v: %w", rel(dir), err)
 		}
-//line eject.ego:41
+//line eject.ego:43
 		for _, d := range res.Diags {
 			fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
 		}
@@ -68,17 +70,18 @@ func ejectCmd(args []string) error {
 			}
 			steps = append(steps, s)
 		}
-		// Files that build constraints exclude here can't be compiled here:
-		// their committed Go is what they compile to where they build.
+		// Files that no build context ego compiles for includes can't be
+		// compiled here: their committed Go is what they compile to where
+		// they build.
 		for _, ex := range res.Excluded {
 			if ex.Missing || ex.Stale {
-				return fmt.Errorf("%v is excluded here by its build constraints, and its Go is missing or stale: run ego generate where they hold, then eject", rel(ex.Ego))
+				return fmt.Errorf("%v: ego can't compile it for a platform its build constraints include, and its Go is missing or stale: run ego generate where they hold, then eject", rel(ex.Ego))
 			}
 			code, err := os.ReadFile(ex.Go)
 			if err != nil {
 				return err
 			}
-//line eject.ego:62
+//line eject.ego:65
 			s := step{path: plainName(ex.Go), code: dropLineDirectives(dropHeader(code)), remove: []string{ex.Ego}}
 			if s.path != ex.Go {
 				s.remove = append(s.remove, ex.Go)
@@ -89,7 +92,7 @@ func ejectCmd(args []string) error {
 		if err != nil {
 			return fmt.Errorf("%v: %w", rel(dir), err)
 		}
-//line eject.ego:69
+//line eject.ego:72
 		if lr != nil {
 			if len(lr.Diags) > 0 {
 				return fmt.Errorf("%s: the wiring doesn't compile: run ego generate", rel(dir))
@@ -115,7 +118,7 @@ func ejectCmd(args []string) error {
 		if err := os.WriteFile(s.path, s.code, 0o666); err != nil {
 			return err
 		}
-//line eject.ego:92
+//line eject.ego:95
 		for _, r := range s.remove {
 			if err := os.Remove(r); err != nil && !os.IsNotExist(err) {
 				return err

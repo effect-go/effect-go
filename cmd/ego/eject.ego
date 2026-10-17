@@ -37,7 +37,9 @@ func ejectCmd(args []string) error {
 	var steps []step
 	im := lower.NewImporter()
 	for _, dir := range dependencyOrder(dirs) {
-		res := check lower.Generate(lower.Config{Dir: dir, NoLines: true, Importer: im}) "{rel(dir)}"
+		// Files that build constraints exclude here are compiled where they
+		// hold, as ego generate does.
+		res := check lower.Generate(lower.Config{Dir: dir, NoLines: true, Importer: im, Excluded: _ => true}) "{rel(dir)}"
 		for _, d := range res.Diags {
 			fmt.Fprintln(os.Stderr, rel(d.Pos.String())+": "+d.Msg)
 		}
@@ -52,11 +54,12 @@ func ejectCmd(args []string) error {
 			}
 			steps = append(steps, s)
 		}
-		// Files that build constraints exclude here can't be compiled here:
-		// their committed Go is what they compile to where they build.
+		// Files that no build context ego compiles for includes can't be
+		// compiled here: their committed Go is what they compile to where
+		// they build.
 		for _, ex := range res.Excluded {
 			if ex.Missing || ex.Stale {
-				fail "{rel(ex.Ego)} is excluded here by its build constraints, and its Go is missing or stale: run ego generate where they hold, then eject"
+				fail "{rel(ex.Ego)}: ego can't compile it for a platform its build constraints include, and its Go is missing or stale: run ego generate where they hold, then eject"
 			}
 			code := check os.ReadFile(ex.Go) ""
 			s := step{path: plainName(ex.Go), code: dropLineDirectives(dropHeader(code)), remove: []string{ex.Ego}}
