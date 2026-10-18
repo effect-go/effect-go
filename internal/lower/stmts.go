@@ -59,7 +59,12 @@ func (g *fileGen) lowerStmt(s ast.Stmt) {
 						g.w.str(" = " + v)
 						return
 					}
-					g.lowerInto(g.renderStr(s.Lhs[0]), s.Tok == token.DEFINE, g.typeOf(x), x)
+					target := g.renderStr(s.Lhs[0])
+					if s.Tok == token.ASSIGN {
+						g.self = target
+					}
+					g.lowerInto(target, s.Tok == token.DEFINE, g.typeOf(x), x)
+					g.self = ""
 					g.trimNewline()
 					return
 				}

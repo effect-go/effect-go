@@ -840,3 +840,41 @@ func Lines(n int) []int {
 }
 
 func m(k int) *int { return nil }
+
+// Field is an optional value, as a PATCH request gives.
+type Field struct {
+	Set   bool
+	Value string
+}
+
+// Keep updates a only from what is set: a value that keeps the target
+// stores nothing (x = x is vet's self-assignment), and p ?? c keeps c when
+// p is nil.
+func Keep(a *Address, name, city Field, p *Address, tags map[string]string) (*Address, string) {
+	if name.Set {
+		a.Tags["name"] = name.Value
+	} else {
+		a.Tags["name"] = a.Tags["name"]
+	}
+//line regress.ego:442
+	label := "a"
+	if city.Set {
+		label = city.Value
+	}
+//line regress.ego:444
+	if v, ok := tags["label"]; ok {
+		label = v
+	}
+//line regress.ego:445
+	switch len(label) {
+	case 0:
+		label = "empty"
+	default:
+	}
+//line regress.ego:446
+	if p != nil {
+		a = p
+	}
+//line regress.ego:447
+	return a, label
+}

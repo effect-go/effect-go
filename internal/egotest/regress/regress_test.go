@@ -235,3 +235,14 @@ func TestLines(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+
+func TestKeep(t *testing.T) {
+	a := &Address{Tags: map[string]string{"name": "ada"}}
+	if got, label := Keep(a, Field{}, Field{}, nil, nil); got != a || a.Tags["name"] != "ada" || label != "a" {
+		t.Errorf("Keep kept nothing: %v %v %q", got, a.Tags, label)
+	}
+	p := &Address{}
+	if got, label := Keep(a, Field{true, "bob"}, Field{true, "paris"}, p, map[string]string{"label": "x"}); got != p || a.Tags["name"] != "bob" || label != "x" {
+		t.Errorf("Keep: %v %v %q", got, a.Tags, label)
+	}
+}

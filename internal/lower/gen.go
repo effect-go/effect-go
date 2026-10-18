@@ -333,6 +333,7 @@ type fileGen struct {
 	diags   []Diagnostic
 	fn      *funcState
 	foreign map[ast.Expr]*errSet // another package's sets in signatures, rewritten to error
+	self    string               // the variable an assignment being lowered stores in, which holds a value already
 
 	exprPats map[*ast.CallExpr]bool
 	parents  map[ast.Node]ast.Node

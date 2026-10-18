@@ -6,6 +6,7 @@ import (
 	"maps"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/effect-go/effect-go/internal/syntax/ast"
 )
@@ -287,8 +288,13 @@ func (g *fileGen) optInto(target string, declare bool, t types.Type, x ast.Expr)
 }
 
 // branchInto stores a branch's value in target. One that calls a function
-// is on the branch's line, for stack traces: not the closing brace's.
+// is on the branch's line, for stack traces: not the closing brace's. A
+// branch that keeps target's value stores nothing: x = x is vet's
+// self-assignment.
 func (g *fileGen) branchInto(target string, t types.Type, x ast.Expr) {
+	if g.keeps(target, x) {
+		return
+	}
 	if hasCall(x) {
 		g.mark(x.Pos())
 	}
@@ -296,18 +302,78 @@ func (g *fileGen) branchInto(target string, t types.Type, x ast.Expr) {
 }
 
 func (g *fileGen) ifInto(target string, t types.Type, x *ast.IfExpr) {
+	elseIf, _ := x.Else.(*ast.IfExpr)
+	if x.ElseL.IsValid() {
+		elseIf = nil // a value in braces
+	}
+	if elseIf == nil && g.keeps(target, x.Then) && !g.keeps(target, x.Else) {
+		// x = if c { x } else { b }: if !c { x = b }.
+		g.w.str("if ")
+		g.not(x.Cond)
+		g.w.str(" {\n")
+		g.branchInto(target, t, x.Else)
+		g.w.str("}\n")
+		return
+	}
 	g.w.str("if ")
 	g.node(x.Cond)
 	g.w.str(" {\n")
 	g.branchInto(target, t, x.Then)
-	g.w.str("} else ")
-	if e, ok := x.Else.(*ast.IfExpr); ok && !x.ElseL.IsValid() {
-		g.ifInto(target, t, e)
+	if elseIf != nil {
+		g.w.str("} else ")
+		g.ifInto(target, t, elseIf)
 		return
 	}
-	g.w.str("{\n")
-	g.branchInto(target, t, x.Else)
+	g.elseInto(target, t, x.Else)
+}
+
+// elseInto ends an if storing a value in target with an else that stores x,
+// unless x keeps target's value.
+func (g *fileGen) elseInto(target string, t types.Type, x ast.Expr) {
+	if g.keeps(target, x) {
+		g.w.str("}\n")
+		return
+	}
+	g.w.str("} else {\n")
+	g.branchInto(target, t, x)
 	g.w.str("}\n")
+}
+
+// keeps reports whether storing x in target would keep its value: x is
+// the variable or field the assignment being lowered stores in.
+func (g *fileGen) keeps(target string, x ast.Expr) bool {
+	x = ast.Unparen(x)
+	return target != "" && target == g.self && isRef(x) && g.renderStr(x) == target
+}
+
+// isRef reports whether x is a variable or a field of one, as a.b.c, which
+// reading has no effect.
+func isRef(x ast.Expr) bool {
+	switch x := ast.Unparen(x).(type) {
+	case *ast.Ident:
+		return true
+	case *ast.SelectorExpr:
+		return isRef(x.X)
+	}
+	return false
+}
+
+// not renders the negation of a condition.
+func (g *fileGen) not(cond ast.Expr) {
+	switch c := ast.Unparen(cond).(type) {
+	case *ast.UnaryExpr:
+		if c.Op == token.NOT {
+			g.node(ast.Unparen(c.X))
+			return
+		}
+	case *ast.Ident, *ast.SelectorExpr, *ast.CallExpr, *ast.IndexExpr:
+		g.w.str("!")
+		g.node(c)
+		return
+	}
+	g.w.str("!(")
+	g.node(cond)
+	g.w.str(")")
 }
 
 // draft renders an expression form for type-checking, with the draft
@@ -541,9 +607,7 @@ func (g *fileGen) coalesceInto(target string, declare bool, t types.Type, x *ast
 		}
 		g.w.str("if " + strings.Join(guards, " && ") + " {\n")
 		g.w.str(target + " = " + value + "\n")
-		g.w.str("} else {\n")
-		fallback()
-		g.w.str("}\n")
+		g.elseInto(target, t, x.Y)
 	case commaOK && declare:
 		ok := g.temp("ok")
 		g.genStmt(func() {
@@ -561,9 +625,20 @@ func (g *fileGen) coalesceInto(target string, declare bool, t types.Type, x *ast
 		v, ok := g.temp("v"), g.temp("ok")
 		g.w.str("if " + v + ", " + ok + " := ")
 		g.node(left)
-		g.w.str("; " + found(v, ok) + " {\n" + target + " = " + v + "\n} else {\n")
-		fallback()
-		g.w.str("}\n")
+		g.w.str("; " + found(v, ok) + " {\n" + target + " = " + v + "\n")
+		g.elseInto(target, t, x.Y)
+	case nillable(g.typeOf(left)) && !declare && mentions(x.Y, target):
+		// c = p ?? c: the fallback reads target, so p isn't stored first.
+		if isRef(left) {
+			v := g.renderStr(left)
+			g.w.str("if " + v + " != nil {\n" + target + " = " + v + "\n")
+		} else {
+			v := g.temp("v")
+			g.w.str("if " + v + " := ")
+			g.node(left)
+			g.w.str("; " + v + " != nil {\n" + target + " = " + v + "\n")
+		}
+		g.elseInto(target, t, x.Y)
 	case nillable(g.typeOf(left)):
 		g.genStmt(func() {
 			g.w.str(target + op)
@@ -575,6 +650,19 @@ func (g *fileGen) coalesceInto(target string, declare bool, t types.Type, x *ast
 	default:
 		g.errorf(x.OpPos, "?? needs a value that can be missing: a pointer, map lookup, type assertion, ?. chain or a call returning (value, ok)")
 	}
+}
+
+// mentions reports whether x may read target, a variable or a field of
+// one, as c.Name: whether it uses the variable.
+func mentions(x ast.Expr, target string) bool {
+	end := strings.IndexFunc(target, func(r rune) bool { return r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	if end == 0 {
+		return true // *p, say
+	}
+	if end > 0 {
+		target = target[:end]
+	}
+	return usesName(x, target)
 }
 
 // literalType is the type := gives a literal (-1, 2.5, "s", 'c'), or nil
