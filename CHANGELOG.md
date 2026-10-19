@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+- A lambda whose parameter or result is a struct or interface type with
+  fields, as `x => x.A == ""` over `[]struct{ A string }` items, gives
+  generated Go that `gofmt -l` accepts. Formatting it again moved the
+  body to its own lines.
+- A lambda with a block body no longer gets blank lines at its start and
+  end in the generated Go.
+
 ## v0.5.0 (2026-10-19)
 
 To update, run `ego generate ./...`. It now also writes the Go of `.ego`

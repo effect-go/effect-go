@@ -246,3 +246,12 @@ func TestKeep(t *testing.T) {
 		t.Errorf("Keep: %v %v %q", got, a.Tags, label)
 	}
 }
+
+func TestBlank(t *testing.T) {
+	type item = struct {
+		Name string `json:"name"`
+	}
+	if Blank([]item{{"a"}}) || !Blank([]item{{"a"}, {""}}) {
+		t.Error("Blank")
+	}
+}

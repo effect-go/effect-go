@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -447,4 +448,13 @@ func Keep(a *Address, name, city Field, p *Address, tags map[string]string) (*Ad
 	tags = tags ?? map[string]string{}
 	tags["label"] = label
 	return a, label
+}
+
+// Blank reports whether an item has no name. The lambda's parameter is a
+// struct gofmt writes on several lines: the generated Go is formatted
+// once and for all.
+func Blank(items []struct {
+	Name string `json:"name"`
+}) bool {
+	return slices.ContainsFunc(items, it => it.Name == "")
 }
