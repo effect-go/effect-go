@@ -640,10 +640,12 @@ func (g *fileGen) coalesceInto(target string, declare bool, t types.Type, x *ast
 		}
 		g.elseInto(target, t, x.Y)
 	case nillable(g.typeOf(left)):
-		g.genStmt(func() {
-			g.w.str(target + op)
-			g.node(left)
-		})
+		if !g.keeps(target, left) { // x = x ?? y has nothing to store first
+			g.genStmt(func() {
+				g.w.str(target + op)
+				g.node(left)
+			})
+		}
 		g.w.str("if " + target + " == nil {\n")
 		fallback()
 		g.w.str("}\n")

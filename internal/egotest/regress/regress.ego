@@ -435,8 +435,8 @@ type Field struct {
 }
 
 // Keep updates a only from what is set: a value that keeps the target
-// stores nothing (x = x is vet's self-assignment), and p ?? c keeps c when
-// p is nil.
+// stores nothing (x = x is vet's self-assignment), p ?? c keeps c when p is
+// nil, and x = x ?? y only tests x.
 func Keep(a *Address, name, city Field, p *Address, tags map[string]string) (*Address, string) {
 	a.Tags["name"] = if name.Set { name.Value } else { a.Tags["name"] }
 	label := "a"
@@ -444,5 +444,7 @@ func Keep(a *Address, name, city Field, p *Address, tags map[string]string) (*Ad
 	label = tags["label"] ?? label
 	label = match len(label) { 0 => "empty"; _ => label }
 	a = p ?? a
+	tags = tags ?? map[string]string{}
+	tags["label"] = label
 	return a, label
 }

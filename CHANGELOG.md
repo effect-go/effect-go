@@ -30,8 +30,9 @@ excluded on your platform too.
   back on `x`, which then read the nil.
 - A conditional value, `??` or `match` whose branch is the assignment's
   own target, as `c.Name = if b.Set { b.Value } else { c.Name }`, stores
-  nothing in that branch. It lowered to `c.Name = c.Name`, which go vet
-  reports as a self-assignment.
+  nothing in that branch, and `m = m ?? map[string]string{}` only tests
+  `m`. Both lowered to `x = x`, which go vet reports as a
+  self-assignment.
 - `ego generate -tags` reaches the wiring: injectors can use providers
   that only those tags include.
 - `ego lsp`: saving removes the Go left from `.ego` files deleted or

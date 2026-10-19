@@ -848,8 +848,8 @@ type Field struct {
 }
 
 // Keep updates a only from what is set: a value that keeps the target
-// stores nothing (x = x is vet's self-assignment), and p ?? c keeps c when
-// p is nil.
+// stores nothing (x = x is vet's self-assignment), p ?? c keeps c when p is
+// nil, and x = x ?? y only tests x.
 func Keep(a *Address, name, city Field, p *Address, tags map[string]string) (*Address, string) {
 	if name.Set {
 		a.Tags["name"] = name.Value
@@ -876,5 +876,10 @@ func Keep(a *Address, name, city Field, p *Address, tags map[string]string) (*Ad
 		a = p
 	}
 //line regress.ego:447
+	if tags == nil {
+		tags = map[string]string{}
+	}
+//line regress.ego:448
+	tags["label"] = label
 	return a, label
 }
