@@ -32,3 +32,7 @@ func BuildBareServer() (*Server, error) {
 func BuildRemote() (*Remote, error) {
 	panic(layer.Build(fw.Set, mylib.Load, NewRemote))
 }
+
+func BuildReport(s *scope.Scope, c Cfg) (*Report, error) {
+	panic(layer.Build(RepoSet, NewStore, layer.Decorate(WrapGetter), NewReport))
+}

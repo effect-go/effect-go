@@ -32,7 +32,19 @@
 // even if AppSet's provides the Repo interface that NewMemoryRepo's result
 // implements. An interface parameter is satisfied by the one provided type
 // that implements it.
+//
+// Decorate wraps a service: layer.Decorate(NewCachedRepo), where
+// NewCachedRepo(inner Repo, c *Cache) Repo, gives every provider needing a
+// Repo the cached one, and only NewCachedRepo the Repo it wraps. Several
+// decorators of a type wrap in the order they are listed, sets flattened,
+// the first nearest the original.
+//
+// A parameter of type Lazy[T] defers building T, and what only T needs, to
+// its first Get: what only some code paths use doesn't slow down the others,
+// or fail them. Its providers get the injector's context and scope.
 package layer
+
+import "sync"
 
 // A Provider is a constructor function, or a ProviderSet.
 type Provider any
@@ -54,3 +66,41 @@ func Build(providers ...Provider) string {
 func Close(provider Provider) Provider { return closer{provider} }
 
 type closer struct{ p Provider }
+
+// Decorate marks a provider that wraps the service of its own result type,
+// which one of its parameters takes.
+func Decorate(provider Provider) Provider { return decorator{provider} }
+
+type decorator struct{ p Provider }
+
+// A Lazy is a service built on its first Get, by the code ego generate
+// writes. Its finalizers run when the scope closes, as an eager service's
+// do. A zero Lazy panics on Get.
+type Lazy[T any] struct{ c *lazy[T] }
+
+type lazy[T any] struct {
+	mu    sync.Mutex
+	built bool
+	v     T
+	build func() (T, error)
+}
+
+// NewLazy returns a Lazy that build builds. Generated code calls it.
+func NewLazy[T any](build func() (T, error)) Lazy[T] { return Lazy[T]{&lazy[T]{build: build}} }
+
+// Get returns the service, building it on the first call; concurrent calls
+// wait for that one. A failure isn't kept: the next call tries again,
+// reusing what built fine.
+func (l Lazy[T]) Get() (T, error) {
+	c := l.c
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.built {
+		v, err := c.build()
+		if err != nil {
+			return v, err
+		}
+		c.v, c.built, c.build = v, true, nil
+	}
+	return c.v, nil
+}

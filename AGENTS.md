@@ -84,7 +84,7 @@ func BuildApp(ctx context.Context, s *scope.Scope, cfg Config) (*App, error) {
 var AppSet = layer.Set(layer.Close(NewDB), NewRepo, NewService, NewApp)
 ```
 
-Providers are ordinary constructors, given by name, returning `T`, `(T, error)` or `(T, cleanup, error)`. `ego generate` writes `layers_ego.go`. Run the app inside `scope.Run(ctx, func(s *scope.Scope) (T, error) {…})`; finalizers run in reverse order when it returns. In `main`, `scope.Main(s => serve(s, cfg))` does that with a scope that SIGINT and SIGTERM cancel (a second signal kills the program); it exits with status 1 if `serve` or the shutdown fails, and takes `scope.StopTimeout(d)` to bound shutdown.
+Providers are ordinary constructors, given by name, returning `T`, `(T, error)` or `(T, cleanup, error)`. `ego generate` writes `layers_ego.go`. `layer.Decorate(NewCachedRepo)`, with `NewCachedRepo(inner Repo, c *Cache) Repo`, wraps the Repo every other provider gets; several decorators of a type wrap in listing order, the first innermost. A parameter of type `layer.Lazy[*Mailer]` defers building the mailer, and what only it needs, to its first `m.Get()`, which returns `(*Mailer, error)`; a failed build is tried again at the next `Get`. Run the app inside `scope.Run(ctx, func(s *scope.Scope) (T, error) {…})`; finalizers run in reverse order when it returns. In `main`, `scope.Main(s => serve(s, cfg))` does that with a scope that SIGINT and SIGTERM cancel (a second signal kills the program); it exits with status 1 if `serve` or the shutdown fails, and takes `scope.StopTimeout(d)` to bound shutdown.
 
 ## Runtime from plain Go
 

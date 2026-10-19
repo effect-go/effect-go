@@ -70,15 +70,17 @@ func TestGolden(t *testing.T) {
 	}
 }
 
-// The wiring of testdata/shared compiles, and a provider runs once, however
-// many interfaces and types it is needed as.
+// The wiring of testdata/shared compiles, and a provider runs once in an
+// injector, however many interfaces, types and lazy services need it.
 func TestShared(t *testing.T) {
 	res, err := Generate("testdata/shared")
 	if err != nil || res == nil || len(res.Diags) > 0 {
 		t.Fatal(err, res)
 	}
-	if n := strings.Count(string(res.Code), "NewStore()"); n != 1 {
-		t.Fatalf("NewStore called %d times:\n%s", n, res.Code)
+	for _, fn := range strings.Split(string(res.Code), "\nfunc ") {
+		if n := strings.Count(fn, "NewStore()"); n > 1 {
+			t.Fatalf("NewStore called %d times:\n%s", n, fn)
+		}
 	}
 	path, _ := filepath.Abs(res.Path)
 	cfg := &packages.Config{Mode: packages.LoadSyntax, Dir: "testdata/shared", Overlay: map[string][]byte{path: res.Code}}

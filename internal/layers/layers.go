@@ -311,6 +311,7 @@ type provider struct {
 	cleanup string // "", "func()", "func() error", "func(ctx) error"
 	close   bool   // layer.Close: call out.Close when the scope closes
 	direct  bool   // passed to Build itself, not through a Set
+	inner   int    // layer.Decorate: the parameter that takes the service it wraps; else -1
 	used    bool
 }
 
@@ -326,6 +327,21 @@ func (g *gen) providers(args []ast.Expr, direct bool, seen map[types.Object]bool
 				p.close = true
 				if !hasClose(p.out) {
 					g.errorf(c.Pos(), "layer.Close: %s has no Close method", g.typeString(p.out))
+				}
+				out = append(out, p)
+			}
+			continue
+		}
+		if c, ok := a.(*ast.CallExpr); ok && g.isLayerFunc(c.Fun, "Decorate") && len(c.Args) == 1 {
+			for _, p := range g.providers(c.Args, direct, seen) {
+				for i := range p.sig.Params().Len() {
+					if types.Identical(p.sig.Params().At(i).Type(), p.out) {
+						p.inner = i
+					}
+				}
+				if p.inner < 0 {
+					g.errorf(c.Pos(), "layer.Decorate: %s takes no %s to wrap", p.name(), g.typeString(p.out))
+					continue
 				}
 				out = append(out, p)
 			}
@@ -363,7 +379,7 @@ func (g *gen) providers(args []ast.Expr, direct bool, seen map[types.Object]bool
 			g.errorf(a.Pos(), "%s is not a provider function", types.ExprString(a))
 			continue
 		}
-		p := &provider{expr: a, sig: sig, direct: direct}
+		p := &provider{expr: a, sig: sig, direct: direct, inner: -1}
 		if f, ok := obj.(*types.Func); !ok || f.Signature().Recv() == nil {
 			p.obj = obj
 		}
@@ -510,7 +526,9 @@ func (g *gen) injector(fd *ast.FuncDecl, args []ast.Expr) (string, bool) {
 	// The same function in several sets is one provider.
 	var ps []*provider
 	for _, p := range g.providers(args, true, map[types.Object]bool{}) {
-		i := slices.IndexFunc(ps, func(q *provider) bool { return p.obj != nil && q.obj == p.obj && types.Identical(q.sig, p.sig) })
+		i := slices.IndexFunc(ps, func(q *provider) bool {
+			return p.obj != nil && q.obj == p.obj && types.Identical(q.sig, p.sig) && (q.inner < 0) == (p.inner < 0)
+		})
 		if i < 0 {
 			ps = append(ps, p)
 			continue
@@ -524,7 +542,16 @@ func (g *gen) injector(fd *ast.FuncDecl, args []ast.Expr) (string, bool) {
 		return "", false // the graph would only add errors, about providers it lacks
 	}
 
-	b := &builder{g: g, fn: name, pos: fd.Body.List[0].Pos(), names: map[string]bool{}, building: map[*provider]bool{}}
+	b := &builder{g: g, fn: name, pos: fd.Body.List[0].Pos(), names: map[string]bool{}, building: map[*provider]bool{}, decorating: map[*provider]bool{}}
+	b.top = &frame{}
+	b.f = b.top
+	// Decorators wrap what the other providers give, in the order listed.
+	ps = slices.DeleteFunc(ps, func(p *provider) bool {
+		if p.inner >= 0 {
+			b.decorators = append(b.decorators, p)
+		}
+		return p.inner >= 0
+	})
 	// The injector's parameters are inputs.
 	for i := 0; i < sig.Params().Len(); i++ {
 		v := sig.Params().At(i)
@@ -542,7 +569,7 @@ func (g *gen) injector(fd *ast.FuncDecl, args []ast.Expr) (string, bool) {
 			b.scope = pname
 		}
 	}
-	b.zero = g.zero(want) // after the parameters, so it names packages they don't hide
+	b.top.zero = g.zero(want) // after the parameters, so it names packages they don't hide
 	// Direct providers take precedence over those from sets. Types are
 	// compared with Identical, which sees through aliases.
 	var byType [][]*provider
@@ -574,12 +601,20 @@ func (g *gen) injector(fd *ast.FuncDecl, args []ast.Expr) (string, bool) {
 		b.providers = append(b.providers, list[0])
 	}
 	sort.Slice(b.providers, func(i, j int) bool { return b.providers[i].expr.Pos() < b.providers[j].expr.Pos() })
+	for _, d := range b.decorators {
+		if !b.canProvide(d.out) {
+			g.errorf(d.expr.Pos(), "%s: %s wraps %s, which no provider gives", name, d.name(), g.typeString(d.out))
+		}
+	}
+	if len(g.diags) > before {
+		return "", false
+	}
 
 	result := b.resolve(want, "the result of "+name, nil)
 	if len(g.diags) > before {
 		return "", false
 	}
-	for _, p := range b.providers {
+	for _, p := range append(slices.Clone(b.providers), b.decorators...) {
 		if p.direct && !p.used {
 			g.errorf(p.expr.Pos(), "%s: %s is not needed", name, p.name())
 		}
@@ -602,7 +637,7 @@ func (g *gen) injector(fd *ast.FuncDecl, args []ast.Expr) (string, bool) {
 		out.WriteString(in.name + " " + g.typeString(in.typ))
 	}
 	out.WriteString(") (" + g.typeString(want) + ", error) {\n")
-	out.WriteString(b.body.String())
+	out.WriteString(b.top.body.String())
 	out.WriteString("return " + result + ", nil\n}\n")
 	return out.String(), true
 }
@@ -614,18 +649,28 @@ type input struct {
 
 // builder writes the body of one injector.
 type builder struct {
-	g         *gen
-	fn        string
-	pos       token.Pos // the layer.Build call, where graph errors are reported
-	inputs    []input
-	ctx       string
-	scope     string
-	providers []*provider
-	vals      []value // built already
-	names     map[string]bool
-	building  map[*provider]bool
-	body      strings.Builder
-	zero      string
+	g          *gen
+	fn         string
+	pos        token.Pos // the layer.Build call, where graph errors are reported
+	inputs     []input
+	ctx        string
+	scope      string
+	providers  []*provider
+	decorators []*provider // in the order listed
+	top, f     *frame      // the injector's body, and the one being written
+	cells      []value     // the layer.Lazy of each type that has one
+	names      map[string]bool
+	building   map[*provider]bool
+	decorating map[*provider]bool
+	lazies     []types.Type // the lazy services being written
+}
+
+// A frame is a function the builder writes: the injector, or the build
+// function of a lazy service.
+type frame struct {
+	body strings.Builder
+	zero string  // the zero values of its results but the error
+	vals []value // built in it
 }
 
 // A value is the variable holding a type built already.
@@ -634,11 +679,19 @@ type value struct {
 	name string
 }
 
-// built returns the variable holding a value of type t, if it is built.
+// built returns the variable holding a value of type t, if it is an input
+// or built in the current frame or, before it, in the injector's.
 func (b *builder) built(t types.Type) (string, bool) {
-	for _, v := range b.vals {
-		if types.Identical(v.typ, t) {
-			return v.name, true
+	for _, in := range b.inputs {
+		if types.Identical(in.typ, t) {
+			return in.name, true
+		}
+	}
+	for _, f := range []*frame{b.f, b.top} {
+		for _, v := range f.vals {
+			if types.Identical(v.typ, t) {
+				return v.name, true
+			}
 		}
 	}
 	return "", false
@@ -650,16 +703,83 @@ func (b *builder) provides(t types.Type) bool {
 		slices.ContainsFunc(b.providers, func(q *provider) bool { return types.Identical(q.out, t) })
 }
 
-// resolve returns the variable holding a value of type t, building it.
+// canProvide reports whether a provider gives t: has type t, or implements
+// it if t is an interface.
+func (b *builder) canProvide(t types.Type) bool {
+	iface, isIface := t.Underlying().(*types.Interface)
+	return slices.ContainsFunc(b.providers, func(q *provider) bool {
+		return types.Identical(q.out, t) || isIface && types.Implements(q.out, iface)
+	})
+}
+
+// resolve returns the variable holding a value of type t, building it. In a
+// lazy service's build function, what isn't built before it comes from
+// the lazy service of its own: each provider runs once.
 func (b *builder) resolve(t types.Type, neededBy string, chain []string) string {
 	if v, ok := b.built(t); ok {
 		return v
 	}
-	for _, in := range b.inputs {
-		if types.Identical(in.typ, t) {
-			return in.name
+	cell, ok := b.cell(t)
+	if !ok && b.f == b.top {
+		return b.make(t, neededBy, chain)
+	}
+	if !ok {
+		if cell = b.lazy(t, neededBy, chain); cell == "" {
+			return "nil"
 		}
 	}
+	v := b.varName(t)
+	fmt.Fprintf(&b.f.body, "%s, err := %s.Get()\nif err != nil {\nreturn %s, err\n}\n", v, cell, b.f.zero)
+	b.f.vals = append(b.f.vals, value{t, v})
+	return v
+}
+
+// cell returns the layer.Lazy of type t, if it has one.
+func (b *builder) cell(t types.Type) (string, bool) {
+	for _, c := range b.cells {
+		if types.Identical(c.typ, t) {
+			return c.name, true
+		}
+	}
+	return "", false
+}
+
+// lazy returns the layer.Lazy of type t, declaring it in the injector's
+// body if needed. It returns "" after reporting an error.
+func (b *builder) lazy(t types.Type, neededBy string, chain []string) string {
+	if c, ok := b.cell(t); ok {
+		return c
+	}
+	if slices.ContainsFunc(b.lazies, func(u types.Type) bool { return types.Identical(u, t) }) {
+		b.g.errorf(b.pos, "%s: dependency cycle: %s", b.fn, strings.Join(append(chain, b.g.typeString(t)), " → "))
+		return ""
+	}
+	b.lazies = append(b.lazies, t)
+	saved := b.f
+	b.f = &frame{zero: b.g.zero(t)}
+	v, ok := b.built(t) // an input, or in the injector already
+	if !ok {
+		v = b.make(t, neededBy, chain)
+	}
+	body := b.f.body.String()
+	b.f = saved
+	b.lazies = b.lazies[:len(b.lazies)-1]
+	name, named := "lazy", t
+	if p, ok := t.(*types.Pointer); ok {
+		named = p.Elem()
+	}
+	if n, ok := types.Unalias(named).(*types.Named); ok {
+		name += n.Obj().Name() // lazyDB
+	}
+	name = b.fresh(name)
+	fmt.Fprintf(&b.top.body, "%s := %s.NewLazy(func() (%s, error) {\n%sreturn %s, nil\n})\n", name, b.g.pkgName(layerPath, "layer"), b.g.typeString(t), body, v)
+	b.cells = append(b.cells, value{t, name})
+	return name
+}
+
+// make builds a value of type t in the current frame: with its provider,
+// then its decorators.
+func (b *builder) make(t types.Type, neededBy string, chain []string) string {
 	var p *provider
 	for _, q := range b.providers {
 		if types.Identical(q.out, t) {
@@ -720,9 +840,11 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 		b.g.errorf(b.pos, "%s: no provider for %s, needed by %s", b.fn, b.g.typeString(t), neededBy)
 		return "nil"
 	}
-	// A provider found through an interface may be built already.
-	if v, ok := b.built(p.out); ok {
-		b.vals = append(b.vals, value{t, v})
+	if !types.Identical(p.out, t) {
+		// Found through an interface: built as its own type, then wrapped
+		// by the interface's decorators.
+		v := b.decorate(t, b.resolve(p.out, neededBy, chain), chain)
+		b.f.vals = append(b.f.vals, value{t, v})
 		return v
 	}
 	if b.building[p] {
@@ -730,24 +852,67 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 		return "nil"
 	}
 	b.building[p] = true
+	v := b.call(p, b.args(p, chain, ""))
+	v = b.decorate(t, v, chain) // still building p: a decorator needing t is a cycle
+	delete(b.building, p)
+	b.f.vals = append(b.f.vals, value{t, v})
+	return v
+}
+
+// decorate wraps v, of type t, with t's decorators, the first listed
+// innermost.
+func (b *builder) decorate(t types.Type, v string, chain []string) string {
+	for _, d := range b.decorators {
+		if !types.Identical(d.out, t) {
+			continue
+		}
+		if b.decorating[d] {
+			b.g.errorf(b.pos, "%s: dependency cycle: %s", b.fn, strings.Join(append(chain, d.name()), " → "))
+			return "nil"
+		}
+		b.decorating[d] = true
+		v = b.call(d, b.args(d, chain, v))
+		delete(b.decorating, d)
+	}
+	return v
+}
+
+// args returns the arguments of a provider's call: a decorator's inner
+// parameter takes inner.
+func (b *builder) args(p *provider, chain []string, inner string) []string {
 	p.used = true
+	chain = append(chain, p.name())
 	var args []string
 	for i := 0; i < p.sig.Params().Len(); i++ {
 		pt := p.sig.Params().At(i).Type()
 		switch {
+		case i == p.inner:
+			args = append(args, inner)
 		case isContext(pt) && b.ctx != "":
 			args = append(args, b.ctx)
 		case isScope(pt) && b.scope != "":
 			args = append(args, b.scope)
+		case isLazy(pt):
+			c := b.lazy(pt.(*types.Named).TypeArgs().At(0), p.name(), chain)
+			if c == "" {
+				c = "nil"
+			}
+			args = append(args, c)
 		case p.sig.Variadic() && i == p.sig.Params().Len()-1:
 			// ...T takes the []T provided, if any, and else nothing.
 			if b.provides(pt) {
-				args = append(args, b.resolve(pt, p.name(), append(chain, p.name()))+"...")
+				args = append(args, b.resolve(pt, p.name(), chain)+"...")
 			}
 		default:
-			args = append(args, b.resolve(pt, p.name(), append(chain, p.name())))
+			args = append(args, b.resolve(pt, p.name(), chain))
 		}
 	}
+	return args
+}
+
+// call writes the call of a provider in the current frame, with its error
+// and its finalizer, and returns the variable holding its result.
+func (b *builder) call(p *provider, args []string) string {
 	// The packages before the variable, which then doesn't take their names.
 	call := b.g.exprString(p.expr) + "(" + strings.Join(args, ", ") + ")"
 	var wrap, ctx string
@@ -762,37 +927,45 @@ func (b *builder) resolve(t types.Type, neededBy string, chain []string) string 
 	if needsScope && b.scope == "" {
 		b.g.errorf(p.expr.Pos(), "%s: %s has a finalizer, so the injector needs a *scope.Scope parameter", b.fn, p.name())
 	}
+	body, zero := &b.f.body, b.f.zero
 	switch {
 	case p.cleanup != "":
 		c := b.fresh("cleanup")
-		fmt.Fprintf(&b.body, "%s, %s, err := %s\nif err != nil {\nreturn %s, %s\n}\n", v, c, call, b.zero, wrap)
+		fmt.Fprintf(body, "%s, %s, err := %s\nif err != nil {\nreturn %s, %s\n}\n", v, c, call, zero, wrap)
 		switch p.cleanup {
 		case "func()":
-			fmt.Fprintf(&b.body, "%s.Defer(func(%s.Context) error { %s(); return nil })\n", b.scope, ctx, c)
+			fmt.Fprintf(body, "%s.Defer(func(%s.Context) error { %s(); return nil })\n", b.scope, ctx, c)
 		case "func() error":
-			fmt.Fprintf(&b.body, "%s.Defer(func(%s.Context) error { return %s() })\n", b.scope, ctx, c)
+			fmt.Fprintf(body, "%s.Defer(func(%s.Context) error { return %s() })\n", b.scope, ctx, c)
 		default:
-			fmt.Fprintf(&b.body, "%s.Defer(%s)\n", b.scope, c)
+			fmt.Fprintf(body, "%s.Defer(%s)\n", b.scope, c)
 		}
 	case p.hasErr:
-		fmt.Fprintf(&b.body, "%s, err := %s\nif err != nil {\nreturn %s, %s\n}\n", v, call, b.zero, wrap)
+		fmt.Fprintf(body, "%s, err := %s\nif err != nil {\nreturn %s, %s\n}\n", v, call, zero, wrap)
 	default:
-		fmt.Fprintf(&b.body, "%s := %s\n", v, call)
+		fmt.Fprintf(body, "%s := %s\n", v, call)
 	}
 	if p.close {
 		if closeReturnsError(p.out) {
-			fmt.Fprintf(&b.body, "%s.Defer(func(%s.Context) error { return %s.Close() })\n", b.scope, ctx, v)
+			fmt.Fprintf(body, "%s.Defer(func(%s.Context) error { return %s.Close() })\n", b.scope, ctx, v)
 		} else {
-			fmt.Fprintf(&b.body, "%s.Defer(func(%s.Context) error { %s.Close(); return nil })\n", b.scope, ctx, v)
+			fmt.Fprintf(body, "%s.Defer(func(%s.Context) error { %s.Close(); return nil })\n", b.scope, ctx, v)
 		}
 	}
-	delete(b.building, p)
-	b.vals = append(b.vals, value{p.out, v}, value{t, v})
 	return v
 }
 
+// isLazy reports whether t is a layer.Lazy[T].
+func isLazy(t types.Type) bool {
+	n, ok := t.(*types.Named)
+	return ok && n.TypeArgs().Len() == 1 && typeutil.IsNamed(n, layerPath, "Lazy")
+}
+
 // varName names a variable after its type: *sql.DB -> db.
-func (b *builder) varName(t types.Type) string {
+func (b *builder) varName(t types.Type) string { return b.fresh(b.baseName(t)) }
+
+// baseName is the name varName starts from.
+func (b *builder) baseName(t types.Type) string {
 	if p, ok := t.(*types.Pointer); ok {
 		t = p.Elem()
 	}
@@ -807,7 +980,7 @@ func (b *builder) varName(t types.Type) string {
 		}
 		base = string(r)
 	}
-	return b.fresh(base)
+	return base
 }
 
 func (b *builder) fresh(base string) string {

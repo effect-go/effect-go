@@ -93,6 +93,8 @@ cd hello && ego test ./... && go run .
 - Constructors wired by generated code, checked when you run `ego generate`,
   with no reflection ([`layer`](layer)).
 - Swap one provider in tests: `layer.Build(AppSet, NewMemRepo)`.
+- Wrap a service with `layer.Decorate(NewCachedRepo)`, and build what only
+  some paths need at its first use with `layer.Lazy[*Mailer]`.
 
 Everything except the syntax is a plain Go library
 (`go get github.com/effect-go/effect-go`), and the shorthand is there if you

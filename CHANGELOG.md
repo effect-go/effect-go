@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+**New**
+- `layer.Decorate(NewCachedRepo)`, among a set's or an injector's
+  providers, wraps a service: with `NewCachedRepo(inner Repo, c *Cache)
+  Repo`, every provider needing a Repo gets the cached one. Several
+  decorators of a type wrap in the order they are listed, sets flattened,
+  so an app's decorator listed after a set wraps the set's.
+- A provider's parameter of type `layer.Lazy[T]` defers building `T`, and
+  what only `T` needs, to its first `Get()`. Lazy services share what they
+  need, build each provider once, and release it when the scope closes,
+  before what was built eagerly. A failed build isn't kept: the next `Get`
+  tries again.
+
 **Fixes**
 - A lambda whose parameter or result is a struct or interface type with
   fields, as `x => x.A == ""` over `[]struct{ A string }` items, gives

@@ -42,3 +42,15 @@ func Literal() (A, error) {
 func Call() (A, error) {
 	panic(layer.Build(Provide())) // ERROR "Provide\(\): a provider is a function's name"
 }
+
+func NothingToWrap() (*Service, error) {
+	panic(layer.Build(NewDB, NewService, layer.Decorate(Wrap))) // ERROR "NothingToWrap: Wrap wraps Repo, which no provider gives"
+}
+
+func WrapsNothing() (*DB, error) {
+	panic(layer.Build(NewDB, NewA, layer.Decorate(WrapDB))) // ERROR "layer.Decorate: WrapDB takes no \*DB to wrap"
+}
+
+func LazyCycle() (Loop1, error) {
+	panic(layer.Build(NewLoop1, NewLazyLoop)) // ERROR "dependency cycle"
+}

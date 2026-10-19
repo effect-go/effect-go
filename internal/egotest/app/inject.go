@@ -24,3 +24,9 @@ func BuildTestApp(ctx context.Context, s *scope.Scope, cfg Config) (*App, error)
 func BuildClock(ctx context.Context, s *scope.Scope) (*framework.Clock, error) {
 	panic(layer.Build(framework.Set))
 }
+
+// BuildReports builds the reports command: what only sending needs waits
+// for the first Get.
+func BuildReports(ctx context.Context, s *scope.Scope, cfg Config) (*Reports, error) {
+	panic(layer.Build(ReportSet, layer.Decorate(NewTraced)))
+}

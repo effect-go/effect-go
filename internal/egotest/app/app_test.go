@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 
@@ -60,4 +61,48 @@ func TestSetFromAnotherPackage(t *testing.T) {
 	if err != nil || clock.Now().IsZero() {
 		t.Fatal(clock, err)
 	}
+}
+
+// Decorators wrap in listing order; lazy services are built at their first
+// Get, share what they need, retry a failed build, and are released before
+// what was built eagerly.
+func TestDecorateAndLazy(t *testing.T) {
+	log, down := &Log{}, &atomic.Bool{}
+	down.Store(true)
+	_, err := scope.Run(t.Context(), func(s *scope.Scope) (struct{}, error) {
+		r, err := BuildReports(s.Context(), s, Config{DSN: "postgres://", Log: log, SMTPDown: down})
+		if err != nil {
+			return struct{}{}, err
+		}
+		if name := r.Repo.Name(); name != "traced counted postgres" {
+			t.Errorf("repo %q", name)
+		}
+		if slices.Contains(log.Events, "smtp dialed") {
+			t.Error("smtp dialed before a Get")
+		}
+		if _, err := r.Mailer.Get(); err == nil || err.Error() != "NewSMTP: smtp down" {
+			t.Errorf("err %v", err)
+		}
+		down.Store(false)
+		m, err := r.Mailer.Get()
+		if err != nil {
+			return struct{}{}, err
+		}
+		p := must(r.Pager.Get())
+		if m.SMTP != p.SMTP || m != must(r.Mailer.Get()) {
+			t.Error("lazy services built twice")
+		}
+		return struct{}{}, nil
+	})
+	want := []string{"db opened", "smtp dialed", "smtp closed", "db closed"}
+	if err != nil || !slices.Equal(log.Events, want) {
+		t.Fatalf("err %v, events %q, want %q", err, log.Events, want)
+	}
+}
+
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
 }

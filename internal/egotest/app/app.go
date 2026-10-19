@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	"github.com/effect-go/effect-go/layer"
 )
@@ -24,8 +25,9 @@ func (l *Log) Add(e string) {
 }
 
 type Config struct {
-	DSN string
-	Log *Log
+	DSN      string
+	Log      *Log
+	SMTPDown *atomic.Bool
 }
 
 type DB struct{ log *Log }
@@ -77,3 +79,54 @@ func NewApp(s *Service) (*App, error) { return &App{s}, nil }
 
 // AppSet is the production graph.
 var AppSet = layer.Set(layer.Close(NewDB), NewCache, NewPgRepo, NewService, NewApp)
+
+// Reports is a command: it reads the repository, and only sending a report
+// needs the mail server.
+type Reports struct {
+	Repo   Repo
+	Mailer layer.Lazy[*Mailer]
+	Pager  layer.Lazy[*Pager]
+}
+
+func NewReports(r Repo, m layer.Lazy[*Mailer], p layer.Lazy[*Pager]) *Reports {
+	return &Reports{r, m, p}
+}
+
+// Counted and Traced decorate a Repo.
+type Counted struct{ Repo }
+
+func (c Counted) Name() string { return "counted " + c.Repo.Name() }
+
+func NewCounted(inner Repo) Repo { return Counted{inner} }
+
+type Traced struct{ Repo }
+
+func (t Traced) Name() string { return "traced " + t.Repo.Name() }
+
+func NewTraced(inner Repo, cfg Config) Repo { return Traced{inner} }
+
+// SMTP is the mail server both lazy services need; Down makes dialing it
+// fail.
+type SMTP struct{}
+
+func NewSMTP(cfg Config) (*SMTP, func(), error) {
+	if cfg.SMTPDown != nil && cfg.SMTPDown.Load() {
+		return nil, nil, errors.New("smtp down")
+	}
+	cfg.Log.Add("smtp dialed")
+	return &SMTP{}, func() { cfg.Log.Add("smtp closed") }, nil
+}
+
+type Mailer struct {
+	SMTP *SMTP
+	DB   *DB
+}
+
+func NewMailer(s *SMTP, db *DB) *Mailer { return &Mailer{s, db} }
+
+type Pager struct{ SMTP *SMTP }
+
+func NewPager(s *SMTP) *Pager { return &Pager{s} }
+
+// ReportSet lists a decorator; the injector adds another, after it.
+var ReportSet = layer.Set(layer.Close(NewDB), NewPgRepo, layer.Decorate(NewCounted), NewSMTP, NewMailer, NewPager, NewReports)

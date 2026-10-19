@@ -28,3 +28,7 @@ func Provide() func() A              { return NewA }
 type Primary = *DB
 
 var Set = layer.Set(NewA, NewB)
+
+func Wrap(r Repo) Repo                      { return r }
+func WrapDB(a A) *DB                        { return nil }
+func NewLazyLoop(l layer.Lazy[Loop1]) Loop2 { return Loop2{} }

@@ -64,3 +64,13 @@ type Pinger interface{ Ping() }
 type Remote struct{}
 
 func NewRemote(p Pinger, c *fw.Cache[fw.Item], cfg lib.Config) *Remote { return &Remote{} }
+
+// Lazy services: of an input, of a decorated interface, of a type also
+// needed eagerly, and of one needing a lazy service of its own.
+type Cfg struct{}
+type Report struct{}
+
+func WrapGetter(g Getter) Getter { return g }
+func NewReport(c layer.Lazy[Cfg], g layer.Lazy[Getter], s layer.Lazy[*Store], _ *Store, r layer.Lazy[*Repo], _ *DB) *Report {
+	return &Report{}
+}

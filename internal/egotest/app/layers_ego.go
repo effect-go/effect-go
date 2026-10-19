@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/effect-go/effect-go/internal/egotest/framework"
+	"github.com/effect-go/effect-go/layer"
 	"github.com/effect-go/effect-go/scope"
 )
 
@@ -53,4 +54,43 @@ func BuildTestApp(ctx context.Context, s *scope.Scope, cfg Config) (*App, error)
 func BuildClock(ctx context.Context, s *scope.Scope) (*framework.Clock, error) {
 	clock := framework.NewClock()
 	return clock, nil
+}
+
+// BuildReports builds the reports command: what only sending needs waits
+// for the first Get.
+func BuildReports(ctx context.Context, s *scope.Scope, cfg Config) (*Reports, error) {
+	db, err := NewDB(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("NewDB: %w", err)
+	}
+	s.Defer(func(context.Context) error { return db.Close() })
+	pgRepo := NewPgRepo(db)
+	repo := NewCounted(pgRepo)
+	repo2 := NewTraced(repo, cfg)
+	lazySMTP := layer.NewLazy(func() (*SMTP, error) {
+		smtp, cleanup, err := NewSMTP(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("NewSMTP: %w", err)
+		}
+		s.Defer(func(context.Context) error { cleanup(); return nil })
+		return smtp, nil
+	})
+	lazyMailer := layer.NewLazy(func() (*Mailer, error) {
+		smtp2, err := lazySMTP.Get()
+		if err != nil {
+			return nil, err
+		}
+		mailer := NewMailer(smtp2, db)
+		return mailer, nil
+	})
+	lazyPager := layer.NewLazy(func() (*Pager, error) {
+		smtp3, err := lazySMTP.Get()
+		if err != nil {
+			return nil, err
+		}
+		pager := NewPager(smtp3)
+		return pager, nil
+	})
+	reports := NewReports(repo2, lazyMailer, lazyPager)
+	return reports, nil
 }
