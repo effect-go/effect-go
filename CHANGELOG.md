@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.6.1 (2026-10-19)
+
+To update, run `ego generate ./...`: the Go of `each`, `all`, `race`,
+`timeout` and `retry` over struct types changes, which
+`ego generate -check` reports until then.
 
 **Fixes**
 - The functions that `each`, `all`, `race`, `timeout` and `retry` run, and
