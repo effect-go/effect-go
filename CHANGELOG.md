@@ -1,9 +1,11 @@
 # Changelog
 
-## Unreleased
+## v0.5.0 (2026-10-19)
 
-To update, run `ego generate ./...`: it now writes the Go of `.ego` files
-excluded on your platform too.
+To update, run `ego generate ./...`. It now also writes the Go of `.ego`
+files that build constraints exclude on your platform, which
+`ego generate -check` reports until then, and the generated code changes
+where a branch kept its assignment's target.
 
 **New**
 - A function can return another package's error set:
