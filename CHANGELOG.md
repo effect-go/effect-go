@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.6.0 (2026-10-19)
+
+To update, run `ego generate ./...`: the Go of lambdas with a block body,
+or over struct types, changes, which `ego generate -check` reports until
+then.
 
 **New**
 - `layer.Decorate(NewCachedRepo)`, among a set's or an injector's
