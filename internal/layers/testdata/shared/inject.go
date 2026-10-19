@@ -36,3 +36,7 @@ func BuildRemote() (*Remote, error) {
 func BuildReport(s *scope.Scope, c Cfg) (*Report, error) {
 	panic(layer.Build(RepoSet, NewStore, layer.Decorate(WrapGetter), NewReport))
 }
+
+func BuildUnwrapped() (*Server, error) {
+	panic(layer.Build(Wrappers, NewServer))
+}

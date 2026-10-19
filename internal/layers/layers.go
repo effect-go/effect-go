@@ -546,12 +546,15 @@ func (g *gen) injector(fd *ast.FuncDecl, args []ast.Expr) (string, bool) {
 	b.top = &frame{}
 	b.f = b.top
 	// Decorators wrap what the other providers give, in the order listed.
-	ps = slices.DeleteFunc(ps, func(p *provider) bool {
+	var others []*provider
+	for _, p := range ps {
 		if p.inner >= 0 {
 			b.decorators = append(b.decorators, p)
+		} else {
+			others = append(others, p)
 		}
-		return p.inner >= 0
-	})
+	}
+	ps = others
 	// The injector's parameters are inputs.
 	for i := 0; i < sig.Params().Len(); i++ {
 		v := sig.Params().At(i)
@@ -601,8 +604,14 @@ func (g *gen) injector(fd *ast.FuncDecl, args []ast.Expr) (string, bool) {
 		b.providers = append(b.providers, list[0])
 	}
 	sort.Slice(b.providers, func(i, j int) bool { return b.providers[i].expr.Pos() < b.providers[j].expr.Pos() })
+	// A set's decorator of a type no provider gives is left out, as a set's
+	// unneeded providers are.
 	for _, d := range b.decorators {
-		if !b.canProvide(d.out) {
+		iface, isIface := d.out.Underlying().(*types.Interface)
+		gives := slices.ContainsFunc(b.providers, func(q *provider) bool {
+			return types.Identical(q.out, d.out) || isIface && types.Implements(q.out, iface)
+		})
+		if d.direct && !gives {
 			g.errorf(d.expr.Pos(), "%s: %s wraps %s, which no provider gives", name, d.name(), g.typeString(d.out))
 		}
 	}
@@ -701,15 +710,6 @@ func (b *builder) built(t types.Type) (string, bool) {
 func (b *builder) provides(t types.Type) bool {
 	return slices.ContainsFunc(b.inputs, func(in input) bool { return types.Identical(in.typ, t) }) ||
 		slices.ContainsFunc(b.providers, func(q *provider) bool { return types.Identical(q.out, t) })
-}
-
-// canProvide reports whether a provider gives t: has type t, or implements
-// it if t is an interface.
-func (b *builder) canProvide(t types.Type) bool {
-	iface, isIface := t.Underlying().(*types.Interface)
-	return slices.ContainsFunc(b.providers, func(q *provider) bool {
-		return types.Identical(q.out, t) || isIface && types.Implements(q.out, iface)
-	})
 }
 
 // resolve returns the variable holding a value of type t, building it. In a
@@ -885,6 +885,7 @@ func (b *builder) args(p *provider, chain []string, inner string) []string {
 	var args []string
 	for i := 0; i < p.sig.Params().Len(); i++ {
 		pt := p.sig.Params().At(i).Type()
+		lazyT, isLazy := lazyOf(pt)
 		switch {
 		case i == p.inner:
 			args = append(args, inner)
@@ -892,8 +893,8 @@ func (b *builder) args(p *provider, chain []string, inner string) []string {
 			args = append(args, b.ctx)
 		case isScope(pt) && b.scope != "":
 			args = append(args, b.scope)
-		case isLazy(pt):
-			c := b.lazy(pt.(*types.Named).TypeArgs().At(0), p.name(), chain)
+		case isLazy:
+			c := b.lazy(lazyT, p.name(), chain)
 			if c == "" {
 				c = "nil"
 			}
@@ -955,10 +956,13 @@ func (b *builder) call(p *provider, args []string) string {
 	return v
 }
 
-// isLazy reports whether t is a layer.Lazy[T].
-func isLazy(t types.Type) bool {
-	n, ok := t.(*types.Named)
-	return ok && n.TypeArgs().Len() == 1 && typeutil.IsNamed(n, layerPath, "Lazy")
+// lazyOf returns T if t is a layer.Lazy[T].
+func lazyOf(t types.Type) (types.Type, bool) {
+	n, ok := types.Unalias(t).(*types.Named)
+	if !ok || n.TypeArgs().Len() != 1 || !typeutil.IsNamed(n, layerPath, "Lazy") {
+		return nil, false
+	}
+	return n.TypeArgs().At(0), true
 }
 
 // varName names a variable after its type: *sql.DB -> db.

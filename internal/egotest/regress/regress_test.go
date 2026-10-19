@@ -254,4 +254,8 @@ func TestBlank(t *testing.T) {
 	if Blank([]item{{"a"}}) || !Blank([]item{{"a"}, {""}}) {
 		t.Error("Blank")
 	}
+	names, err := Names(t.Context(), []item{{"a"}, {"b"}})
+	if err != nil || !slices.Equal(names, []string{"a", "b", "a", "b"}) {
+		t.Error(names, err)
+	}
 }

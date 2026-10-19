@@ -530,6 +530,12 @@ func (p *pkgGen) run(res *Result, only []*fileGen) (*typeInfo, error) {
 		}
 		t := time.Now()
 		formatted, err := format.Source(code)
+		if err == nil {
+			// Once more: gofmt writes a struct type with fields in a
+			// function literal's header on several lines, and only then
+			// moves the body after it.
+			formatted, err = format.Source(formatted)
+		}
 		since(&p.times.format, t)
 		if err == nil {
 			code = formatted

@@ -66,11 +66,16 @@ type Remote struct{}
 func NewRemote(p Pinger, c *fw.Cache[fw.Item], cfg lib.Config) *Remote { return &Remote{} }
 
 // Lazy services: of an input, of a decorated interface, of a type also
-// needed eagerly, and of one needing a lazy service of its own.
+// needed eagerly, and, through an alias, of one needing a lazy service of
+// its own.
 type Cfg struct{}
 type Report struct{}
+type LazyRepo = layer.Lazy[*Repo]
 
 func WrapGetter(g Getter) Getter { return g }
-func NewReport(c layer.Lazy[Cfg], g layer.Lazy[Getter], s layer.Lazy[*Store], _ *Store, r layer.Lazy[*Repo], _ *DB) *Report {
+func NewReport(c layer.Lazy[Cfg], g layer.Lazy[Getter], s layer.Lazy[*Store], _ *Store, r LazyRepo, _ *DB) *Report {
 	return &Report{}
 }
+
+// A set's decorator of a type that a graph lacks is left out of it.
+var Wrappers = layer.Set(layer.Decorate(WrapGetter))

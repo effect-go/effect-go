@@ -889,3 +889,53 @@ func Blank(items []struct {
 		return it.Name == ""
 	})
 }
+
+// Names gets the items' names, and the first two items together: the
+// functions that each and all run take and return such a struct too.
+func Names(ctx context.Context, items []struct {
+	Name string `json:"name"`
+}) (_ []string, err error) {
+	ctx, span := trace.Start(ctx, "regress.Names")
+	defer trace.End(span, &err)
+//line regress.ego:467
+	names, err := scope.Each(ctx, items, 2, func(ctx context.Context, it struct {
+		Name string "json:\"name\""
+	}) (string, error) {
+		return name(ctx, it)
+	})
+	if err != nil {
+		return nil, egofmt.Errorf("name: %w", err)
+	}
+//line regress.ego:468
+	a, b, err := scope.All2(ctx,
+		func(ctx context.Context) (struct {
+			Name string "json:\"name\""
+		}, error) {
+			return first(ctx, items)
+		},
+		func(ctx context.Context) (struct {
+			Name string "json:\"name\""
+		}, error) {
+			return first(ctx, items[1:])
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+//line regress.ego:469
+	return append(names, a.Name, b.Name), nil
+}
+
+func name(ctx context.Context, it struct {
+	Name string `json:"name"`
+}) (string, error) {
+	return it.Name, ctx.Err()
+}
+
+func first(ctx context.Context, items []struct {
+	Name string `json:"name"`
+}) (struct {
+	Name string `json:"name"`
+}, error) {
+	return items[0], ctx.Err()
+}

@@ -458,3 +458,27 @@ func Blank(items []struct {
 }) bool {
 	return slices.ContainsFunc(items, it => it.Name == "")
 }
+
+// Names gets the items' names, and the first two items together: the
+// functions that each and all run take and return such a struct too.
+effect Names(items []struct {
+	Name string `json:"name"`
+}) ([]string, error) {
+	names := check each(items, 2, it => name(it))
+	a, b := check all(first(items), first(items[1:]))
+	return append(names, a.Name, b.Name), nil
+}
+
+func name(ctx context.Context, it struct {
+	Name string `json:"name"`
+}) (string, error) {
+	return it.Name, ctx.Err()
+}
+
+func first(ctx context.Context, items []struct {
+	Name string `json:"name"`
+}) (struct {
+	Name string `json:"name"`
+}, error) {
+	return items[0], ctx.Err()
+}

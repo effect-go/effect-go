@@ -2,7 +2,6 @@ package lower
 
 import (
 	"bytes"
-	"go/format"
 	"go/token"
 	"go/types"
 	"maps"
@@ -980,7 +979,6 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 		return
 	}
 	g.w.rec(x, func() {
-		header := len(g.w.buf)
 		g.w.str("func(")
 		// Parameters, grouped by type as in hand-written code: (a, b T).
 		type param struct {
@@ -997,7 +995,7 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 				case fl.Type != nil && k == len(fl.Names)-1:
 					p.typ = fl.Type
 				case fl.Type == nil && f.sig != nil:
-					p.t = expanded(g.typeString(f.sig.Params().At(i).Type()))
+					p.t = g.typeString(f.sig.Params().At(i).Type())
 				}
 				ps = append(ps, p)
 				i++
@@ -1029,7 +1027,7 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 		}
 		var resTexts []string
 		for _, t := range res {
-			resTexts = append(resTexts, expanded(g.typeString(t)))
+			resTexts = append(resTexts, g.typeString(t))
 		}
 		_, exprBody := x.Body.(ast.Expr)
 		switch {
@@ -1040,8 +1038,6 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 		case exprBody && (f.sig == nil || f.openRes) && !g.r.final:
 			g.w.str(" any") // draft: learn the body's type
 		}
-		// After a header on several lines, gofmt puts the body on its own.
-		oneLine := !bytes.Contains(g.w.buf[header:], []byte("\n"))
 		g.w.str(" {\n")
 		ft := &ast.FuncType{Params: x.Params}
 		g.pushFunc(ft, x.Body)
@@ -1081,16 +1077,12 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 				ret = ""
 			}
 			switch {
-			case (!g.r.final || !needsHoist(b)) && oneLine:
+			case !g.r.final || !needsHoist(b):
 				// One line, as a hand-written function literal would be.
 				g.w.buf = g.w.buf[:len(g.w.buf)-1]
 				g.w.str(" " + ret)
 				g.node(b)
 				g.w.str(" ")
-			case !g.r.final || !needsHoist(b):
-				g.w.str(ret)
-				g.node(b)
-				g.w.str("\n")
 			case ret != "" && len(res) == 1:
 				name := g.temp("v")
 				g.lowerInto(name, true, res[0], b)
@@ -1107,22 +1099,6 @@ func (g *fileGen) lambda(x *ast.LambdaExpr) {
 		g.fn = g.fn.outer
 		g.w.str("}")
 	})
-}
-
-// expanded returns a type as gofmt writes it: a struct or interface with
-// fields on several lines, as types.TypeString doesn't. In a function
-// literal's header on one line, gofmt would put them there, and only when
-// formatting again, its body too.
-func expanded(t string) string {
-	if !strings.Contains(t, "struct{") && !strings.Contains(t, "interface{") {
-		return t
-	}
-	const decl = "package p\n\nvar _ "
-	src, err := format.Source([]byte(decl + t + "\n"))
-	if err != nil {
-		return t
-	}
-	return strings.TrimSuffix(strings.TrimPrefix(string(src), decl), "\n")
 }
 
 // generic reports whether t mentions a type parameter: the expected type of

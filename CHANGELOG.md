@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+- The functions that `each`, `all`, `race`, `timeout` and `retry` run, and
+  every other function literal the generated Go has, are gofmt-stable when
+  they take or return a struct type with fields, as lambdas are since
+  v0.6.0.
+- A set's `layer.Decorate` of a type that an injector's graph doesn't have
+  is left out of that injector, as the set's other unneeded providers are,
+  instead of failing it. A decorator given to `layer.Build` itself is
+  still reported.
+- A parameter whose type is an alias of `layer.Lazy[T]` is lazy too.
+
 ## v0.6.0 (2026-10-19)
 
 To update, run `ego generate ./...`: the Go of lambdas with a block body,
